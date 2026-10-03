@@ -1,7 +1,8 @@
 """Acceso a la BD para partidos (fixtures).
 
 Igual que el catálogo, los upserts usan INSERT ... ON CONFLICT y una sola sentencia
-por lote para no hacer una ida y vuelta a la BD por cada fila.
+por lote para no hacer una ida y vuelta a la BD por cada fila, y registran también
+los IDs del proveedor en las tablas de mapeo (escritura doble).
 """
 
 from datetime import datetime
@@ -10,7 +11,8 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Fixture, Season, Team
+from app.models import Fixture, FixtureProviderMapping, Season, Team, TeamProviderMapping
+from app.repositories.provider_mapping_repository import upsert_origin_mappings
 from app.schemas.catalog import TeamData
 from app.schemas.fixture import FINISHED_STATUSES, FixtureData
 
@@ -20,7 +22,7 @@ _FIXTURE_COLUMNS = [
 ]
 
 
-def ensure_teams(db: Session, teams: list[TeamData]) -> dict[int, int]:
+def ensure_teams(db: Session, teams: list[TeamData], provider: str) -> dict[int, int]:
     """Crea los equipos que aún no existen (sin tocar los existentes). Devuelve {external_id: id}.
 
     Hace falta porque en un partido puede aparecer un equipo que no salió en /teams
@@ -34,11 +36,16 @@ def ensure_teams(db: Session, teams: list[TeamData]) -> dict[int, int]:
     )
     db.execute(stmt.on_conflict_do_nothing(index_elements=[Team.external_id]))
     rows = db.execute(select(Team.external_id, Team.id).where(Team.external_id.in_(unique)))
-    return {external_id: team_id for external_id, team_id in rows}
+    ids = {external_id: team_id for external_id, team_id in rows}
+    # Equipos nuevos y existentes: los nuevos obtienen su mapeo y los demás actualizan last_seen_at
+    upsert_origin_mappings(
+        db, TeamProviderMapping, provider, [(ids[e], e, t.name) for e, t in unique.items()]
+    )
+    return ids
 
 
 def upsert_fixtures(
-    db: Session, season_id: int, fixtures: list[FixtureData], team_ids: dict[int, int]
+    db: Session, season_id: int, fixtures: list[FixtureData], team_ids: dict[int, int], provider: str
 ) -> int:
     """Guarda los partidos de una temporada en una sola sentencia. Devuelve cuántos se guardaron."""
     unique = list({f.external_id: f for f in fixtures}.values())
@@ -58,8 +65,11 @@ def upsert_fixtures(
     stmt = stmt.on_conflict_do_update(
         index_elements=[Fixture.external_id],
         set_={**{k: stmt.excluded[k] for k in updatable}, "updated_at": func.now()},
+    ).returning(Fixture.external_id, Fixture.id)
+    ids = {external_id: fixture_id for external_id, fixture_id in db.execute(stmt)}
+    upsert_origin_mappings(
+        db, FixtureProviderMapping, provider, [(fixture_id, e, None) for e, fixture_id in ids.items()]
     )
-    db.execute(stmt)
     return len(rows)
 
 

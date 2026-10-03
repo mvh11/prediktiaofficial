@@ -12,7 +12,8 @@ class Competition(Base):
     __tablename__ = "competitions"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # ID de la competición en el proveedor de datos (API-Football)
+    # ID de la competición en API-Football. Deprecado como identidad: la fuente de verdad
+    # multi-proveedor es competition_provider_mappings (se mantiene durante la transición)
     external_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(150))
     type: Mapped[str | None] = mapped_column(String(20))

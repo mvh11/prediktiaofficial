@@ -39,6 +39,9 @@ class FixtureData(BaseModel):
     extratime_away: int | None = None
     penalty_home: int | None = None
     penalty_away: int | None = None
+    # Marcador a 90' (sin prórroga ni penaltis). Solo en FT, AET y PEN
+    fulltime_home: int | None = None
+    fulltime_away: int | None = None
 
 
 # --- Respuestas de la API --------------------------------------------------------------
@@ -77,6 +80,8 @@ class FixtureOut(BaseModel):
     extratime_away: int | None
     penalty_home: int | None
     penalty_away: int | None
+    fulltime_home: int | None = Field(default=None, description="Goles local a los 90' (sin prórroga ni penaltis)")
+    fulltime_away: int | None = Field(default=None, description="Goles visitante a los 90' (sin prórroga ni penaltis)")
     is_finished: bool = Field(default=False, description="True si el partido ya terminó (FT, AET o PEN)")
 
 

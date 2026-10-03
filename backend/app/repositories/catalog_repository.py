@@ -2,24 +2,39 @@
 
 Los upserts usan INSERT ... ON CONFLICT de PostgreSQL: si el registro ya existe
 (mismo external_id), se actualiza en lugar de duplicarse.
+
+Escritura doble (transición multi-proveedor): cada upsert registra también el ID del
+proveedor en su tabla de mapeo, en la misma transacción.
 """
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from app.models import Competition, Season, SeasonTeam, Team
+from app.models import (
+    Competition,
+    CompetitionProviderMapping,
+    Season,
+    SeasonTeam,
+    Team,
+    TeamProviderMapping,
+)
+from app.repositories.provider_mapping_repository import upsert_origin_mappings
 from app.schemas.catalog import CompetitionData, SeasonData, TeamData
 
 
-def upsert_competition(db: Session, data: CompetitionData) -> int:
+def upsert_competition(db: Session, data: CompetitionData, provider: str) -> int:
     values = data.model_dump(exclude={"seasons"})
     stmt = insert(Competition).values(**values)
     stmt = stmt.on_conflict_do_update(
         index_elements=[Competition.external_id],
         set_={**{k: stmt.excluded[k] for k in values if k != "external_id"}, "updated_at": func.now()},
     ).returning(Competition.id)
-    return db.execute(stmt).scalar_one()
+    competition_id = db.execute(stmt).scalar_one()
+    upsert_origin_mappings(
+        db, CompetitionProviderMapping, provider, [(competition_id, data.external_id, data.name)]
+    )
+    return competition_id
 
 
 def upsert_seasons(db: Session, competition_id: int, seasons: list[SeasonData]) -> dict[int, int]:
@@ -39,7 +54,7 @@ def clear_current_flag(db: Session, competition_id: int) -> None:
     db.execute(update(Season).where(Season.competition_id == competition_id).values(is_current=False))
 
 
-def upsert_teams(db: Session, teams: list[TeamData]) -> list[int]:
+def upsert_teams(db: Session, teams: list[TeamData], provider: str) -> list[int]:
     """Guarda todos los equipos en una sola sentencia. Devuelve sus ids internos."""
     if not teams:
         return []
@@ -50,8 +65,12 @@ def upsert_teams(db: Session, teams: list[TeamData]) -> list[int]:
     stmt = stmt.on_conflict_do_update(
         index_elements=[Team.external_id],
         set_={**{k: stmt.excluded[k] for k in columns}, "updated_at": func.now()},
-    ).returning(Team.id)
-    return list(db.scalars(stmt))
+    ).returning(Team.external_id, Team.id)
+    ids = {external_id: team_id for external_id, team_id in db.execute(stmt)}
+    upsert_origin_mappings(
+        db, TeamProviderMapping, provider, [(ids[t.external_id], t.external_id, t.name) for t in unique]
+    )
+    return list(ids.values())
 
 
 def link_teams_to_season(db: Session, season_id: int, team_ids: list[int]) -> None:
@@ -66,6 +85,16 @@ def link_teams_to_season(db: Session, season_id: int, team_ids: list[int]) -> No
 
 def list_competitions(db: Session) -> list[Competition]:
     return list(db.scalars(select(Competition).order_by(Competition.country, Competition.name)))
+
+
+def list_competitions_with_current_season(db: Session) -> list[tuple[Competition, int | None]]:
+    """Competiciones con el año de su temporada actual, en una sola consulta."""
+    stmt = (
+        select(Competition, Season.year)
+        .outerjoin(Season, and_(Season.competition_id == Competition.id, Season.is_current.is_(True)))
+        .order_by(Competition.country, Competition.name)
+    )
+    return [(competition, year) for competition, year in db.execute(stmt)]
 
 
 def get_competition(db: Session, competition_id: int) -> Competition | None:

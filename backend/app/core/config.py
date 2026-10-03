@@ -34,7 +34,8 @@ class Settings(BaseSettings):
     # Tiempo máximo de espera para llamadas HTTP externas (segundos)
     http_timeout_seconds: float = 10.0
 
-    # Competiciones que Prediktia sigue (IDs de API-Football).
+    # Competiciones que Prediktia sigue (IDs de API-Football, los de competitions.external_id).
+    # Es la única fuente de verdad: la sync de fixtures ignora las competiciones que no estén aquí.
     # Se puede sobrescribir en el .env con una lista JSON: TRACKED_LEAGUE_IDS=[39,140]
     tracked_league_ids: list[int] = [
         # Sudamérica: primeras divisiones

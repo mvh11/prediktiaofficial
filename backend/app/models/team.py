@@ -12,7 +12,8 @@ class Team(Base):
     __tablename__ = "teams"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    # ID del equipo en el proveedor de datos (API-Football)
+    # ID del equipo en API-Football. Deprecado como identidad: la fuente de verdad
+    # multi-proveedor es team_provider_mappings (se mantiene durante la transición)
     external_id: Mapped[int] = mapped_column(Integer, unique=True, index=True)
     name: Mapped[str] = mapped_column(String(150))
     code: Mapped[str | None] = mapped_column(String(10))

@@ -9,6 +9,7 @@ from datetime import date
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.integrations.exceptions import ProviderError
 from app.repositories import catalog_repository, fixture_repository
 from app.schemas.fixture import CompetitionFixtureSyncResult, FixtureSyncResult
@@ -28,8 +29,10 @@ async def sync_fixtures(
     Con date_from/date_to solo se piden los partidos de ese rango, útil para
     actualizar resultados recientes sin descargar toda la temporada.
     Si falla una competición se anota el error y se sigue con las demás.
+    Solo se sincronizan las competiciones de TRACKED_LEAGUE_IDS (IDs de API-Football).
     """
     provider = get_football_provider()
+    tracked = set(get_settings().tracked_league_ids)
     competitions = catalog_repository.list_competitions(db)
     if competition_id is not None:
         competitions = [c for c in competitions if c.id == competition_id]
@@ -37,6 +40,11 @@ async def sync_fixtures(
     results: list[CompetitionFixtureSyncResult] = []
     for comp in competitions:
         result = CompetitionFixtureSyncResult(competition_id=comp.id, name=comp.name)
+        if comp.external_id not in tracked:
+            if competition_id is not None:  # pedida explícitamente: se explica por qué no se sincroniza
+                result.error = "No está en TRACKED_LEAGUE_IDS"
+                results.append(result)
+            continue
         results.append(result)
 
         season = catalog_repository.get_season(db, comp.id, None)
@@ -53,9 +61,11 @@ async def sync_fixtures(
             continue
 
         team_ids = fixture_repository.ensure_teams(
-            db, [f.home_team for f in fixtures] + [f.away_team for f in fixtures]
+            db, [f.home_team for f in fixtures] + [f.away_team for f in fixtures], provider.name
         )
-        result.fixtures = fixture_repository.upsert_fixtures(db, season.id, fixtures, team_ids)
+        result.fixtures = fixture_repository.upsert_fixtures(
+            db, season.id, fixtures, team_ids, provider.name
+        )
         db.commit()
         logger.info("%s %s: %d partidos", comp.name, season.year, result.fixtures)
 

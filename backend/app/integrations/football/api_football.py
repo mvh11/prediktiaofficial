@@ -4,7 +4,8 @@ Documentación oficial: https://www.api-football.com/documentation-v3
 - Base URL: https://v3.football.api-sports.io
 - Autenticación: cabecera "x-apisports-key"
 - Todas las respuestas usan el formato: {get, parameters, errors, results, paging, response}
-- Ojo: con una key inválida la API puede responder HTTP 200 con el detalle en "errors".
+- Ojo: con una key inválida o al superar el límite de peticiones la API puede responder
+  HTTP 200 con el detalle en "errors".
 """
 
 from datetime import date
@@ -13,12 +14,13 @@ from typing import Any
 from app.integrations.exceptions import (
     ProviderAuthError,
     ProviderNotConfiguredError,
+    ProviderRateLimitError,
     ProviderResponseError,
 )
 from app.integrations.football.base import FootballDataProvider
 from app.integrations.http import get_json
 from app.schemas.catalog import CompetitionData, SeasonData, TeamData
-from app.schemas.fixture import FixtureData
+from app.schemas.fixture import FINISHED_STATUSES, FixtureData
 from app.schemas.provider import ProviderStatus
 
 
@@ -30,7 +32,11 @@ class ApiFootballProvider(FootballDataProvider):
         self._base_url = base_url
         self._timeout = timeout
 
-    async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+    async def _get(
+        self, path: str, params: dict[str, Any] | None = None, *, allow_paging: bool = False
+    ) -> Any:
+        """GET a la API. Si la respuesta tiene más de una página y el llamador no pagina
+        (allow_paging=False), falla en lugar de perder datos en silencio."""
         if not self._api_key:
             raise ProviderNotConfiguredError(self.name, "Falta API_FOOTBALL_KEY en el archivo .env")
 
@@ -48,9 +54,21 @@ class ApiFootballProvider(FootballDataProvider):
         errors = data.get("errors")
         if errors:  # puede venir como lista o como diccionario
             text = str(errors)
-            if isinstance(errors, dict) and "token" in errors:
-                raise ProviderAuthError(self.name, f"Error de autenticación: {text}")
+            if isinstance(errors, dict):
+                if "token" in errors:
+                    raise ProviderAuthError(self.name, f"Error de autenticación: {text}")
+                if "rateLimit" in errors:
+                    raise ProviderRateLimitError(self.name, f"Límite de peticiones por minuto superado: {text}")
+                if "requests" in errors:
+                    raise ProviderRateLimitError(self.name, f"Cuota diaria de peticiones agotada: {text}")
             raise ProviderResponseError(self.name, f"La API devolvió errores: {text}")
+
+        paging = data.get("paging")
+        total_pages = (paging.get("total") or 1) if isinstance(paging, dict) else 1
+        if total_pages > 1 and not allow_paging:
+            raise ProviderResponseError(
+                self.name, f"Respuesta paginada ({total_pages} páginas) en {path}: este método no pagina"
+            )
         return data
 
     async def check_status(self) -> ProviderStatus:
@@ -163,10 +181,14 @@ class ApiFootballProvider(FootballDataProvider):
             halftime = score.get("halftime") or {}
             extratime = score.get("extratime") or {}
             penalty = score.get("penalty") or {}
+            fulltime = score.get("fulltime") or {}
             home = teams.get("home") or {}
             away = teams.get("away") or {}
             if fixture.get("id") is None or home.get("id") is None or away.get("id") is None:
                 continue
+            status_short = status.get("short") or "TBD"
+            # El marcador a 90' solo tiene sentido en partidos terminados (FT, AET, PEN)
+            finished = status_short in FINISHED_STATUSES
 
             fixtures.append(
                 FixtureData(
@@ -175,7 +197,7 @@ class ApiFootballProvider(FootballDataProvider):
                     season=season,
                     round=(item.get("league") or {}).get("round"),
                     kickoff_at=fixture["date"],
-                    status_short=status.get("short") or "TBD",
+                    status_short=status_short,
                     status_long=status.get("long"),
                     elapsed=status.get("elapsed"),
                     venue_name=venue.get("name"),
@@ -191,6 +213,8 @@ class ApiFootballProvider(FootballDataProvider):
                     extratime_away=extratime.get("away"),
                     penalty_home=penalty.get("home"),
                     penalty_away=penalty.get("away"),
+                    fulltime_home=fulltime.get("home") if finished else None,
+                    fulltime_away=fulltime.get("away") if finished else None,
                 )
             )
         return fixtures

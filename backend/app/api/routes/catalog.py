@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.routes.providers import run_provider_call
+from app.api.errors import run_provider_call
 from app.db.session import get_db
 from app.repositories import catalog_repository as repo
 from app.schemas.catalog import CatalogSyncResult, CompetitionOut, TeamOut
@@ -15,11 +15,10 @@ router = APIRouter(tags=["catalog"])
 @router.get("/competitions", response_model=list[CompetitionOut])
 def list_competitions(db: Session = Depends(get_db)) -> list[CompetitionOut]:
     """Competiciones guardadas en la BD, con su temporada actual."""
-    out = []
-    for comp in repo.list_competitions(db):
-        current = next((s.year for s in comp.seasons if s.is_current), None)
-        out.append(CompetitionOut.model_validate(comp).model_copy(update={"current_season": current}))
-    return out
+    return [
+        CompetitionOut.model_validate(comp).model_copy(update={"current_season": current})
+        for comp, current in repo.list_competitions_with_current_season(db)
+    ]
 
 
 @router.get("/competitions/{competition_id}/teams", response_model=list[TeamOut])

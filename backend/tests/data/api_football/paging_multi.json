@@ -1,0 +1,1 @@
+{"get": "players", "parameters": {"league": "265", "season": "2026"}, "errors": [], "results": 20, "paging": {"current": 1, "total": 3}, "response": []}

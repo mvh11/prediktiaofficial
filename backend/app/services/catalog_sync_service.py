@@ -38,7 +38,7 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
         result = CompetitionSyncResult(external_id=comp.external_id, name=comp.name)
         results.append(result)
 
-        competition_id = repo.upsert_competition(db, comp)
+        competition_id = repo.upsert_competition(db, comp, provider.name)
         repo.clear_current_flag(db, competition_id)
         season_ids = repo.upsert_seasons(db, competition_id, comp.seasons)
         db.commit()
@@ -56,7 +56,7 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
             result.error = exc.message
             continue
 
-        team_ids = repo.upsert_teams(db, teams)
+        team_ids = repo.upsert_teams(db, teams, provider.name)
         repo.link_teams_to_season(db, season_ids[current.year], team_ids)
         db.commit()
         result.teams = len(teams)

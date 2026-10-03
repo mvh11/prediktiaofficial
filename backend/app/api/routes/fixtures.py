@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.routes.providers import run_provider_call
+from app.api.errors import run_provider_call
 from app.db.session import get_db
 from app.models import Fixture
 from app.repositories import fixture_repository as repo
