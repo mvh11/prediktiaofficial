@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/providers", tags=["providers"])
 
 
-async def _run_check(check: Callable[[], Awaitable[ProviderStatus]]) -> ProviderStatus:
-    """Ejecuta la comprobación y convierte los errores del proveedor en respuestas HTTP."""
+async def run_provider_call[T](check: Callable[[], Awaitable[T]]) -> T:
+    """Ejecuta la llamada al proveedor y convierte los errores del proveedor en respuestas HTTP."""
     try:
         return await check()
     except ProviderNotConfiguredError as exc:
@@ -42,10 +42,10 @@ async def _run_check(check: Callable[[], Awaitable[ProviderStatus]]) -> Provider
 @router.get("/football/status", response_model=ProviderStatus)
 async def football_provider_status() -> ProviderStatus:
     """Prueba la conexión con el proveedor de datos futbolísticos (API-Football)."""
-    return await _run_check(provider_service.check_football_provider)
+    return await run_provider_call(provider_service.check_football_provider)
 
 
 @router.get("/odds/status", response_model=ProviderStatus)
 async def odds_provider_status() -> ProviderStatus:
     """Prueba la conexión con el proveedor de cuotas (5DollarFootballAPI)."""
-    return await _run_check(provider_service.check_odds_provider)
+    return await run_provider_call(provider_service.check_odds_provider)
