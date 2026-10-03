@@ -3,7 +3,7 @@
 .env.*
 !.env.example
 
-# Entornos virtuales
+# Entorno virtual
 .venv/
 venv/
 env/
@@ -15,9 +15,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-
-# Node (para el frontend en el futuro)
-node_modules/
 
 # Logs
 *.log
