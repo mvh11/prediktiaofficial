@@ -10,8 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.catalog import TeamData
 
-# Estados (código corto de API-Football) en los que el partido ya terminó
+# Estados (código corto de API-Football) en los que el partido ya terminó jugándose.
+# Solo en ellos existe marcador a 90' (fulltime)
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
+# Estados finales: terminado jugándose o con resultado administrativo (AWD = adjudicado,
+# WO = incomparecencia). Su marcador ya no cambia salvo corrección del proveedor
+FINAL_STATUSES = FINISHED_STATUSES | {"AWD", "WO"}
 
 
 # --- Datos que entregan los adapters -------------------------------------------------

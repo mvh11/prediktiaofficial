@@ -117,3 +117,30 @@ def test_sync_respects_tracked_league_ids(db_session, fake):
     result = _sync(db_session, competition_id=untracked_id)
     assert [r.error for r in result.competitions] == ["No está en TRACKED_LEAGUE_IDS"]
     assert 999_999 not in fake.calls
+
+
+def test_db_error_in_one_competition_rolls_back_and_continues(db_session, fake):
+    # la sync recorre las competiciones por país y nombre: "A ..." va antes que "B ..."
+    failing_id, _ = make_competition(db_session, 265, name="A Liga que falla")
+    ok_id, _ = make_competition(db_session, 39, name="B Liga correcta")
+    db_session.commit()
+
+    fake.fixtures[265] = [
+        make_fixture_data(10, home=31, away=32),
+        # par fulltime incompleto (el adapter nunca lo entregaría): viola ck_fixtures_fulltime_pair
+        make_fixture_data(11, home=31, away=32, status="FT", home_goals=1, away_goals=0, fulltime_home=1, fulltime_away=None),
+    ]
+    fake.fixtures[39] = [make_fixture_data(20, home=41, away=42)]
+
+    result = _sync(db_session)
+    by_id = {r.competition_id: r for r in result.competitions}
+
+    assert fake.calls == [265, 39]
+    assert by_id[failing_id].fixtures == 0 and "IntegrityError" in by_id[failing_id].error
+    assert by_id[ok_id].fixtures == 1 and by_id[ok_id].error is None
+    assert result.fixtures_synced == 1
+    # de la competición fallida no queda nada a medias: ni partidos, ni equipos, ni mapeos
+    db_session.expire_all()
+    assert set(db_session.scalars(select(Fixture.external_id))) == {20}
+    assert db_session.scalar(select(func.count()).select_from(Team).where(Team.external_id.in_([31, 32]))) == 0
+    assert set(db_session.scalars(select(FixtureProviderMapping.external_id))) == {"20"}

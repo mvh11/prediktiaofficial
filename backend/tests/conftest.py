@@ -1,10 +1,19 @@
 """Configuración común de los tests.
 
-Seguridad de la BD:
-- Los tests marcados `db` solo se ejecutan si TEST_DATABASE_URL existe y apunta a una BD
-  distinta de la DATABASE_URL de desarrollo (la del .env o la del entorno).
-- Si no es así, se saltan y además DATABASE_URL se sustituye por una URL inalcanzable,
-  de modo que ningún test pueda conectarse por accidente a la BD de desarrollo/producción.
+Seguridad de la BD (fail-closed):
+- Los tests marcados `db` son DESTRUCTIVOS (`alembic downgrade base`, TRUNCATE ... CASCADE).
+  Solo se ejecutan si se cumplen TODAS estas condiciones:
+  1. TEST_DATABASE_URL existe en el entorno (nunca se usa DATABASE_URL como sustituto);
+  2. su destino normalizado (host:puerto/bd) se puede determinar y no coincide con el de la
+     DATABASE_URL de desarrollo (la del entorno y la del .env). Neon expone el mismo endpoint
+     directo (ep-xxx.region.aws.neon.tech) y con pooler (ep-xxx-pooler.region...): cuentan
+     como el mismo host. Fuera de localhost, compartir host ya basta para bloquear;
+  3. PREDIKTIA_DESTRUCTIVE_TEST_DB contiene exactamente ese destino normalizado (el motivo
+     del skip indica el valor esperado). La autorización vale solo para esa BD.
+- Si algo falta o no se puede interpretar, los tests `db` se saltan y DATABASE_URL se sustituye
+  por una URL inalcanzable, de modo que ningún test pueda conectarse por accidente a la BD de
+  desarrollo/producción. Además, `migrated_db` y `alembic_run` vuelven a comprobar el destino
+  justo antes de cada operación destructiva.
 
 Esto se decide aquí, antes de importar `app`, porque el engine se crea al importarlo.
 """
@@ -21,37 +30,87 @@ from sqlalchemy.engine import make_url
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 DATA_DIR = Path(__file__).parent / "data"
 UNREACHABLE_DB_URL = "postgresql+psycopg://tests:tests@127.0.0.1:9/tests_sin_bd"
+DESTRUCTIVE_AUTH_VAR = "PREDIKTIA_DESTRUCTIVE_TEST_DB"
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
-def _same_database(a: str, b: str) -> bool:
+def db_target(url: str | None) -> str | None:
+    """Destino normalizado `host:puerto/bd` de una URL, o None si no se puede determinar.
+
+    La normalización solo junta destinos, nunca los separa: se quita el sufijo `-pooler` del
+    primer segmento del host (Neon) y las direcciones de loopback cuentan como `localhost`.
+    """
     try:
-        ua, ub = make_url(a), make_url(b)
+        parsed = make_url((url or "").strip())
     except Exception:
-        return a.strip() == b.strip()
-    return (ua.host, ua.port or 5432, ua.database) == (ub.host, ub.port or 5432, ub.database)
-
-
-def _resolve_test_db_url() -> str | None:
-    test_url = os.environ.get("TEST_DATABASE_URL", "").strip()
-    if not test_url:
         return None
-    dev_urls = [
-        os.environ.get("DATABASE_URL", ""),
-        dotenv_values(BACKEND_DIR / ".env").get("DATABASE_URL") or "",
-    ]
-    if any(u and _same_database(test_url, u) for u in dev_urls):
-        return None  # misma BD que desarrollo: nunca se usa
-    return test_url
+    host = (parsed.host or "").strip().lower().rstrip(".")
+    if not host or not parsed.database:
+        return None  # p. ej. socket unix o host en la query: no se puede comparar
+    first, dot, rest = host.partition(".")
+    host = first.removesuffix("-pooler") + dot + rest
+    if host in _LOOPBACK_HOSTS:
+        host = "localhost"
+    return f"{host}:{parsed.port or 5432}/{parsed.database}"
 
 
-TEST_DB_URL = _resolve_test_db_url()
+def _host_port(target: str) -> str:
+    return target.split("/", 1)[0]
+
+
+def resolve_destructive_test_db(
+    test_url: str | None, dev_urls: list[str | None], authorization: str | None
+) -> tuple[str | None, str]:
+    """Devuelve (url, motivo). La url es None si los tests destructivos NO deben ejecutarse."""
+    test_url = (test_url or "").strip()
+    if not test_url:
+        return None, "falta TEST_DATABASE_URL"
+    target = db_target(test_url)
+    if target is None:
+        return None, "TEST_DATABASE_URL no tiene un host y una BD identificables"
+    for dev_url in dev_urls:
+        if not (dev_url or "").strip():
+            continue
+        dev_target = db_target(dev_url)
+        if dev_target is None:
+            return None, "no se puede interpretar DATABASE_URL: no se descarta que sea el mismo destino"
+        if dev_target == target:
+            return None, "TEST_DATABASE_URL apunta al mismo destino que DATABASE_URL"
+        if not target.startswith("localhost:") and _host_port(dev_target) == _host_port(target):
+            return None, "TEST_DATABASE_URL comparte servidor/endpoint con DATABASE_URL"
+    if (authorization or "").strip() != target:
+        return None, f"falta autorización explícita: {DESTRUCTIVE_AUTH_VAR} debe ser exactamente '{target}'"
+    return test_url, "ok"
+
+
+_DEV_URLS = [os.environ.get("DATABASE_URL"), dotenv_values(BACKEND_DIR / ".env").get("DATABASE_URL")]
+TEST_DB_URL, TEST_DB_REASON = resolve_destructive_test_db(
+    os.environ.get("TEST_DATABASE_URL"), _DEV_URLS, os.environ.get(DESTRUCTIVE_AUTH_VAR)
+)
 os.environ["DATABASE_URL"] = TEST_DB_URL or UNREACHABLE_DB_URL
+
+
+def require_destructive_test_db() -> None:
+    """Última comprobación antes de una operación destructiva: la app debe apuntar exactamente
+    a la TEST_DATABASE_URL autorizada. En cualquier otro caso lanza RuntimeError."""
+    if TEST_DB_URL is None:
+        raise RuntimeError(f"Operación destructiva bloqueada: {TEST_DB_REASON}")
+    from app.core.config import get_settings
+    from app.db.database import engine
+
+    expected = db_target(TEST_DB_URL)
+    for url in (get_settings().database_url, engine.url.render_as_string(hide_password=False)):
+        if db_target(url) != expected:
+            raise RuntimeError("Operación destructiva bloqueada: la app no apunta a la BD de tests autorizada")
+    for dev_url in _DEV_URLS:
+        if dev_url and db_target(dev_url) == expected:
+            raise RuntimeError("Operación destructiva bloqueada: el destino coincide con DATABASE_URL")
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     if TEST_DB_URL:
         return
-    skip = pytest.mark.skip(reason="Sin TEST_DATABASE_URL segura y separada de la BD de desarrollo")
+    skip = pytest.mark.skip(reason=f"Tests de BD NO ejecutados: {TEST_DB_REASON}")
     for item in items:
         if "db" in item.keywords:
             item.add_marker(skip)
@@ -75,12 +134,14 @@ def _alembic_config():
 def alembic_run(command: str, revision: str) -> None:
     from alembic import command as alembic_command
 
+    require_destructive_test_db()
     getattr(alembic_command, command)(_alembic_config(), revision)
 
 
 @pytest.fixture(scope="session")
 def migrated_db() -> Iterator[None]:
     """BD de pruebas vacía y en la última versión del esquema."""
+    require_destructive_test_db()
     alembic_run("downgrade", "base")
     alembic_run("upgrade", "head")
     yield

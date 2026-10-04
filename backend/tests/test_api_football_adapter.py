@@ -62,6 +62,127 @@ def test_fixture_not_finished_fulltime_none(provider, respond_with, external_id)
     assert (f.fulltime_home, f.fulltime_away) == (None, None)
 
 
+# --- Normalización de pares de marcador -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, (None, None)),  # sin marcador
+        ({"home": None, "away": None}, (None, None)),  # NULL completo
+        ({}, (None, None)),  # objeto vacío
+        ({"home": 2, "away": 1}, (2, 1)),  # válido
+        ({"home": 0, "away": 0}, (0, 0)),  # 0 es válido
+        ({"home": 2, "away": None}, (None, None)),  # home válido + away NULL
+        ({"home": None, "away": 3}, (None, None)),  # home NULL + away válido
+        ({"home": 2}, (None, None)),  # falta away
+        ({"away": 2}, (None, None)),  # falta home
+        ({"home": -1, "away": 0}, (None, None)),  # negativo
+        ({"home": "1", "away": 1}, (None, None)),  # string
+        ({"home": True, "away": False}, (None, None)),  # bool no es un entero válido
+        ({"home": 1.0, "away": 2}, (None, None)),  # float
+        ("1-0", (None, None)),  # estructura inválida
+        ([1, 0], (None, None)),  # estructura inválida
+    ],
+)
+def test_score_pair_normalization(raw, expected):
+    assert api_football._score_pair(raw, "goals", 1) == expected
+
+
+# --- Casos límite del proveedor (fixture JSON) ------------------------------------------
+
+
+def _edge_fixtures(provider, respond_with) -> dict:
+    respond_with(load_json("api_football/fixtures_score_edge_cases.json"))
+    return {f.external_id: f for f in asyncio.run(provider.get_fixtures(265, 2026))}
+
+
+def _pairs(f) -> dict:
+    return {
+        "goals": (f.home_goals, f.away_goals),
+        "halftime": (f.halftime_home, f.halftime_away),
+        "fulltime": (f.fulltime_home, f.fulltime_away),
+        "extratime": (f.extratime_home, f.extratime_away),
+        "penalty": (f.penalty_home, f.penalty_away),
+    }
+
+
+def test_invalid_scores_do_not_prevent_ingestion(provider, respond_with):
+    assert set(_edge_fixtures(provider, respond_with)) == set(range(301, 311))
+
+
+def test_never_half_pairs(provider, respond_with):
+    for f in _edge_fixtures(provider, respond_with).values():
+        for pair in _pairs(f).values():
+            assert pair == (None, None) or None not in pair, (f.external_id, pair)
+
+
+def test_ft_with_valid_fulltime_uses_score_fulltime(provider, respond_with):
+    f = _edge_fixtures(provider, respond_with)[310]
+    # goals llegó incompleto (se descarta) pero score.fulltime es válido y se usa tal cual
+    assert _pairs(f)["goals"] == (None, None)
+    assert _pairs(f)["fulltime"] == (1, 2)
+
+
+@pytest.mark.parametrize("external_id", [301, 302])  # score.fulltime a null / sin la clave
+def test_ft_without_fulltime_falls_back_to_goals(provider, respond_with, external_id):
+    f = _edge_fixtures(provider, respond_with)[external_id]
+    assert _pairs(f)["fulltime"] == _pairs(f)["goals"] != (None, None)
+
+
+def test_aet_without_fulltime_is_null_never_goals(provider, respond_with):
+    f = _edge_fixtures(provider, respond_with)[303]
+    assert _pairs(f)["goals"] == (3, 2)
+    assert _pairs(f)["extratime"] == (1, 0)
+    # ni goals (3-2) ni goals - extratime (2-2)
+    assert _pairs(f)["fulltime"] == (None, None)
+
+
+def test_pen_without_fulltime_is_null_never_goals(provider, respond_with):
+    f = _edge_fixtures(provider, respond_with)[304]
+    assert _pairs(f)["goals"] == (1, 1)
+    assert _pairs(f)["penalty"] == (5, 4)
+    assert _pairs(f)["fulltime"] == (None, None)
+
+
+def test_aet_invalid_fulltime_has_no_fallback(provider, respond_with, caplog):
+    f = _edge_fixtures(provider, respond_with)[306]
+    assert _pairs(f)["fulltime"] == (None, None)
+    assert _pairs(f)["goals"] == (1, 0)
+    assert "Partido 306: marcador fulltime inválido" in caplog.text
+
+
+def test_incomplete_pairs_discarded_whole(provider, respond_with, caplog):
+    f = _edge_fixtures(provider, respond_with)[305]
+    # goals, halftime y fulltime venían con un lado NULL; sin goals válido no hay fallback FT
+    assert _pairs(f)["goals"] == _pairs(f)["halftime"] == _pairs(f)["fulltime"] == (None, None)
+    assert "Partido 305: marcador goals inválido" in caplog.text
+
+
+def test_negative_goals_discarded_and_not_used_as_fulltime(provider, respond_with):
+    f = _edge_fixtures(provider, respond_with)[307]
+    assert _pairs(f)["goals"] == (None, None)
+    assert _pairs(f)["fulltime"] == (None, None)
+    assert _pairs(f)["halftime"] == (0, 0)
+
+
+def test_structurally_invalid_scores_discarded(provider, respond_with, caplog):
+    f = _edge_fixtures(provider, respond_with)[308]
+    assert _pairs(f)["halftime"] == (None, None)  # "1-0" en lugar de un objeto
+    assert _pairs(f)["extratime"] == (None, None)  # lista en lugar de un objeto
+    assert _pairs(f)["penalty"] == (None, None)  # booleanos
+    assert _pairs(f)["fulltime"] == (1, 1)  # fulltime con string se descarta; FT recurre a goals
+    assert "Partido 308: marcador halftime con formato inesperado" in caplog.text
+
+
+def test_provider_incoherence_kept_as_is(provider, respond_with):
+    """Caso tipo fixture 6570: fulltime 4-0 con goals 2-0 y extratime 0-2. No se corrige."""
+    f = _edge_fixtures(provider, respond_with)[309]
+    assert _pairs(f)["goals"] == (2, 0)
+    assert _pairs(f)["extratime"] == (0, 2)
+    assert _pairs(f)["fulltime"] == (4, 0)
+
+
 # --- Errores en HTTP 200 --------------------------------------------------------------------
 
 

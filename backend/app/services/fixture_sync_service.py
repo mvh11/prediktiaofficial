@@ -7,6 +7,7 @@ Coste en peticiones: 1 llamada a /fixtures por competición (26 con la lista por
 import logging
 from datetime import date
 
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -16,6 +17,11 @@ from app.schemas.fixture import CompetitionFixtureSyncResult, FixtureSyncResult
 from app.services.provider_service import get_football_provider
 
 logger = logging.getLogger(__name__)
+
+# Errores de BD que afectan a los datos o a la conexión de UNA competición: se deshace esa
+# competición y se sigue con las demás. Los errores de programación (SQL mal construido,
+# esquema desalineado...) no se capturan: fallarían igual en todas y deben verse.
+_ISOLATED_DB_ERRORS = (IntegrityError, DataError, OperationalError)
 
 
 async def sync_fixtures(
@@ -28,7 +34,8 @@ async def sync_fixtures(
 
     Con date_from/date_to solo se piden los partidos de ese rango, útil para
     actualizar resultados recientes sin descargar toda la temporada.
-    Si falla una competición se anota el error y se sigue con las demás.
+    Si falla una competición (proveedor o BD) se anota el error en su resultado, se deshacen
+    sus cambios y se sigue con las demás.
     Solo se sincronizan las competiciones de TRACKED_LEAGUE_IDS (IDs de API-Football).
     """
     provider = get_football_provider()
@@ -60,13 +67,18 @@ async def sync_fixtures(
             result.error = exc.message
             continue
 
-        team_ids = fixture_repository.ensure_teams(
-            db, [f.home_team for f in fixtures] + [f.away_team for f in fixtures], provider.name
-        )
-        result.fixtures = fixture_repository.upsert_fixtures(
-            db, season.id, fixtures, team_ids, provider.name
-        )
-        db.commit()
+        try:
+            team_ids = fixture_repository.ensure_teams(
+                db, [f.home_team for f in fixtures] + [f.away_team for f in fixtures], provider.name
+            )
+            saved = fixture_repository.upsert_fixtures(db, season.id, fixtures, team_ids, provider.name)
+            db.commit()
+        except _ISOLATED_DB_ERRORS as exc:
+            db.rollback()
+            logger.error("Error de BD guardando los partidos de %s: %s", result.name, exc.__class__.__name__)
+            result.error = f"Error de base de datos ({exc.__class__.__name__}): no se guardó ningún partido"
+            continue
+        result.fixtures = saved
         logger.info("%s %s: %d partidos", comp.name, season.year, result.fixtures)
 
     return FixtureSyncResult(
