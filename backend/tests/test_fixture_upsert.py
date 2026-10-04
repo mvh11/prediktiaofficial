@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 
 from app.models import Fixture, FixtureProviderMapping
 from app.repositories import fixture_repository
@@ -81,14 +82,35 @@ def test_complete_new_pairs_correct_stored_values(db_session, season_id):
 
 
 def test_never_mixes_half_pairs(db_session, season_id):
-    """7. Un par entrante incompleto no se mezcla con el guardado: se conserva el par entero."""
+    """7. Un par entrante incompleto no se mezcla con el guardado: se conserva el par entero.
+
+    Cubre goals, halftime, extratime y penalty, que llegan al DO UPDATE. fulltime no se incluye:
+    ck_fixtures_fulltime_pair rechaza el medio par ya en la fila propuesta del INSERT (ver
+    test_partial_fulltime_pair_is_rejected_by_database).
+    """
     _upsert(db_session, season_id, make_fixture_data(1, status="PEN", **KNOWN_PEN))
     half = dict(
         home_goals=5, away_goals=None, halftime_home=None, halftime_away=3, extratime_home=2, extratime_away=None,
-        penalty_home=None, penalty_away=9, fulltime_home=7, fulltime_away=None,
+        penalty_home=None, penalty_away=9,
     )
     _upsert(db_session, season_id, make_fixture_data(1, status="PEN", **half))
     f = _fixture(db_session)
+    for name, (home, away) in PAIRS.items():
+        assert _pair(f, name) == (KNOWN_PEN[home], KNOWN_PEN[away]), name
+
+
+def test_partial_fulltime_pair_is_rejected_by_database(db_session, season_id):
+    """Un medio par de fulltime enviado directamente al repositorio (saltándose el adapter, que
+    nunca lo entrega) lo rechaza PostgreSQL por ck_fixtures_fulltime_pair, y la fila guardada
+    queda intacta tras el rollback."""
+    _upsert(db_session, season_id, make_fixture_data(1, status="PEN", **KNOWN_PEN))
+
+    with pytest.raises(IntegrityError, match="ck_fixtures_fulltime_pair"):
+        with db_session.begin_nested():
+            _upsert(db_session, season_id, make_fixture_data(1, status="PEN", **{**KNOWN_PEN, "fulltime_away": None, "fulltime_home": 7}))
+
+    f = _fixture(db_session)
+    assert f.status_short == "PEN"
     for name, (home, away) in PAIRS.items():
         assert _pair(f, name) == (KNOWN_PEN[home], KNOWN_PEN[away]), name
 
