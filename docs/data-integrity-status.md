@@ -52,7 +52,7 @@ Qué hace:
 
 ## Reintentos y límites del proveedor (`410f881`)
 
-**Estado: aplicado en esta rama** en el commit `410f881` ("fix: add provider retries and rate limit fail-fast"). Pendiente de push y de merge a `main`.
+**Estado: aplicado en esta rama** en el commit `410f881` ("fix: add provider retries and rate limit fail-fast"), ya subido a `origin/feature/data-integrity-sync`. Pendiente de merge a `main`.
 
 **Reintentos** (en `ApiFootballProvider._get()`; el adapter de odds no los recibe):
 
@@ -72,14 +72,26 @@ Qué hace:
 - **Rate limit persistente o cuota agotada:** las competiciones restantes ya no se piden al proveedor y quedan con el motivo en su error. En el catálogo se siguen guardando los datos de `/leagues` ya obtenidos; solo se dejan de pedir los `/teams`.
 - **Timeout o 5xx agotados:** falla esa competición y la sync continúa con la siguiente.
 
+## Credenciales rechazadas (`542c761`)
+
+**Estado: aplicado en esta rama** en el commit `542c761` ("fix: stop sync on provider auth failures"). Pendiente de push y de merge a `main`.
+
+HTTP 401, HTTP 403 y `errors.token` (todos `ProviderAuthError`) cortan la sync. No se reintentan.
+
+- **`sync_fixtures`:** la competición que falla queda con su error, no se hacen más llamadas al proveedor y las competiciones restantes quedan con el motivo del corte. Lo ya guardado se conserva.
+- **`sync_catalog`:**
+  - Un error de credenciales en `/teams` corta los `/teams` restantes. Las competiciones restantes se siguen guardando con los datos ya obtenidos de `/leagues` y quedan con el motivo del corte.
+  - Un error de credenciales en `/leagues` se sigue propagando como antes.
+- **Errores que no son de credenciales:** un 404 o un error funcional de la API (por ejemplo, `errors.season`) no corta la sync: falla esa competición y se sigue con la siguiente.
+
 ## Verificación
 
-**Verificación del código de `410f881`: hecha.** Incluye `b3af1d4` y `8c00609`.
+**Verificación del código de `542c761`: hecha.** Incluye `b3af1d4`, `8c00609` y `410f881`.
 
-- **Resultado de `pytest -q`:** 192 passed, 0 skipped.
-- **Tests de BD:** los 46 se ejecutaron contra un PostgreSQL 18 local desechable, que escuchaba solo en `127.0.0.1:55432`.
-- **Autorización usada:** `TEST_DATABASE_ALLOW_DESTRUCTIVE=127.0.0.1:55432/prediktia_tests`. Con la misma URL y sin autorización, los 46 se saltaron.
-- **Sin BD:** 146 passed, 46 skipped por la guarda.
+- **Resultado de `pytest -q`:** 204 passed, 0 skipped.
+- **Tests de BD:** los 58 se ejecutaron contra un PostgreSQL 18 local desechable, que escuchaba solo en `127.0.0.1:55432`.
+- **Autorización usada:** `TEST_DATABASE_ALLOW_DESTRUCTIVE=127.0.0.1:55432/prediktia_tests`. Con la misma URL y sin autorización, los 58 se saltaron.
+- **Sin BD:** 146 passed, 58 skipped por la guarda.
 - **Esperas:** ningún test espera de verdad. Un fixture sustituye solo la espera de `api_football` y registra los segundos pedidos.
 - **Neon no se tocó:** no se modificó `.env` y no se usó ninguna URL de Neon para conectarse.
 - **Cluster temporal:** detenido y su directorio eliminado al terminar.
@@ -90,6 +102,6 @@ La guarda de `8c00609` se comprobó además en su momento con cuatro casos que d
 
 - **Semántica de `extratime_*`:** no está en `_SCORE_PAIRS`, así que una sync con NULL borra la prórroga guardada. Hay que decidir cómo tratarla, dado que su semántica en API-Football no se considera estable.
 - **Marcadores obsoletos tras revertir el estado:** los marcadores conservados no se limpian si el partido pasa a PST/CANC/ABD/NS, ni `penalty_*` si pasa de PEN a FT.
-- **`ProviderAuthError` y corte global:** un 401/403 o `errors.token` no corta la sync; se sigue intentando cada competición. Queda por decidir si aplicarle el mismo corte.
+- **Reconciliación multi-proveedor de fixtures:** correlacionar IDs distintos de API-Football y 5Dollar con el fixture interno mediante `provider_mappings`, usando matching seguro por competición, equipos y kickoff, sin fuzzy matching automático cuando el resultado sea ambiguo.
 - **Normalización de hosts de Neon:** solo contempla `-pooler`. Sería más robusto comparar por el id del endpoint.
-- **Merge/checkpoint con `main`:** `b3af1d4`, `329e6dc`, `8c00609`, `cd408b7` y `410f881` siguen pendientes de merge.
+- **Checkpoint/merge con `main`:** `b3af1d4`, `329e6dc`, `8c00609`, `cd408b7`, `410f881`, `5995d62` y `542c761` siguen pendientes de merge.
