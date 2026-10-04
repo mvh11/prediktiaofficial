@@ -103,5 +103,28 @@ La guarda de `8c00609` se comprobó además en su momento con cuatro casos que d
 - **Semántica de `extratime_*`:** no está en `_SCORE_PAIRS`, así que una sync con NULL borra la prórroga guardada. Hay que decidir cómo tratarla, dado que su semántica en API-Football no se considera estable.
 - **Marcadores obsoletos tras revertir el estado:** los marcadores conservados no se limpian si el partido pasa a PST/CANC/ABD/NS, ni `penalty_*` si pasa de PEN a FT.
 - **Reconciliación multi-proveedor de fixtures:** correlacionar IDs distintos de API-Football y 5Dollar con el fixture interno mediante `provider_mappings`, usando matching seguro por competición, equipos y kickoff, sin fuzzy matching automático cuando el resultado sea ambiguo.
+- **Provider resilience / recovery:** el fail-fast ya está implementado (`410f881` para rate limit y cuota, `542c761` para credenciales), pero hoy un fallo del proveedor solo corta la ejecución en curso. No queda constancia persistente del fallo ni hay forma de recuperarse automáticamente.
+
+  ```
+  FAIL-FAST:         implementado
+  RECOVERY / RESUME: pendiente
+  INCIDENT HISTORY:  pendiente
+  CATCH-UP:          pendiente
+  ```
+
+  Falta:
+  - estado de salud persistente del proveedor;
+  - registro persistente de incidentes y caídas;
+  - timestamps de inicio, último fallo y recuperación de cada incidente;
+  - tipo de error, código de estado y endpoint afectado;
+  - número de intentos y competiciones afectadas;
+  - `Retry-After` y/o `next_retry_at` cuando corresponda;
+  - política de reintento posterior según el tipo de fallo;
+  - circuit breaker o mecanismo equivalente para no golpear continuamente al proveedor;
+  - detección de la recuperación del proveedor;
+  - reanudación y catch-up automático desde el último punto seguro, para no dejar huecos de datos;
+  - evidencia suficiente para auditar el SLA y reclamar al proveedor si hubo una caída.
+
+  Esos registros nunca deben guardar secretos ni API keys. Todavía no hay diseño de tablas ni migraciones: solo se registra el pendiente.
 - **Normalización de hosts de Neon:** solo contempla `-pooler`. Sería más robusto comparar por el id del endpoint.
 - **Checkpoint/merge con `main`:** `b3af1d4`, `329e6dc`, `8c00609`, `cd408b7`, `410f881`, `5995d62` y `542c761` siguen pendientes de merge.
