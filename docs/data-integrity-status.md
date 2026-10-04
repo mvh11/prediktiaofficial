@@ -50,26 +50,46 @@ Qué hace:
 - **Antes de cada operación destructiva** se comprueba que el engine y la configuración de Alembic apuntan exactamente a `<host>:<puerto>/<bd>` autorizado.
 - **Comparación con desarrollo sin cambios:** sigue siendo conservadora (sin puerto, alias de localhost juntos, Neon directo y `-pooler` juntos), de modo que bloquea de más y nunca de menos.
 
+## Reintentos y límites del proveedor (`410f881`)
+
+**Estado: aplicado en esta rama** en el commit `410f881` ("fix: add provider retries and rate limit fail-fast"). Pendiente de push y de merge a `main`.
+
+**Reintentos** (en `ApiFootballProvider._get()`; el adapter de odds no los recibe):
+
+| Error | ¿Reintento? | Espera |
+| --- | --- | --- |
+| Timeout, conexión, HTTP 500/502/503/504 | Sí | 1 s y 2 s |
+| HTTP 429 y `errors.rateLimit` | Sí | Lo que pida `Retry-After` (segundos o fecha HTTP; una fecha vencida cuenta como 0), o 5 s y 10 s si no viene o no se puede interpretar |
+| `errors.requests` (cuota diaria agotada) | No | — |
+| 400, 401, 403, 404, otros 4xx, `token`, otros `errors`, JSON inválido, paginación | No | — |
+
+- **Máximo 3 intentos** por llamada.
+- **Presupuesto de espera:** como mucho 60 s acumulados por llamada a `_get()`. Si la siguiente espera lo superaría (por ejemplo, `Retry-After` 40 + 40, o un `Retry-After` de más de 60), no se espera y se lanza el error.
+- **Clasificación nueva:** `ProviderQuotaExceededError` (subclase de `ProviderRateLimitError`) y `ProviderConnectionError` (subclase de `ProviderResponseError`). La API sigue respondiendo igual que antes.
+
+**Corte de la sync** (igual en `sync_fixtures` y `sync_catalog`):
+
+- **Rate limit persistente o cuota agotada:** las competiciones restantes ya no se piden al proveedor y quedan con el motivo en su error. En el catálogo se siguen guardando los datos de `/leagues` ya obtenidos; solo se dejan de pedir los `/teams`.
+- **Timeout o 5xx agotados:** falla esa competición y la sync continúa con la siguiente.
+
 ## Verificación
 
-**Verificación del código de `8c00609`: hecha.** Incluye el fix de `b3af1d4` sin cambios en el código de producción.
+**Verificación del código de `410f881`: hecha.** Incluye `b3af1d4` y `8c00609`.
 
-- **Resultado de `pytest -q`:** 123 passed, 0 skipped.
-- **Tests de BD:** los 34 se ejecutaron contra un PostgreSQL 18 local desechable, que escuchaba solo en `127.0.0.1:55432`.
-- **Autorización usada:** `TEST_DATABASE_ALLOW_DESTRUCTIVE=127.0.0.1:55432/prediktia_tests`.
-- **Bloqueos comprobados antes de la ejecución:** con la misma URL, la suite se bloqueó (34 skipped) en cuatro casos:
-  - Sin autorización.
-  - Autorización con otro puerto (`127.0.0.1:5432/...`).
-  - Autorización en el formato antiguo sin puerto.
-  - Autorización con el alias `localhost:55432/...`.
+- **Resultado de `pytest -q`:** 192 passed, 0 skipped.
+- **Tests de BD:** los 46 se ejecutaron contra un PostgreSQL 18 local desechable, que escuchaba solo en `127.0.0.1:55432`.
+- **Autorización usada:** `TEST_DATABASE_ALLOW_DESTRUCTIVE=127.0.0.1:55432/prediktia_tests`. Con la misma URL y sin autorización, los 46 se saltaron.
+- **Sin BD:** 146 passed, 46 skipped por la guarda.
+- **Esperas:** ningún test espera de verdad. Un fixture sustituye solo la espera de `api_football` y registra los segundos pedidos.
 - **Neon no se tocó:** no se modificó `.env` y no se usó ninguna URL de Neon para conectarse.
 - **Cluster temporal:** detenido y su directorio eliminado al terminar.
+
+La guarda de `8c00609` se comprobó además en su momento con cuatro casos que debían bloquearse: sin autorización, otro puerto, formato antiguo sin puerto y alias `localhost`.
 
 ## Pendiente
 
 - **Semántica de `extratime_*`:** no está en `_SCORE_PAIRS`, así que una sync con NULL borra la prórroga guardada. Hay que decidir cómo tratarla, dado que su semántica en API-Football no se considera estable.
 - **Marcadores obsoletos tras revertir el estado:** los marcadores conservados no se limpian si el partido pasa a PST/CANC/ABD/NS, ni `penalty_*` si pasa de PEN a FT.
-- **Retries/backoff** ante 429, timeouts y 5xx.
-- **Rate limits y cuota:** fallar pronto cuando se agota la cuota del proveedor.
+- **`ProviderAuthError` y corte global:** un 401/403 o `errors.token` no corta la sync; se sigue intentando cada competición. Queda por decidir si aplicarle el mismo corte.
 - **Normalización de hosts de Neon:** solo contempla `-pooler`. Sería más robusto comparar por el id del endpoint.
-- **Merge a `main`:** `b3af1d4`, `8c00609` y los commits de documentación siguen pendientes de merge.
+- **Merge/checkpoint con `main`:** `b3af1d4`, `329e6dc`, `8c00609`, `cd408b7` y `410f881` siguen pendientes de merge.
