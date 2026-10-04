@@ -1,18 +1,43 @@
 """Función común para hacer peticiones GET a proveedores externos con manejo de errores."""
 
 import logging
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
 
 from app.integrations.exceptions import (
     ProviderAuthError,
+    ProviderConnectionError,
     ProviderRateLimitError,
     ProviderResponseError,
     ProviderTimeoutError,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:
+    """Segundos de espera de una cabecera Retry-After (segundos o fecha HTTP).
+
+    Devuelve None si falta o no se puede interpretar; una fecha ya pasada es 0, nunca negativo.
+    """
+    if not value or not value.strip():
+        return None
+    value = value.strip()
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            when = parsedate_to_datetime(value)
+        except (TypeError, ValueError):
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        seconds = (when - (now or datetime.now(timezone.utc))).total_seconds()
+        return max(seconds, 0.0)
+    return seconds if seconds >= 0 else None
 
 
 async def get_json(
@@ -37,7 +62,7 @@ async def get_json(
     except httpx.TimeoutException as exc:
         raise ProviderTimeoutError(provider, f"Timeout tras {timeout}s") from exc
     except httpx.RequestError as exc:
-        raise ProviderResponseError(provider, f"Error de conexión: {exc.__class__.__name__}") from exc
+        raise ProviderConnectionError(provider, f"Error de conexión: {exc.__class__.__name__}") from exc
 
     status = response.status_code
     if status in (401, 403):
@@ -47,7 +72,7 @@ async def get_json(
         msg = "Límite de peticiones superado"
         if retry_after:
             msg += f" (reintentar en {retry_after}s)"
-        raise ProviderRateLimitError(provider, msg, status)
+        raise ProviderRateLimitError(provider, msg, status, retry_after=parse_retry_after(retry_after))
     if status >= 400:
         raise ProviderResponseError(provider, f"Respuesta HTTP {status}", status)
 

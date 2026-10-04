@@ -117,3 +117,116 @@ def test_sync_respects_tracked_league_ids(db_session, fake):
     result = _sync(db_session, competition_id=untracked_id)
     assert [r.error for r in result.competitions] == ["No está en TRACKED_LEAGUE_IDS"]
     assert 999_999 not in fake.calls
+
+
+# --- Upsert no destructivo ----------------------------------------------------------------------
+
+
+def _scores(f: Fixture) -> dict:
+    return {
+        "goals": (f.home_goals, f.away_goals),
+        "halftime": (f.halftime_home, f.halftime_away),
+        "fulltime": (f.fulltime_home, f.fulltime_away),
+        "penalty": (f.penalty_home, f.penalty_away),
+    }
+
+
+def test_ft_fulltime_kept_when_resync_brings_null(db_session, fake):
+    make_competition(db_session, 265)
+    fake.fixtures[265] = [make_fixture_data(1, status="FT", home_goals=2, away_goals=0, fulltime_home=2, fulltime_away=0)]
+    _sync(db_session)
+
+    fake.fixtures[265] = [make_fixture_data(1, status="FT", home_goals=2, away_goals=0)]
+    _sync(db_session)
+    assert _scores(_fixture(db_session, 1))["fulltime"] == (2, 0)
+
+
+def test_partial_response_keeps_known_scores(db_session, fake):
+    make_competition(db_session, 265)
+    known = {"home_goals": 1, "away_goals": 1, "halftime_home": 0, "halftime_away": 1,
+             "fulltime_home": 1, "fulltime_away": 1, "penalty_home": 4, "penalty_away": 3}
+    fake.fixtures[265] = [make_fixture_data(1, status="PEN", **known)]
+    _sync(db_session)
+    before = _scores(_fixture(db_session, 1))
+
+    # todo a NULL, y pares a medias (que el repositorio trata como ausentes, sin mezclar)
+    fake.fixtures[265] = [
+        make_fixture_data(1, status="PEN", home_goals=3, away_goals=None, halftime_home=None, halftime_away=2)
+    ]
+    _sync(db_session)
+    assert _scores(_fixture(db_session, 1)) == before == {
+        "goals": (1, 1), "halftime": (0, 1), "fulltime": (1, 1), "penalty": (4, 3)
+    }
+
+
+def test_valid_new_scores_correct_stored_ones(db_session, fake):
+    make_competition(db_session, 265)
+    fake.fixtures[265] = [make_fixture_data(1, status="FT", home_goals=2, away_goals=0, halftime_home=1,
+                                            halftime_away=0, fulltime_home=2, fulltime_away=0)]
+    _sync(db_session)
+
+    fake.fixtures[265] = [make_fixture_data(1, status="FT", home_goals=2, away_goals=1, halftime_home=1,
+                                            halftime_away=1, fulltime_home=2, fulltime_away=1)]
+    _sync(db_session)
+    scores = _scores(_fixture(db_session, 1))
+    assert (scores["goals"], scores["halftime"], scores["fulltime"]) == ((2, 1), (1, 1), (2, 1))
+
+
+def test_metadata_still_follows_provider(db_session, fake):
+    make_competition(db_session, 265)
+    fake.fixtures[265] = [make_fixture_data(1, referee="Árbitro A", venue_name="Estadio A")]
+    _sync(db_session)
+    fake.fixtures[265] = [make_fixture_data(1, status="PST")]
+    _sync(db_session)
+    f = _fixture(db_session, 1)
+    assert (f.status_short, f.referee, f.venue_name) == ("PST", None, None)
+
+
+def test_unchanged_resync_does_not_rewrite_row(db_session, fake):
+    make_competition(db_session, 265)
+    data = [make_fixture_data(1, status="FT", home_goals=1, away_goals=0, fulltime_home=1, fulltime_away=0)]
+    fake.fixtures[265] = data
+    _sync(db_session)
+    old = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    db_session.execute(update(Fixture).values(updated_at=old))
+
+    _sync(db_session)  # mismos datos: no se reescribe
+    assert _fixture(db_session, 1).updated_at == old
+    # el mapeo sí registra que el proveedor volvió a ver el partido
+    db_session.execute(update(FixtureProviderMapping).values(last_seen_at=old))
+    _sync(db_session)
+    db_session.expire_all()
+    assert db_session.scalars(select(FixtureProviderMapping)).one().last_seen_at > old
+
+    fake.fixtures[265] = [make_fixture_data(1, status="FT", home_goals=2, away_goals=0, fulltime_home=2, fulltime_away=0)]
+    _sync(db_session)
+    assert _fixture(db_session, 1).updated_at > old
+
+
+# --- Aislamiento por competición ---------------------------------------------------------------
+
+
+def test_db_error_rolls_back_only_that_competition(db_session, fake):
+    # Orden de la sync: por país (NULL en ambas) y nombre -> "Liga A" se procesa antes
+    failing_id, _ = make_competition(db_session, 265, name="Liga A")
+    ok_id, _ = make_competition(db_session, 39, name="Liga B")
+    db_session.commit()  # el rollback de la competición fallida no debe deshacer el catálogo
+
+    # fulltime negativo saltándose el adapter: viola ck_fixtures_fulltime_nonneg al guardar
+    fake.fixtures[265] = [make_fixture_data(7001, home=501, away=502, status="FT", home_goals=0, away_goals=0,
+                                            fulltime_home=-1, fulltime_away=0)]
+    fake.fixtures[39] = [make_fixture_data(7002, home=601, away=602)]
+
+    result = _sync(db_session)
+    by_id = {r.competition_id: r for r in result.competitions}
+
+    assert fake.calls == [265, 39]
+    assert by_id[failing_id].fixtures == 0 and "Error de BD" in by_id[failing_id].error
+    assert by_id[ok_id].error is None and by_id[ok_id].fixtures == 1
+    assert result.fixtures_synced == 1
+
+    db_session.expire_all()
+    assert db_session.scalars(select(Fixture.external_id)).all() == [7002]
+    # los equipos creados para la competición fallida también se deshicieron
+    assert set(db_session.scalars(select(Team.external_id))) == {601, 602}
+    assert set(db_session.scalars(select(TeamProviderMapping.external_id))) == {"601", "602"}

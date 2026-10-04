@@ -7,7 +7,7 @@ los IDs del proveedor en las tablas de mapeo (escritura doble).
 
 from datetime import datetime
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, case, func, null, or_, select, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, joinedload
 
@@ -19,6 +19,16 @@ from app.schemas.fixture import FINISHED_STATUSES, FixtureData
 # Campos de FixtureData que se copian tal cual a la tabla
 _FIXTURE_COLUMNS = [
     f for f in FixtureData.model_fields if f not in {"competition_external_id", "season", "home_team", "away_team"}
+]
+
+# Marcadores (local, visitante) que una respuesta con NULL no puede borrar. Cada par se
+# sustituye entero o no se toca: nunca se mezcla el local nuevo con el visitante viejo.
+# El resto de columnas (estado, horario, árbitro, estadio...) sigue al proveedor tal cual
+_SCORE_PAIRS = [
+    ("home_goals", "away_goals"),
+    ("halftime_home", "halftime_away"),
+    ("fulltime_home", "fulltime_away"),
+    ("penalty_home", "penalty_away"),
 ]
 
 
@@ -44,10 +54,33 @@ def ensure_teams(db: Session, teams: list[TeamData], provider: str) -> dict[int,
     return ids
 
 
+def _conflict_values(excluded, columns: list[str]) -> dict:
+    """Valores del UPDATE cuando el partido ya existe.
+
+    - Marcadores: un par entrante completo sustituye al guardado (correcciones del proveedor);
+      un par con algún NULL conserva el guardado.
+    - fulltime solo existe en partidos terminados (ck_fixtures_fulltime_finished): si el
+      partido deja de estarlo (p. ej. FT -> AWD) se vacía en lugar de conservarse.
+    """
+    current = Fixture.__table__.c
+    values = {k: excluded[k] for k in columns}
+    for home, away in _SCORE_PAIRS:
+        complete = and_(excluded[home].is_not(None), excluded[away].is_not(None))
+        for column in (home, away):
+            values[column] = case((complete, excluded[column]), else_=current[column])
+    not_finished = excluded.status_short.not_in(sorted(FINISHED_STATUSES))
+    for column in ("fulltime_home", "fulltime_away"):
+        values[column] = case((not_finished, null()), else_=values[column])
+    return values
+
+
 def upsert_fixtures(
     db: Session, season_id: int, fixtures: list[FixtureData], team_ids: dict[int, int], provider: str
 ) -> int:
-    """Guarda los partidos de una temporada en una sola sentencia. Devuelve cuántos se guardaron."""
+    """Guarda los partidos de una temporada en una sola sentencia. Devuelve cuántos se guardaron.
+
+    Las filas que no cambian no se reescriben (ni se toca su updated_at).
+    """
     unique = list({f.external_id: f for f in fixtures}.values())
     if not unique:
         return 0
@@ -62,11 +95,22 @@ def upsert_fixtures(
     ]
     stmt = insert(Fixture).values(rows)
     updatable = [k for k in rows[0] if k != "external_id"]
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[Fixture.external_id],
-        set_={**{k: stmt.excluded[k] for k in updatable}, "updated_at": func.now()},
-    ).returning(Fixture.external_id, Fixture.id)
-    ids = {external_id: fixture_id for external_id, fixture_id in db.execute(stmt)}
+    new_values = _conflict_values(stmt.excluded, updatable)
+    current = Fixture.__table__.c
+    changed = tuple_(*(current[k] for k in updatable)).is_distinct_from(tuple_(*new_values.values()))
+    db.execute(
+        stmt.on_conflict_do_update(
+            index_elements=[Fixture.external_id],
+            set_={**new_values, "updated_at": func.now()},
+            where=changed,
+        )
+    )
+    # RETURNING no devuelve las filas sin cambios: los ids se leen aparte para todos los mapeos
+    ids = dict(
+        db.execute(
+            select(Fixture.external_id, Fixture.id).where(Fixture.external_id.in_([f.external_id for f in unique]))
+        ).all()
+    )
     upsert_origin_mappings(
         db, FixtureProviderMapping, provider, [(fixture_id, e, None) for e, fixture_id in ids.items()]
     )
