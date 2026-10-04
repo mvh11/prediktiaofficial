@@ -18,6 +18,11 @@ from app.services.provider_service import get_football_provider
 
 logger = logging.getLogger(__name__)
 
+# Errores de BD que afectan a los datos o a la conexión de UNA competición: se deshace esa
+# competición y se sigue con las demás. Los errores de programación (SQL mal construido,
+# esquema desalineado...) no se capturan: fallarían igual en todas y deben verse.
+_ISOLATED_DB_ERRORS = (IntegrityError, DataError, OperationalError)
+
 
 async def sync_fixtures(
     db: Session,
@@ -84,7 +89,7 @@ async def sync_fixtures(
             )
             saved = fixture_repository.upsert_fixtures(db, season.id, fixtures, team_ids, provider.name)
             db.commit()
-        except (IntegrityError, DataError, OperationalError) as exc:
+        except _ISOLATED_DB_ERRORS as exc:
             db.rollback()
             logger.exception("Error de BD guardando los partidos de %s: se deshacen sus cambios", result.name)
             result.error = f"Error de BD al guardar los partidos ({exc.__class__.__name__}); cambios deshechos"

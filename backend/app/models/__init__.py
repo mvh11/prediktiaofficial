@@ -4,6 +4,7 @@ Importa aquí cada modelo nuevo para que Alembic lo detecte.
 """
 
 from app.db.database import Base
+from app.models.backfill import SeasonBackfillRun
 from app.models.competition import Competition
 from app.models.fixture import Fixture
 from app.models.provider import Provider
@@ -23,6 +24,7 @@ __all__ = [
     "FixtureProviderMapping",
     "Provider",
     "Season",
+    "SeasonBackfillRun",
     "SeasonTeam",
     "Team",
     "TeamProviderMapping",

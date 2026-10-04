@@ -8,7 +8,10 @@ Seguridad de la BD (fail-closed: ante cualquier duda los tests `db` no se ejecut
      .env). Esta comparación es conservadora (db_target): en Neon el host directo y el
      `-pooler` del mismo endpoint son la misma BD, localhost/127.0.0.1/::1 son el mismo
      servidor y el puerto no se tiene en cuenta (un pooler local en otro puerto también
-     es la misma BD).
+     es la misma BD). Además, si el servidor es REMOTO y TEST_DATABASE_URL comparte host y
+     puerto con la de desarrollo, se bloquea aunque el nombre de la BD sea otro (un endpoint
+     remoto de desarrollo nunca aloja la BD de tests). Esto no se aplica a servidores locales,
+     donde una BD desechable en el mismo servidor es lo habitual.
   3. TEST_DATABASE_ALLOW_DESTRUCTIVE contiene exactamente el destino estricto
      "<host>:<puerto>/<bd>" de TEST_DATABASE_URL (authorization_target; el motivo del skip
      indica el valor esperado). Aquí no se juntan alias: cada host literal y cada puerto
@@ -103,6 +106,12 @@ def authorization_target(url: str | URL) -> str:
     return f"{host}:{u.port or _DEFAULT_PG_PORT}/{u.database}"
 
 
+def _server(url: str | URL) -> tuple[str, int]:
+    """Servidor (host normalizado como en db_target, puerto) de una URL que db_target ya validó."""
+    host, _ = db_target(url)
+    return host, make_url(url).port or _DEFAULT_PG_PORT
+
+
 def libpq_redirect_env(environ: Mapping[str, str]) -> list[str]:
     """Variables PG* definidas que podrían llevar la conexión a otro destino."""
     return [name for name in _LIBPQ_REDIRECT_ENV if (environ.get(name) or "").strip()]
@@ -131,6 +140,9 @@ def resolve_test_db(environ: Mapping[str, str], dotenv_database_url: str | None)
             return None, f"No se puede interpretar la {name}: no se puede descartar que sea la misma BD"
         if dev_target == target:
             return None, f"TEST_DATABASE_URL apunta a la misma BD que la {name}"
+        if target[0] != "localhost" and _server(test_url) == _server(dev_url):
+            host, port = _server(test_url)
+            return None, f"TEST_DATABASE_URL comparte servidor remoto ({host}:{port}) con la {name}"
 
     if (environ.get(ALLOW_DESTRUCTIVE_ENV) or "").strip() != expected:
         return None, f"Falta la autorización explícita {ALLOW_DESTRUCTIVE_ENV}={expected}"

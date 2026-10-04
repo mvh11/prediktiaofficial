@@ -65,24 +65,58 @@ def _retry_delay(exc: ProviderError, retry_number: int) -> float | None:
     return None
 
 
-def _is_empty_score(raw: Any) -> bool:
-    """True si el marcador falta o viene con local y visitante a NULL."""
+ScorePair = tuple[int | None, int | None]
+
+
+def _is_goal_count(value: Any) -> bool:
+    # bool es subclase de int en Python: True/False no son goles
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _is_absent_score(raw: Any) -> bool:
+    """True si el marcador falta o viene con local y visitante a NULL (ausente, no inválido)."""
     return raw is None or (isinstance(raw, dict) and raw.get("home") is None and raw.get("away") is None)
 
 
-def _score_pair(raw: Any, fixture_id: int, label: str) -> tuple[int | None, int | None]:
-    """Par (local, visitante) de un marcador del proveedor.
+def _score_pair(raw: Any, label: str, fixture_id: Any) -> ScorePair:
+    """Normaliza un marcador del proveedor a un par (local, visitante) completo o (None, None).
 
-    Si viene incompleto, negativo o con un formato inesperado se descarta entero y se
-    registra: nunca se devuelve medio marcador ni se inventa un valor.
+    Un par incompleto, negativo, con valores que no son enteros o con estructura inválida se
+    descarta ENTERO (nunca se devuelve medio par) y se registra; el resto del partido se sigue
+    ingiriendo.
     """
-    if _is_empty_score(raw):
+    if raw is None:
         return None, None
-    home, away = (raw.get("home"), raw.get("away")) if isinstance(raw, dict) else (None, None)
-    if all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (home, away)):
+    if not isinstance(raw, dict):
+        logger.warning("Partido %s: marcador %s con formato inesperado (%r), se descarta", fixture_id, label, raw)
+        return None, None
+    home, away = raw.get("home"), raw.get("away")
+    if home is None and away is None:
+        return None, None
+    if _is_goal_count(home) and _is_goal_count(away):
         return home, away
-    logger.warning("Partido %s: marcador '%s' inválido (%r), se descarta", fixture_id, label, raw)
+    logger.warning("Partido %s: marcador %s inválido (home=%r, away=%r), se descarta", fixture_id, label, home, away)
     return None, None
+
+
+def _fulltime_pair(status_short: str, score: dict, goals: ScorePair, fixture_id: Any) -> ScorePair:
+    """Marcador a 90' + descuento (sin prórroga ni penaltis), solo en FT/AET/PEN.
+
+    - FT: score.fulltime. Si FALTA (sin la clave, null o con local y visitante a null), goals:
+      sin prórroga, goals ES el 90'. Si viene pero es inválido o incompleto, (None, None): es un
+      dato erróneo del proveedor, no un dato ausente, y no se sustituye por otro.
+    - AET/PEN: solo score.fulltime. Nunca goals ni goals - extratime: extratime no tiene una
+      semántica consistente en el histórico del proveedor (fixture 5862: acumulado).
+    - Resto de estados: (None, None).
+    Las incoherencias del proveedor (p. ej. fixture 6570: fulltime 4-0 con goals 2-0) se guardan
+    tal cual para que los controles de calidad las detecten; aquí no se corrigen.
+    """
+    if status_short not in FINISHED_STATUSES:
+        return None, None
+    raw = score.get("fulltime")
+    if status_short == "FT" and _is_absent_score(raw):
+        return goals
+    return _score_pair(raw, "fulltime", fixture_id)
 
 
 class ApiFootballProvider(FootballDataProvider):
@@ -269,25 +303,20 @@ class ApiFootballProvider(FootballDataProvider):
             status = fixture.get("status") or {}
             venue = fixture.get("venue") or {}
             teams = item.get("teams") or {}
-            score = item.get("score") or {}
+            score = item.get("score")
+            if not isinstance(score, dict):
+                score = {}
             home = teams.get("home") or {}
             away = teams.get("away") or {}
             if fixture.get("id") is None or home.get("id") is None or away.get("id") is None:
                 continue
-            status_short = status.get("short") or "TBD"
             fixture_id = fixture["id"]
-            goals = _score_pair(item.get("goals"), fixture_id, "goals")
-            halftime = _score_pair(score.get("halftime"), fixture_id, "halftime")
-            extratime = _score_pair(score.get("extratime"), fixture_id, "extratime")
-            penalty = _score_pair(score.get("penalty"), fixture_id, "penalty")
-            # El marcador a 90' solo tiene sentido en partidos terminados (FT, AET, PEN)
-            fulltime: tuple[int | None, int | None] = (None, None)
-            if status_short in FINISHED_STATUSES:
-                fulltime = _score_pair(score.get("fulltime"), fixture_id, "fulltime")
-                # En FT no hubo prórroga: si falta score.fulltime, el de 90' es goals.
-                # En AET/PEN goals incluye la prórroga, así que nunca sirve como fallback
-                if status_short == "FT" and _is_empty_score(score.get("fulltime")):
-                    fulltime = goals
+            status_short = status.get("short") or "TBD"
+            goals = _score_pair(item.get("goals"), "goals", fixture_id)
+            halftime = _score_pair(score.get("halftime"), "halftime", fixture_id)
+            extratime = _score_pair(score.get("extratime"), "extratime", fixture_id)
+            penalty = _score_pair(score.get("penalty"), "penalty", fixture_id)
+            fulltime = _fulltime_pair(status_short, score, goals, fixture_id)
 
             fixtures.append(
                 FixtureData(
