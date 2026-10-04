@@ -9,7 +9,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.integrations.exceptions import ProviderError
+from app.integrations.exceptions import ProviderError, ProviderRateLimitError
 from app.repositories import catalog_repository as repo
 from app.schemas.catalog import CatalogSyncResult, CompetitionSyncResult
 from app.services.provider_service import get_football_provider
@@ -21,6 +21,9 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
     """Guarda las competiciones seguidas, sus temporadas y los equipos de la temporada actual.
 
     Si falla una competición se anota el error y se sigue con las demás.
+    Excepción: si el proveedor sigue limitando las peticiones tras los reintentos o la cuota
+    diaria está agotada (ProviderRateLimitError), ya no se piden los equipos de las
+    competiciones restantes (sus datos de /leagues sí se guardan) y quedan con el motivo.
     Los errores de la llamada inicial a /leagues sí se propagan (sin ella no hay nada que hacer).
     """
     provider = get_football_provider()
@@ -34,6 +37,7 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
         if i not in found_ids
     ]
 
+    stopped: str | None = None  # motivo por el que ya no se llama al proveedor
     for comp in competitions:
         result = CompetitionSyncResult(external_id=comp.external_id, name=comp.name)
         results.append(result)
@@ -48,12 +52,18 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
             result.error = "El proveedor no indica temporada actual"
             continue
         result.season = current.year
+        if stopped:
+            result.error = stopped
+            continue
 
         try:
             teams = await provider.get_teams(comp.external_id, current.year)
         except ProviderError as exc:
             logger.warning("No se pudieron obtener los equipos de %s: %s", comp.name, exc)
             result.error = exc.message
+            if isinstance(exc, ProviderRateLimitError):
+                stopped = f"Equipos no sincronizados: se detuvo la sync por el límite del proveedor ({exc.message})"
+                logger.warning("Límite del proveedor: no se piden los equipos de las competiciones restantes")
             continue
 
         team_ids = repo.upsert_teams(db, teams, provider.name)

@@ -8,15 +8,20 @@ Documentación oficial: https://www.api-football.com/documentation-v3
   HTTP 200 con el detalle en "errors".
 """
 
+import asyncio
 import logging
 from datetime import date
 from typing import Any
 
 from app.integrations.exceptions import (
     ProviderAuthError,
+    ProviderConnectionError,
+    ProviderError,
     ProviderNotConfiguredError,
+    ProviderQuotaExceededError,
     ProviderRateLimitError,
     ProviderResponseError,
+    ProviderTimeoutError,
 )
 from app.integrations.football.base import FootballDataProvider
 from app.integrations.http import get_json
@@ -25,6 +30,39 @@ from app.schemas.fixture import FINISHED_STATUSES, FixtureData
 from app.schemas.provider import ProviderStatus
 
 logger = logging.getLogger(__name__)
+
+# Reintentos de _get(): como mucho MAX_ATTEMPTS peticiones por llamada, sin jitter.
+MAX_ATTEMPTS = 3
+TRANSIENT_BACKOFF = (1.0, 2.0)  # timeout, conexión y 5xx
+RATE_LIMIT_BACKOFF = (5.0, 10.0)  # límite de peticiones sin Retry-After utilizable
+# Espera total máxima de una llamada a _get(): si la siguiente espera la superaría, no se
+# espera y se lanza el error (con un límite de peticiones, el service corta la sync)
+MAX_TOTAL_WAIT = 60.0
+RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
+
+
+async def _sleep(seconds: float) -> None:
+    """Espera entre reintentos (los tests la sustituyen para no esperar de verdad)."""
+    await asyncio.sleep(seconds)
+
+
+def _retry_delay(exc: ProviderError, retry_number: int) -> float | None:
+    """Segundos a esperar antes del reintento número `retry_number` (0, 1...), o None si no se reintenta.
+
+    - Cuota diaria agotada: nunca (no se renueva en segundos).
+    - Límite de peticiones: lo que pida Retry-After, o RATE_LIMIT_BACKOFF si no lo indica.
+    - Timeout, conexión y HTTP 500/502/503/504: TRANSIENT_BACKOFF.
+    - Todo lo demás (4xx, autenticación, errores de la API, JSON inválido...) es permanente.
+    """
+    if isinstance(exc, ProviderQuotaExceededError):
+        return None
+    if isinstance(exc, ProviderRateLimitError):
+        return RATE_LIMIT_BACKOFF[retry_number] if exc.retry_after is None else exc.retry_after
+    if isinstance(exc, (ProviderTimeoutError, ProviderConnectionError)):
+        return TRANSIENT_BACKOFF[retry_number]
+    if isinstance(exc, ProviderResponseError) and exc.status_code in RETRYABLE_STATUS:
+        return TRANSIENT_BACKOFF[retry_number]
+    return None
 
 
 def _is_empty_score(raw: Any) -> bool:
@@ -59,10 +97,41 @@ class ApiFootballProvider(FootballDataProvider):
         self, path: str, params: dict[str, Any] | None = None, *, allow_paging: bool = False
     ) -> Any:
         """GET a la API. Si la respuesta tiene más de una página y el llamador no pagina
-        (allow_paging=False), falla en lugar de perder datos en silencio."""
+        (allow_paging=False), falla en lugar de perder datos en silencio.
+
+        Los errores transitorios se reintentan (ver _retry_delay) hasta MAX_ATTEMPTS peticiones
+        y sin esperar en total más de MAX_TOTAL_WAIT segundos; si no se puede reintentar, se
+        lanza el último error.
+        """
         if not self._api_key:
             raise ProviderNotConfiguredError(self.name, "Falta API_FOOTBALL_KEY en el archivo .env")
 
+        waited = 0.0
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                return await self._get_once(path, params, allow_paging=allow_paging)
+            except ProviderError as exc:
+                delay = _retry_delay(exc, attempt - 1) if attempt < MAX_ATTEMPTS else None
+                if delay is not None and waited + delay > MAX_TOTAL_WAIT:
+                    logger.warning(
+                        "%s %s: no se reintenta, la espera total pasaría de %.0fs (%.1fs + %.1fs)",
+                        self.name, path, MAX_TOTAL_WAIT, waited, delay,
+                    )
+                    raise
+                if delay is None:
+                    if attempt > 1:
+                        logger.warning("%s %s: falla tras %d intentos: %s", self.name, path, attempt, exc)
+                    raise
+                logger.warning(
+                    "%s %s: intento %d/%d falló (%s), reintento en %.1fs",
+                    self.name, path, attempt, MAX_ATTEMPTS, exc, delay,
+                )
+                await _sleep(delay)
+                waited += delay
+        raise AssertionError("inalcanzable: el último intento siempre devuelve o lanza")
+
+    async def _get_once(self, path: str, params: dict[str, Any] | None, *, allow_paging: bool) -> Any:
+        """Una sola petición, con la traducción de errores de la API a excepciones."""
         data = await get_json(
             provider=self.name,
             base_url=self._base_url,
@@ -80,10 +149,11 @@ class ApiFootballProvider(FootballDataProvider):
             if isinstance(errors, dict):
                 if "token" in errors:
                     raise ProviderAuthError(self.name, f"Error de autenticación: {text}")
+                # La cuota diaria va antes: si vienen las dos, reintentar no serviría de nada
+                if "requests" in errors:
+                    raise ProviderQuotaExceededError(self.name, f"Cuota diaria de peticiones agotada: {text}")
                 if "rateLimit" in errors:
                     raise ProviderRateLimitError(self.name, f"Límite de peticiones por minuto superado: {text}")
-                if "requests" in errors:
-                    raise ProviderRateLimitError(self.name, f"Cuota diaria de peticiones agotada: {text}")
             raise ProviderResponseError(self.name, f"La API devolvió errores: {text}")
 
         paging = data.get("paging")

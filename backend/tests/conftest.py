@@ -172,6 +172,20 @@ def assert_destructive_db_allowed() -> None:
             raise RuntimeError(f"Operación destructiva bloqueada: el {name} no apunta a la BD de pruebas autorizada")
 
 
+@pytest.fixture(autouse=True)
+def retry_sleeps(monkeypatch) -> list[float]:
+    """Ningún test espera de verdad entre reintentos: registra los segundos que se habrían esperado."""
+    from app.integrations.football import api_football
+
+    sleeps: list[float] = []
+
+    async def _fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(api_football, "_sleep", _fake_sleep)
+    return sleeps
+
+
 def load_json(relative: str) -> dict:
     return json.loads((DATA_DIR / relative).read_text(encoding="utf-8"))
 
