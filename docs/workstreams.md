@@ -16,4 +16,11 @@ Hay dos ramas activas que avanzan a la vez. Cada una toca solo su área para que
 - **Una migración Alembic nueva a la vez:** solo un carril puede crear una migración nueva en cada momento.
 - **Nada de pull, merge ni rebase entre ramas** sin acordarlo. Cada rama se integra en `main` por separado.
 
-Estado de la línea de integridad de datos: [data-integrity-status.md](data-integrity-status.md).
+## Estado de cada carril
+
+Cada carril mantiene su propio documento de estado:
+
+- **Data Integrity / Sync:** [data-integrity-status.md](data-integrity-status.md).
+- **Modular:** [modular-data-status.md](modular-data-status.md).
+
+Se actualizan al cerrar bloques significativos o antes de un checkpoint, no en cada cambio menor.
