@@ -7,8 +7,8 @@ Flujo de run_backfill:
 1. Registro del run (status=running) en su propia transacción, que se confirma enseguida:
    el registro sobrevive aunque luego se deshagan las escrituras de dominio.
 2. Precondiciones (sin escribir datos de dominio): la temporada existe en Prediktia (no se crea),
-   no es la temporada actual (esa la gestiona el sync vivo) y no tiene ya un backfill
-   `completed` salvo que se pida --refresh.
+   no es la temporada actual (esa la gestiona el sync vivo), está cerrada (end_date conocida y
+   anterior a hoy) y no tiene ya un backfill `completed` salvo que se pida --refresh.
 3. Descarga de la temporada del proveedor (el adapter normaliza los marcadores).
 4. Análisis contra el estado previo de la BD, solo con lecturas: contadores nuevo/existente/
    cambiaría/sin cambios, equipos y season_teams que faltarían, protección cross-season y
@@ -26,7 +26,7 @@ Las anomalías del proveedor se detectan (warnings) pero nunca se corrigen.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import DataError, IntegrityError, OperationalError
@@ -88,6 +88,26 @@ def _would_change(stored: dict, incoming: dict) -> bool:
     return any(stored.get(c) != predicted[c] for c in _COMPARED_COLUMNS)
 
 
+def _validate_expected_range(expected_range: tuple[int, int] | None, dry_run: bool) -> None:
+    if expected_range is None:
+        if not dry_run:
+            raise ValueError("Una ejecución real exige expected_range (mínimo y máximo de partidos esperados)")
+        return
+    low, high = expected_range
+    if low > high:
+        raise ValueError(f"expected_range inválido: el mínimo {low} es mayor que el máximo {high}")
+
+
+def _not_closed_reason(end_date: date | None, now: datetime) -> str | None:
+    """Motivo de bloqueo si la temporada no está cerrada: end_date debe existir y ser anterior a hoy."""
+    today = now.astimezone(timezone.utc).date()
+    if end_date is None:
+        return "La temporada no tiene end_date: no se puede confirmar que esté cerrada"
+    if end_date >= today:
+        return f"La temporada no está cerrada: end_date {end_date.isoformat()} no es anterior a hoy ({today.isoformat()})"
+    return None
+
+
 async def run_backfill(
     db: Session,
     competition_id: int,
@@ -99,7 +119,13 @@ async def run_backfill(
     expected_range: tuple[int, int] | None = None,
     now: datetime | None = None,
 ) -> BackfillResult:
-    """Backfill de un par competición-temporada. Lanza ValueError si la competición no existe."""
+    """Backfill de un par competición-temporada.
+
+    Lanza ValueError, sin registrar run ni llamar al proveedor, si la competición no existe o si
+    el rango esperado no es válido: obligatorio en una ejecución real (min <= max), opcional en
+    dry-run.
+    """
+    _validate_expected_range(expected_range, dry_run)
     provider = provider or default_provider()
     now = now or datetime.now(timezone.utc)
 
@@ -110,6 +136,7 @@ async def run_backfill(
     season = db.scalars(select(Season).where(Season.competition_id == competition_id, Season.year == year)).first()
     season_id = season.id if season else None
     season_is_current = bool(season and season.is_current)
+    season_end_date = season.end_date if season else None
 
     run_id = runs.create_run(
         db,
@@ -135,7 +162,9 @@ async def run_backfill(
     )
 
     try:
-        await _execute(db, result, provider, league_external_id, season_is_current, refresh, expected_range, now)
+        await _execute(
+            db, result, provider, league_external_id, season_is_current, season_end_date, refresh, expected_range, now
+        )
     except Exception as exc:  # cualquier fallo no previsto: el run no puede quedarse en 'running'
         db.rollback()
         result.status = "failed"
@@ -152,6 +181,7 @@ async def _execute(
     provider: FootballDataProvider,
     league_external_id: int,
     season_is_current: bool,
+    season_end_date: date | None,
     refresh: bool,
     expected_range: tuple[int, int] | None,
     now: datetime,
@@ -162,6 +192,8 @@ async def _execute(
         blocked_reason = f"La temporada {result.requested_year} no existe en Prediktia para esta competición (no se crea)"
     elif season_is_current:
         blocked_reason = "Es la temporada actual: la gestiona el sync vivo, no el backfill histórico"
+    elif (not_closed := _not_closed_reason(season_end_date, now)) is not None:
+        blocked_reason = not_closed
     elif not refresh and runs.has_completed_run(db, result.competition_id, result.requested_year):
         blocked_reason = "Ya existe un backfill completed de este par; usa --refresh para reevaluarlo"
     if blocked_reason:

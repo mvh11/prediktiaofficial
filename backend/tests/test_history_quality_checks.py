@@ -294,15 +294,35 @@ def test_q1_without_range_only_blocks_zero():
 
 
 BASE = ["--competition-id", "5", "--season", "2025"]
+TARGET = "ep-test.us-east-2.aws.neon.tech:5432/neondb"
+CONFIRM = ["--confirm-target", TARGET]
+RANGE = ["--expected-min", "370", "--expected-max", "390"]
 
 
-def test_cli_without_range():
-    assert cli.expected_range(cli.parse_args(BASE)) is None
+def test_cli_dry_run_without_range_or_confirmation_is_allowed():
+    args = cli.parse_args(BASE + ["--dry-run"])
+    assert cli.expected_range(args) is None and args.confirm_target is None
 
 
 @pytest.mark.parametrize(("lo", "hi"), [("370", "390"), ("0", "0"), ("380", "380")])
 def test_cli_valid_range(lo, hi):
-    assert cli.expected_range(cli.parse_args(BASE + ["--expected-min", lo, "--expected-max", hi])) == (int(lo), int(hi))
+    args = cli.parse_args(BASE + ["--expected-min", lo, "--expected-max", hi] + CONFIRM)
+    assert cli.expected_range(args) == (int(lo), int(hi))
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        CONFIRM,  # ejecución real sin rango
+        ["--expected-min", "370"] + CONFIRM,  # solo min
+        ["--expected-max", "390"] + CONFIRM,  # solo max
+        ["--refresh"] + CONFIRM,  # refresh real sin rango
+        RANGE,  # ejecución real sin --confirm-target
+    ],
+)
+def test_cli_real_run_requires_range_and_confirmation(extra):
+    with pytest.raises(SystemExit):
+        cli.parse_args(BASE + extra)
 
 
 @pytest.mark.parametrize(
@@ -331,6 +351,7 @@ def test_cli_fail_stale_run_defaults_and_validation():
         ["--fail-stale-run", "--dry-run"],
         ["--fail-stale-run", "--refresh"],
         ["--fail-stale-run", "--expected-min", "1", "--expected-max", "2"],
+        ["--fail-stale-run", "--confirm-target", TARGET],
         ["--fail-stale-run", "--stale-after-minutes", "0"],
         ["--stale-after-minutes", "30"],  # sin --fail-stale-run
     ],
@@ -358,3 +379,101 @@ def test_service_and_cli_share_default_threshold():
     from app.services.history_backfill_service import DEFAULT_STALE_AFTER_MINUTES
 
     assert DEFAULT_STALE_AFTER_MINUTES == cli.DEFAULT_STALE_AFTER_MINUTES
+
+
+# --- CLI: destino de la BD -----------------------------------------------------------------
+
+
+SECRET_URL = "postgresql+psycopg://prediktia_user:s3cr3t-pass@EP-Test.us-east-2.aws.neon.tech/neondb?sslmode=require"
+
+
+def test_database_target_is_sanitized():
+    target = cli.database_target(SECRET_URL)
+    assert target == TARGET  # host en minúsculas y puerto 5432 por defecto
+    assert "prediktia_user" not in target and "s3cr3t" not in target
+
+
+@pytest.mark.parametrize("url", ["postgresql+psycopg:///neondb", "postgresql+psycopg://u:p@host.example"])
+def test_database_target_requires_host_and_database(url):
+    with pytest.raises(ValueError):
+        cli.database_target(url)
+
+
+def _completed(status: str = "completed") -> BackfillResult:
+    return BackfillResult(
+        run_id=1, competition_id=5, competition_name="Premier League", requested_year=2025, season_id=9,
+        provider="api-football", is_dry_run=status == "dry_run_completed", is_refresh=False, status=status,
+    )
+
+
+@pytest.fixture
+def fake_backend(monkeypatch):
+    """DATABASE_URL con credenciales y un _run falso que registra si se llegó a ejecutar."""
+    calls = []
+
+    async def fake_run(args):
+        calls.append(args)
+        return _completed("dry_run_completed" if args.dry_run else "completed")
+
+    monkeypatch.setattr(cli, "_configured_target", lambda: cli.database_target(SECRET_URL))
+    monkeypatch.setattr(cli, "_run", fake_run)
+    return calls
+
+
+def test_cli_real_run_with_matching_target_runs(fake_backend, capsys):
+    assert cli.main(BASE + RANGE + CONFIRM) == 0
+    assert len(fake_backend) == 1
+    out = capsys.readouterr().out
+    assert f"Destino BD:  {TARGET}" in out
+    assert "prediktia_user" not in out and "s3cr3t" not in out
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "ep-test.us-east-2.aws.neon.tech:5432/otra_bd",
+        "ep-test.us-east-2.aws.neon.tech:6543/neondb",
+        "ep-test-pooler.us-east-2.aws.neon.tech:5432/neondb",
+        "localhost:5432/neondb",
+    ],
+)
+def test_cli_real_run_with_wrong_target_aborts_before_writing(fake_backend, capsys, target):
+    assert cli.main(BASE + RANGE + ["--confirm-target", target]) == 2
+    assert fake_backend == []  # ni sesión de BD ni proveedor
+    captured = capsys.readouterr()
+    assert "no coincide" in captured.err
+    assert "prediktia_user" not in captured.out + captured.err and "s3cr3t" not in captured.out + captured.err
+
+
+def test_cli_dry_run_shows_target_without_confirmation(fake_backend, capsys):
+    assert cli.main(BASE + ["--dry-run"]) == 0
+    assert len(fake_backend) == 1
+    out = capsys.readouterr().out
+    assert f"Destino BD:  {TARGET}" in out and "s3cr3t" not in out
+
+
+def test_cli_unresolvable_target_aborts(monkeypatch, capsys):
+    calls = []
+
+    def bad_target():
+        raise ValueError("DATABASE_URL no tiene un host y una base de datos identificables")
+
+    monkeypatch.setattr(cli, "_configured_target", bad_target)
+    monkeypatch.setattr(cli, "_run", lambda args: calls.append(args))
+    assert cli.main(BASE + RANGE + CONFIRM) == 2
+    assert calls == []
+
+
+# --- Servicio: rango obligatorio en ejecución real (se valida antes de tocar la BD) ----------
+
+
+@pytest.mark.parametrize(("dry_run", "expected_range"), [(False, None), (False, (391, 370)), (True, (391, 370))])
+def test_service_rejects_invalid_range_before_db_or_provider(dry_run, expected_range):
+    from app.services.history_backfill_service import run_backfill
+    from tests.test_history_backfill import FakeHistoryProvider
+
+    provider = FakeHistoryProvider()
+    with pytest.raises(ValueError):
+        # db=None: si el servicio llegara a tocar la BD fallaría con AttributeError, no ValueError
+        asyncio.run(run_backfill(None, 5, 2025, dry_run=dry_run, expected_range=expected_range, provider=provider))
+    assert provider.calls == []

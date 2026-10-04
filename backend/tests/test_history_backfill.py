@@ -5,16 +5,17 @@ Ningún test llama a la API: el proveedor falso devuelve FixtureData y la identi
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from app.integrations.exceptions import ProviderResponseError
 from app.integrations.football.base import FootballDataProvider
 from app.models import (
     Fixture,
     FixtureProviderMapping,
+    Season,
     SeasonBackfillRun,
     SeasonTeam,
     Team,
@@ -30,6 +31,10 @@ pytestmark = pytest.mark.db
 LEAGUE = 39
 YEAR = 2025
 NOW = datetime(2027, 1, 1, tzinfo=timezone.utc)
+END_DATE = date(2026, 5, 24)  # temporada 2025 cerrada respecto a NOW
+# Rango amplio para las ejecuciones reales de los tests: el servicio lo exige y Q1 sigue
+# bloqueando 0 partidos aunque el rango empiece en 0
+WIDE_RANGE = (0, 10_000)
 KICKOFF = datetime(2025, 9, 1, 19, 0, tzinfo=timezone.utc)
 
 
@@ -72,14 +77,18 @@ def fx(external_id: int, home: int = 1, away: int = 2, **kwargs):
 
 @pytest.fixture
 def setup(db_session):
-    """Competición con temporada actual 2026 y temporada histórica 2025 (vacías)."""
+    """Competición con temporada actual 2026 y temporada histórica 2025 cerrada (vacías)."""
     competition_id, current_season_id = make_competition(db_session, LEAGUE, name="Premier Test", current_year=2026)
-    seasons = catalog_repository.upsert_seasons(db_session, competition_id, [SeasonData(year=YEAR, is_current=False)])
+    seasons = catalog_repository.upsert_seasons(
+        db_session, competition_id, [SeasonData(year=YEAR, end_date=END_DATE, is_current=False)]
+    )
     db_session.flush()
     return {"competition_id": competition_id, "season_id": seasons[YEAR], "current_season_id": current_season_id}
 
 
 def backfill(db, setup, provider, **kwargs):
+    if not kwargs.get("dry_run"):
+        kwargs.setdefault("expected_range", WIDE_RANGE)
     return asyncio.run(
         service.run_backfill(db, setup["competition_id"], kwargs.pop("year", YEAR), provider=provider, now=NOW, **kwargs)
     )
@@ -122,9 +131,62 @@ def test_current_season_is_blocked(db_session, setup):
     assert result.status == "blocked" and "temporada actual" in result.error_message
 
 
+@pytest.mark.parametrize(
+    ("end_date", "reason"),
+    [
+        (date(2027, 6, 1), "no está cerrada"),  # futura
+        (NOW.date(), "no está cerrada"),  # termina hoy: todavía no es anterior a hoy
+        (None, "no tiene end_date"),
+    ],
+)
+def test_season_not_closed_is_blocked_without_writes(db_session, setup, end_date, reason):
+    db_session.execute(update(Season).where(Season.id == setup["season_id"]).values(end_date=end_date))
+    provider = FakeHistoryProvider([fx(1)])
+    before = domain_counts(db_session)
+    result = backfill(db_session, setup, provider)
+    assert result.status == "blocked" and reason in result.error_message
+    assert provider.calls == []  # ni siquiera se llama al proveedor
+    assert domain_counts(db_session) == before
+    run = run_row(db_session, result.run_id)
+    assert (run.status, run.error_message) == ("blocked", result.error_message)
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_closed_season_continues(db_session, setup, dry_run):
+    provider = FakeHistoryProvider([fx(1)])
+    result = backfill(db_session, setup, provider, dry_run=dry_run)
+    assert result.status == ("dry_run_completed" if dry_run else "completed")
+    assert provider.calls == [(LEAGUE, YEAR)]
+
+
+@pytest.mark.parametrize("expected_range", [None, (391, 370)])
+def test_real_run_without_valid_range_is_rejected_before_provider(db_session, setup, expected_range):
+    provider = FakeHistoryProvider([fx(1)])
+    before = domain_counts(db_session)
+    with pytest.raises(ValueError, match="expected_range|Una ejecución real"):
+        backfill(db_session, setup, provider, expected_range=expected_range)
+    assert provider.calls == []
+    assert domain_counts(db_session) == before
+    assert count(db_session, SeasonBackfillRun) == 0  # ni siquiera se registra el run
+
+
+def test_real_run_with_range_continues(db_session, setup):
+    provider = FakeHistoryProvider([fx(1)])
+    result = backfill(db_session, setup, provider, expected_range=(1, 1))
+    assert result.status == "completed" and provider.calls == [(LEAGUE, YEAR)]
+
+
+def test_dry_run_without_range_continues(db_session, setup):
+    provider = FakeHistoryProvider([fx(1)])
+    result = backfill(db_session, setup, provider, dry_run=True, expected_range=None)
+    assert result.status == "dry_run_completed" and provider.calls == [(LEAGUE, YEAR)]
+
+
 def test_unknown_competition_raises_without_run(db_session, setup):
-    with pytest.raises(ValueError):
-        asyncio.run(service.run_backfill(db_session, 999_999_999, YEAR, provider=FakeHistoryProvider()))
+    with pytest.raises(ValueError, match="No existe la competición"):
+        asyncio.run(
+            service.run_backfill(db_session, 999_999_999, YEAR, provider=FakeHistoryProvider(), expected_range=WIDE_RANGE)
+        )
     assert count(db_session, SeasonBackfillRun) == 0
 
 
