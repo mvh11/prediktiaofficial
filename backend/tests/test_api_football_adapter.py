@@ -1,6 +1,7 @@
-"""Tests unitarios del adapter de API-Football (sin red ni BD)."""
+"""Tests unitarios del adapter de API-Football y de la guarda de BD de tests (sin red ni BD)."""
 
 import asyncio
+import logging
 
 import pytest
 
@@ -8,7 +9,8 @@ from app.integrations.exceptions import ProviderAuthError, ProviderRateLimitErro
 from app.integrations.football import api_football
 from app.integrations.football.api_football import ApiFootballProvider
 from app.repositories.provider_mapping_repository import canonical_external_id
-from tests.conftest import load_json
+from tests import conftest
+from tests.conftest import ALLOW_DESTRUCTIVE_ENV, load_json, resolve_test_db
 
 
 @pytest.fixture
@@ -122,3 +124,137 @@ def test_paging_single_page_or_missing_ok(provider, respond_with, paging):
 )
 def test_canonical_external_id(value, expected):
     assert canonical_external_id(value) == expected
+
+
+# --- Normalización de marcadores --------------------------------------------------------------
+
+
+@pytest.fixture
+def edge(provider, respond_with) -> dict:
+    respond_with(load_json("api_football/fixtures_score_edge.json"))
+    return {f.external_id: f for f in asyncio.run(provider.get_fixtures(265, 2026))}
+
+
+def _pairs(f) -> dict:
+    return {
+        "goals": (f.home_goals, f.away_goals),
+        "halftime": (f.halftime_home, f.halftime_away),
+        "fulltime": (f.fulltime_home, f.fulltime_away),
+    }
+
+
+def test_invalid_scores_do_not_drop_fixtures(edge):
+    assert set(edge) == {201, 202, 203, 204, 205, 206, 207, 208}
+
+
+@pytest.mark.parametrize("external_id", [201, 202])  # score.fulltime a NULL / sin la clave
+def test_ft_without_fulltime_uses_goals(edge, external_id):
+    f = edge[external_id]
+    assert (f.fulltime_home, f.fulltime_away) == (f.home_goals, f.away_goals) != (None, None)
+
+
+@pytest.mark.parametrize("external_id", [203, 204])  # AET, PEN
+def test_aet_pen_without_fulltime_never_use_goals(edge, external_id):
+    f = edge[external_id]
+    assert f.home_goals is not None
+    assert (f.fulltime_home, f.fulltime_away) == (None, None)
+
+
+def test_incomplete_pair_discarded_whole(edge):
+    # goals {2, null} y halftime {1, null}: ni medio marcador ni fallback de fulltime
+    assert _pairs(edge[205]) == {"goals": (None, None), "halftime": (None, None), "fulltime": (None, None)}
+
+
+def test_incomplete_fulltime_not_replaced_by_goals(edge):
+    # score.fulltime {2, null} es un dato inválido, no ausente: no se inventa con goals
+    assert _pairs(edge[206]) == {"goals": (2, 1), "halftime": (1, 0), "fulltime": (None, None)}
+
+
+def test_negative_scores_discarded(edge):
+    assert _pairs(edge[207]) == {"goals": (1, 0), "halftime": (None, None), "fulltime": (None, None)}
+
+
+def test_malformed_score_discarded(edge):
+    assert _pairs(edge[208]) == {"goals": (1, 0), "halftime": (None, None), "fulltime": (1, 0)}
+
+
+def test_invalid_scores_are_logged(provider, respond_with, caplog):
+    respond_with(load_json("api_football/fixtures_score_edge.json"))
+    with caplog.at_level(logging.WARNING, logger=api_football.__name__):
+        asyncio.run(provider.get_fixtures(265, 2026))
+    logged = {(r.args[0], r.args[1]) for r in caplog.records}
+    assert {(205, "goals"), (205, "halftime"), (206, "fulltime"), (207, "halftime"), (207, "fulltime"), (208, "halftime")} == logged
+
+
+# --- Guarda de la BD de tests -------------------------------------------------------------------
+# Credenciales y endpoints ficticios
+
+NEON_DIRECT = "postgresql+psycopg://u:p@ep-calm-sun-123456.us-east-2.aws.neon.tech/neondb?sslmode=require"
+NEON_POOLER = "postgresql+psycopg://u:p@ep-calm-sun-123456-pooler.us-east-2.aws.neon.tech/neondb?sslmode=require"
+NEON_TARGET = "ep-calm-sun-123456.us-east-2.aws.neon.tech/neondb"
+OTHER_NEON = "postgresql+psycopg://u:p@ep-other-999999-pooler.us-east-2.aws.neon.tech/neondb"
+OTHER_TARGET = "ep-other-999999.us-east-2.aws.neon.tech/neondb"
+
+
+def _resolve(test_url: str | None, dev_url: str | None = None, allow: str | None = None, dotenv_url: str | None = None):
+    env = {k: v for k, v in {"TEST_DATABASE_URL": test_url, "DATABASE_URL": dev_url, ALLOW_DESTRUCTIVE_ENV: allow}.items() if v is not None}
+    return resolve_test_db(env, dotenv_url)
+
+
+def test_guard_allows_distinct_authorized_db():
+    assert _resolve(OTHER_NEON, NEON_DIRECT, OTHER_TARGET) == (OTHER_NEON, "")
+
+
+@pytest.mark.parametrize(
+    ("test_url", "dev_url"),
+    [(NEON_POOLER, NEON_DIRECT), (NEON_DIRECT, NEON_POOLER), (NEON_DIRECT, NEON_DIRECT)],
+    ids=["pooler-vs-directo", "directo-vs-pooler", "misma-url"],
+)
+def test_guard_blocks_same_neon_db(test_url, dev_url):
+    url, reason = _resolve(test_url, dev_url, NEON_TARGET)  # aunque esté autorizada
+    assert url is None and "misma BD" in reason
+
+
+def test_guard_blocks_same_db_from_dotenv():
+    url, reason = _resolve(NEON_POOLER, None, NEON_TARGET, dotenv_url=NEON_DIRECT)
+    assert url is None and ".env" in reason
+
+
+def test_guard_blocks_local_aliases_and_other_port():
+    test_url = "postgresql+psycopg://u:p@127.0.0.1:6432/prediktia"
+    url, _ = _resolve(test_url, "postgresql+psycopg://u:p@localhost:5432/prediktia", "localhost/prediktia")
+    assert url is None
+
+
+@pytest.mark.parametrize("allow", [None, "", "1", "true", "neondb", NEON_TARGET])
+def test_guard_requires_exact_authorization(allow):
+    url, reason = _resolve(OTHER_NEON, NEON_DIRECT, allow)
+    assert url is None and f"{ALLOW_DESTRUCTIVE_ENV}={OTHER_TARGET}" in reason
+
+
+def test_guard_requires_explicit_test_url():
+    # DATABASE_URL nunca sustituye a TEST_DATABASE_URL
+    assert _resolve(None, NEON_DIRECT, NEON_TARGET)[0] is None
+
+
+@pytest.mark.parametrize(
+    "test_url",
+    [
+        "postgresql+psycopg://u:p@/neondb?host=ep-calm-sun-123456.us-east-2.aws.neon.tech",
+        "postgresql+psycopg://u:p@proxy.local/neondb?options=endpoint%3Dep-calm-sun-123456",
+        "sqlite:///tests.db",
+        "esto no es una url",
+    ],
+)
+def test_guard_blocks_unidentifiable_test_url(test_url):
+    assert _resolve(test_url, NEON_DIRECT, "proxy.local/neondb")[0] is None
+
+
+def test_guard_blocks_unparseable_dev_url():
+    assert _resolve(OTHER_NEON, "esto no es una url", OTHER_TARGET)[0] is None
+
+
+def test_destructive_operations_blocked_without_authorization(monkeypatch):
+    monkeypatch.setattr(conftest, "TEST_DB_URL", None)
+    with pytest.raises(RuntimeError, match="bloqueada"):
+        conftest.alembic_run("downgrade", "base")

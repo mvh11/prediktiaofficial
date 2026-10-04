@@ -8,6 +8,7 @@ Documentación oficial: https://www.api-football.com/documentation-v3
   HTTP 200 con el detalle en "errors".
 """
 
+import logging
 from datetime import date
 from typing import Any
 
@@ -22,6 +23,28 @@ from app.integrations.http import get_json
 from app.schemas.catalog import CompetitionData, SeasonData, TeamData
 from app.schemas.fixture import FINISHED_STATUSES, FixtureData
 from app.schemas.provider import ProviderStatus
+
+logger = logging.getLogger(__name__)
+
+
+def _is_empty_score(raw: Any) -> bool:
+    """True si el marcador falta o viene con local y visitante a NULL."""
+    return raw is None or (isinstance(raw, dict) and raw.get("home") is None and raw.get("away") is None)
+
+
+def _score_pair(raw: Any, fixture_id: int, label: str) -> tuple[int | None, int | None]:
+    """Par (local, visitante) de un marcador del proveedor.
+
+    Si viene incompleto, negativo o con un formato inesperado se descarta entero y se
+    registra: nunca se devuelve medio marcador ni se inventa un valor.
+    """
+    if _is_empty_score(raw):
+        return None, None
+    home, away = (raw.get("home"), raw.get("away")) if isinstance(raw, dict) else (None, None)
+    if all(isinstance(v, int) and not isinstance(v, bool) and v >= 0 for v in (home, away)):
+        return home, away
+    logger.warning("Partido %s: marcador '%s' inválido (%r), se descarta", fixture_id, label, raw)
+    return None, None
 
 
 class ApiFootballProvider(FootballDataProvider):
@@ -176,23 +199,29 @@ class ApiFootballProvider(FootballDataProvider):
             status = fixture.get("status") or {}
             venue = fixture.get("venue") or {}
             teams = item.get("teams") or {}
-            goals = item.get("goals") or {}
             score = item.get("score") or {}
-            halftime = score.get("halftime") or {}
-            extratime = score.get("extratime") or {}
-            penalty = score.get("penalty") or {}
-            fulltime = score.get("fulltime") or {}
             home = teams.get("home") or {}
             away = teams.get("away") or {}
             if fixture.get("id") is None or home.get("id") is None or away.get("id") is None:
                 continue
             status_short = status.get("short") or "TBD"
+            fixture_id = fixture["id"]
+            goals = _score_pair(item.get("goals"), fixture_id, "goals")
+            halftime = _score_pair(score.get("halftime"), fixture_id, "halftime")
+            extratime = _score_pair(score.get("extratime"), fixture_id, "extratime")
+            penalty = _score_pair(score.get("penalty"), fixture_id, "penalty")
             # El marcador a 90' solo tiene sentido en partidos terminados (FT, AET, PEN)
-            finished = status_short in FINISHED_STATUSES
+            fulltime: tuple[int | None, int | None] = (None, None)
+            if status_short in FINISHED_STATUSES:
+                fulltime = _score_pair(score.get("fulltime"), fixture_id, "fulltime")
+                # En FT no hubo prórroga: si falta score.fulltime, el de 90' es goals.
+                # En AET/PEN goals incluye la prórroga, así que nunca sirve como fallback
+                if status_short == "FT" and _is_empty_score(score.get("fulltime")):
+                    fulltime = goals
 
             fixtures.append(
                 FixtureData(
-                    external_id=fixture["id"],
+                    external_id=fixture_id,
                     competition_external_id=competition_external_id,
                     season=season,
                     round=(item.get("league") or {}).get("round"),
@@ -205,16 +234,16 @@ class ApiFootballProvider(FootballDataProvider):
                     referee=fixture.get("referee"),
                     home_team=TeamData(external_id=home["id"], name=home.get("name") or "", logo_url=home.get("logo")),
                     away_team=TeamData(external_id=away["id"], name=away.get("name") or "", logo_url=away.get("logo")),
-                    home_goals=goals.get("home"),
-                    away_goals=goals.get("away"),
-                    halftime_home=halftime.get("home"),
-                    halftime_away=halftime.get("away"),
-                    extratime_home=extratime.get("home"),
-                    extratime_away=extratime.get("away"),
-                    penalty_home=penalty.get("home"),
-                    penalty_away=penalty.get("away"),
-                    fulltime_home=fulltime.get("home") if finished else None,
-                    fulltime_away=fulltime.get("away") if finished else None,
+                    home_goals=goals[0],
+                    away_goals=goals[1],
+                    halftime_home=halftime[0],
+                    halftime_away=halftime[1],
+                    extratime_home=extratime[0],
+                    extratime_away=extratime[1],
+                    penalty_home=penalty[0],
+                    penalty_away=penalty[1],
+                    fulltime_home=fulltime[0],
+                    fulltime_away=fulltime[1],
                 )
             )
         return fixtures
