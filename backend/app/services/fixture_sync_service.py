@@ -11,7 +11,7 @@ from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.integrations.exceptions import ProviderError, ProviderRateLimitError
+from app.integrations.exceptions import ProviderAuthError, ProviderError, ProviderRateLimitError
 from app.repositories import catalog_repository, fixture_repository
 from app.schemas.fixture import CompetitionFixtureSyncResult, FixtureSyncResult
 from app.services.provider_service import get_football_provider
@@ -32,8 +32,9 @@ async def sync_fixtures(
     Si falla una competición (proveedor o BD) se anota el error en su resultado y se sigue
     con las demás; un error de BD deshace solo los cambios de esa competición.
     Excepción: si el proveedor sigue limitando las peticiones tras los reintentos o la cuota
-    diaria está agotada (ProviderRateLimitError), las competiciones restantes no se piden y
-    quedan con el motivo en su error.
+    diaria está agotada (ProviderRateLimitError), o si rechaza las credenciales
+    (ProviderAuthError: HTTP 401/403 o errors.token), las competiciones restantes no se piden
+    y quedan con el motivo en su error.
     Solo se sincronizan las competiciones de TRACKED_LEAGUE_IDS (IDs de API-Football).
     """
     provider = get_football_provider()
@@ -70,6 +71,11 @@ async def sync_fixtures(
             if isinstance(exc, ProviderRateLimitError):
                 stopped = f"No sincronizada: se detuvo la sync por el límite del proveedor ({exc.message})"
                 logger.warning("Límite del proveedor: no se piden las competiciones restantes")
+            elif isinstance(exc, ProviderAuthError):
+                stopped = (
+                    f"No sincronizada: se detuvo la sync porque el proveedor rechazó las credenciales ({exc.message})"
+                )
+                logger.warning("Credenciales rechazadas: no se piden las competiciones restantes")
             continue
 
         try:

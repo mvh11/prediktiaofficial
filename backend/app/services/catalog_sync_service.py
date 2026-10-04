@@ -9,7 +9,7 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.integrations.exceptions import ProviderError, ProviderRateLimitError
+from app.integrations.exceptions import ProviderAuthError, ProviderError, ProviderRateLimitError
 from app.repositories import catalog_repository as repo
 from app.schemas.catalog import CatalogSyncResult, CompetitionSyncResult
 from app.services.provider_service import get_football_provider
@@ -22,7 +22,8 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
 
     Si falla una competición se anota el error y se sigue con las demás.
     Excepción: si el proveedor sigue limitando las peticiones tras los reintentos o la cuota
-    diaria está agotada (ProviderRateLimitError), ya no se piden los equipos de las
+    diaria está agotada (ProviderRateLimitError), o si rechaza las credenciales
+    (ProviderAuthError: HTTP 401/403 o errors.token), ya no se piden los equipos de las
     competiciones restantes (sus datos de /leagues sí se guardan) y quedan con el motivo.
     Los errores de la llamada inicial a /leagues sí se propagan (sin ella no hay nada que hacer).
     """
@@ -64,6 +65,12 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
             if isinstance(exc, ProviderRateLimitError):
                 stopped = f"Equipos no sincronizados: se detuvo la sync por el límite del proveedor ({exc.message})"
                 logger.warning("Límite del proveedor: no se piden los equipos de las competiciones restantes")
+            elif isinstance(exc, ProviderAuthError):
+                stopped = (
+                    "Equipos no sincronizados: se detuvo la sync porque el proveedor rechazó las credenciales "
+                    f"({exc.message})"
+                )
+                logger.warning("Credenciales rechazadas: no se piden los equipos de las competiciones restantes")
             continue
 
         team_ids = repo.upsert_teams(db, teams, provider.name)

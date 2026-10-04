@@ -1,4 +1,4 @@
-"""Syncs de fixtures y catálogo ante límites del proveedor, con el adapter real de API-Football.
+"""Syncs de fixtures y catálogo ante límites y credenciales rechazadas, con el adapter real de API-Football.
 
 Solo se sustituye get_json (respuestas por ruta y liga) y la espera entre reintentos, así que
 se prueba la cadena completa: reintentos en ApiFootballProvider._get() y corte en el service.
@@ -9,7 +9,12 @@ import asyncio
 import pytest
 from sqlalchemy import select
 
-from app.integrations.exceptions import ProviderRateLimitError, ProviderResponseError, ProviderTimeoutError
+from app.integrations.exceptions import (
+    ProviderAuthError,
+    ProviderRateLimitError,
+    ProviderResponseError,
+    ProviderTimeoutError,
+)
 from app.integrations.football import api_football
 from app.integrations.football.api_football import ApiFootballProvider
 from app.models import Competition, Fixture
@@ -64,6 +69,18 @@ TRANSIENT_FAILURES = {
     "timeout": lambda: ProviderTimeoutError(P, "Timeout tras 1s"),
     "503": lambda: ProviderResponseError(P, "Respuesta HTTP 503", 503),
 }
+# Lo que get_json lanzaría con 401/403 y lo que la API devuelve con HTTP 200 y errors.token
+AUTH_FAILURES = {
+    "401": lambda: ProviderAuthError(P, "API key inválida o sin permisos", 401),
+    "403": lambda: ProviderAuthError(P, "API key inválida o sin permisos", 403),
+    "errors.token": lambda: load_json("api_football/errors_token.json"),
+}
+# Errores permanentes que no son de credenciales: fallan esa competición pero no cortan la sync
+NON_AUTH_PERMANENT = {
+    "404": lambda: ProviderResponseError(P, "Respuesta HTTP 404", 404),
+    "errors_other": lambda: load_json("api_football/errors_other.json"),
+}
+AUTH_STOP = "se detuvo la sync porque el proveedor rechazó las credenciales"
 
 
 # --- Sync de fixtures -------------------------------------------------------------------------
@@ -204,3 +221,82 @@ def test_catalog_retry_after_over_60_fails_fast(db_session, api, retry_sleeps):
 
     assert api.calls_to("/teams", 265) == 1 and retry_sleeps == []
     assert api.calls_to("/teams", 39) == api.calls_to("/teams", 140) == 0
+
+
+# --- Credenciales rechazadas (ProviderAuthError): corte sin reintentos -------------------------
+
+
+@pytest.mark.parametrize("failure", AUTH_FAILURES, ids=list(AUTH_FAILURES))
+def test_fixtures_auth_error_stops_remaining(db_session, three_competitions, api, retry_sleeps, failure):
+    api.on("/fixtures", 265, AUTH_FAILURES[failure]())
+    result, by_id = _sync_fixtures(db_session)
+
+    assert len(api.calls) == 1 and api.calls_to("/fixtures", 265) == 1  # 1 llamada en total, sin reintentos
+    assert retry_sleeps == []
+    assert by_id[three_competitions[265]].error  # el error propio de esa competición
+    assert AUTH_STOP not in by_id[three_competitions[265]].error
+    for league in (39, 140):
+        assert AUTH_STOP in by_id[three_competitions[league]].error
+        assert by_id[three_competitions[league]].fixtures == 0
+    assert result.fixtures_synced == 0
+
+
+def test_fixtures_auth_error_after_success_keeps_saved_data(db_session, three_competitions, api, retry_sleeps):
+    api.on("/fixtures", 265, load_json("api_football/fixtures_mixed.json"))
+    api.on("/fixtures", 39, AUTH_FAILURES["401"]())
+    result, by_id = _sync_fixtures(db_session)
+
+    assert (api.calls_to("/fixtures", 265), api.calls_to("/fixtures", 39), api.calls_to("/fixtures", 140)) == (1, 1, 0)
+    assert by_id[three_competitions[265]].error is None and by_id[three_competitions[265]].fixtures == 6
+    assert "API key inválida" in by_id[three_competitions[39]].error
+    assert AUTH_STOP in by_id[three_competitions[140]].error
+    db_session.expire_all()
+    assert len(db_session.scalars(select(Fixture.id)).all()) == 6 == result.fixtures_synced
+
+
+@pytest.mark.parametrize("failure", NON_AUTH_PERMANENT, ids=list(NON_AUTH_PERMANENT))
+def test_fixtures_non_auth_permanent_error_continues(db_session, three_competitions, api, retry_sleeps, failure):
+    api.on("/fixtures", 265, NON_AUTH_PERMANENT[failure]())
+    _, by_id = _sync_fixtures(db_session)
+
+    assert (api.calls_to("/fixtures", 265), api.calls_to("/fixtures", 39), api.calls_to("/fixtures", 140)) == (1, 1, 1)
+    assert retry_sleeps == []
+    assert by_id[three_competitions[265]].error is not None
+    assert by_id[three_competitions[39]].error is None and by_id[three_competitions[140]].error is None
+
+
+@pytest.mark.parametrize("failure", AUTH_FAILURES, ids=list(AUTH_FAILURES))
+def test_catalog_auth_error_in_teams_stops_remaining_teams(db_session, api, retry_sleeps, failure):
+    api.on("/leagues", None, _leagues_payload())
+    api.on("/teams", 265, AUTH_FAILURES[failure]())
+    _, by_ext = _sync_catalog(db_session)
+
+    assert api.calls_to("/teams", 265) == 1
+    assert api.calls_to("/teams", 39) == api.calls_to("/teams", 140) == 0
+    assert retry_sleeps == []
+    assert by_ext[265].error and AUTH_STOP not in by_ext[265].error
+    for league in (39, 140):
+        assert AUTH_STOP in by_ext[league].error
+    # los datos de /leagues de las competiciones restantes sí se guardan
+    db_session.expire_all()
+    assert set(db_session.scalars(select(Competition.external_id))) >= set(LEAGUES)
+
+
+def test_catalog_auth_error_in_leagues_propagates(db_session, api, retry_sleeps):
+    api.on("/leagues", None, AUTH_FAILURES["401"]())
+    with pytest.raises(ProviderAuthError):
+        _sync_catalog(db_session)
+
+    assert api.calls == [("/leagues", None)]  # 1 llamada y ninguna a /teams
+    assert retry_sleeps == []
+
+
+@pytest.mark.parametrize("failure", NON_AUTH_PERMANENT, ids=list(NON_AUTH_PERMANENT))
+def test_catalog_non_auth_permanent_error_continues(db_session, api, retry_sleeps, failure):
+    api.on("/leagues", None, _leagues_payload())
+    api.on("/teams", 265, NON_AUTH_PERMANENT[failure]())
+    _, by_ext = _sync_catalog(db_session)
+
+    assert (api.calls_to("/teams", 265), api.calls_to("/teams", 39), api.calls_to("/teams", 140)) == (1, 1, 1)
+    assert by_ext[265].error is not None
+    assert by_ext[39].error is None and by_ext[140].error is None
