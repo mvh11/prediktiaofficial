@@ -331,12 +331,9 @@ def test_fixtures_invalid_payload_fails_only_that_competition(db_session, three_
     assert result.fixtures_synced == 6
 
 
-def test_fixtures_sync_logs_duration_and_request_counts(db_session, three_competitions, api, retry_sleeps, caplog, monkeypatch):
+def test_fixtures_sync_logs_duration_and_request_counts(db_session, three_competitions, api, retry_sleeps, caplog):
     import logging
 
-    # alembic/env.py (fileConfig) desactiva los loggers existentes al migrar la BD de tests en
-    # migrated_db; se reactiva solo el de este servicio para poder leer sus mensajes
-    monkeypatch.setattr(logging.getLogger(fixture_sync_service.__name__), "disabled", False)
     api.on("/fixtures", 265, ProviderResponseError(P, "Respuesta HTTP 503", 503), EMPTY)  # 1 reintento
     with caplog.at_level(logging.INFO, logger=fixture_sync_service.__name__):
         _sync_fixtures(db_session)

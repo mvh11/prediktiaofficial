@@ -10,7 +10,9 @@ from app.models import Base  # importa todos los modelos registrados
 
 config = context.config
 
-if config.config_file_name is not None:
+# El CLI configura el logging desde alembic.ini. Quien ejecuta Alembic dentro de su propio proceso
+# (los tests) pone configure_logger=False: fileConfig desactivaría los loggers ya creados de app.*
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
