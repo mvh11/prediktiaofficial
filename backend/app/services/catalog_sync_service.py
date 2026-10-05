@@ -10,12 +10,13 @@ import time
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.integrations.exceptions import ProviderAuthError, ProviderError, ProviderRateLimitError
+from app.integrations.exceptions import ProviderError
 from app.integrations.football.base import FootballDataProvider
 from app.integrations.request_stats import describe, stats_of
 from app.repositories import catalog_repository as repo
 from app.schemas.catalog import CatalogSyncResult, CompetitionSyncResult
 from app.services.provider_service import get_football_provider
+from app.services.sync_failures import SyncAction, provider_abort_reason, provider_failure_action
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,8 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
     Excepción: si el proveedor sigue limitando las peticiones tras los reintentos o la cuota
     diaria está agotada (ProviderRateLimitError), o si rechaza las credenciales
     (ProviderAuthError: HTTP 401/403 o errors.token), ya no se piden los equipos de las
-    competiciones restantes (sus datos de /leagues sí se guardan) y quedan con el motivo.
+    competiciones restantes (sus datos de /leagues sí se guardan) y quedan con el motivo
+    (ver sync_failures).
     Los errores de la llamada inicial a /leagues sí se propagan (sin ella no hay nada que hacer).
     Registra en el log la duración y las peticiones (con reintentos) de cada competición y del total.
     Todas las peticiones de la sync comparten un cliente HTTP, que se cierra al terminar.
@@ -78,15 +80,9 @@ async def _sync_catalog(db: Session, provider: FootballDataProvider) -> CatalogS
             except ProviderError as exc:
                 logger.warning("No se pudieron obtener los equipos de %s: %s", comp.name, exc)
                 result.error = exc.message
-                if isinstance(exc, ProviderRateLimitError):
-                    stopped = f"Equipos no sincronizados: se detuvo la sync por el límite del proveedor ({exc.message})"
-                    logger.warning("Límite del proveedor: no se piden los equipos de las competiciones restantes")
-                elif isinstance(exc, ProviderAuthError):
-                    stopped = (
-                        "Equipos no sincronizados: se detuvo la sync porque el proveedor rechazó las credenciales "
-                        f"({exc.message})"
-                    )
-                    logger.warning("Credenciales rechazadas: no se piden los equipos de las competiciones restantes")
+                if provider_failure_action(exc) is SyncAction.ABORT_PROVIDER_RUN:
+                    stopped = f"Equipos no sincronizados: {provider_abort_reason(exc)}"
+                    logger.warning("%s: no se piden los equipos de las competiciones restantes", exc.__class__.__name__)
                 continue
 
             team_ids = repo.upsert_teams(db, teams, provider.name)

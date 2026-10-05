@@ -7,24 +7,39 @@ Coste en peticiones: 1 llamada a /fixtures por competición (26 con la lista por
 import logging
 import time
 from datetime import date
+from typing import NamedTuple
 
 from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.integrations.exceptions import ProviderAuthError, ProviderError, ProviderRateLimitError
+from app.integrations.exceptions import ProviderError
 from app.integrations.football.base import FootballDataProvider
 from app.integrations.request_stats import describe, stats_of
 from app.repositories import catalog_repository, fixture_repository
 from app.schemas.fixture import CompetitionFixtureSyncResult, FixtureSyncResult
 from app.services.provider_service import get_football_provider
+from app.services.sync_failures import (
+    SyncAction,
+    classify_db_error,
+    db_failure_action,
+    provider_abort_reason,
+    provider_failure_action,
+)
 
 logger = logging.getLogger(__name__)
 
-# Errores de BD que afectan a los datos o a la conexión de UNA competición: se deshace esa
-# competición y se sigue con las demás. Los errores de programación (SQL mal construido,
-# esquema desalineado...) no se capturan: fallarían igual en todas y deben verse.
+# Errores de BD al guardar UNA competición: se deshace esa competición y se decide con
+# classify_db_error (conexión perdida corta el run; el resto, como una consulta cancelada, solo
+# falla esa competición). Los errores de programación (SQL mal construido, esquema
+# desalineado...) no se capturan: fallarían igual en todas y deben verse.
 _ISOLATED_DB_ERRORS = (IntegrityError, DataError, OperationalError)
+
+
+class _CompetitionRef(NamedTuple):
+    id: int
+    external_id: int
+    name: str
 
 
 async def sync_fixtures(
@@ -40,9 +55,10 @@ async def sync_fixtures(
     Si falla una competición (proveedor o BD) se anota el error en su resultado y se sigue
     con las demás; un error de BD deshace solo los cambios de esa competición.
     Excepción: si el proveedor sigue limitando las peticiones tras los reintentos o la cuota
-    diaria está agotada (ProviderRateLimitError), o si rechaza las credenciales
-    (ProviderAuthError: HTTP 401/403 o errors.token), las competiciones restantes no se piden
-    y quedan con el motivo en su error.
+    diaria está agotada (ProviderRateLimitError), si rechaza las credenciales
+    (ProviderAuthError: HTTP 401/403 o errors.token), si no está configurado o si se pierde la
+    conexión con la BD al guardar, las competiciones restantes no se piden y quedan con el
+    motivo en su error (ver sync_failures).
     Solo se sincronizan las competiciones de TRACKED_LEAGUE_IDS (IDs de API-Football).
     Registra en el log la duración y las peticiones (con reintentos) de cada competición y del total.
     Todas las peticiones de la sync comparten un cliente HTTP, que se cierra al terminar.
@@ -62,9 +78,13 @@ async def _sync_fixtures(
     stats = stats_of(provider)
     stats_at_start = stats.snapshot() if stats else None
     tracked = set(get_settings().tracked_league_ids)
-    competitions = catalog_repository.list_competitions(db)
-    if competition_id is not None:
-        competitions = [c for c in competitions if c.id == competition_id]
+    # Valores planos, no objetos ORM: el rollback de una competición fallida expira los objetos
+    # de la sesión y releerlos necesitaría la BD, que puede ser justo lo que se ha perdido
+    competitions = [
+        _CompetitionRef(c.id, c.external_id, c.name)
+        for c in catalog_repository.list_competitions(db)
+        if competition_id is None or c.id == competition_id
+    ]
 
     results: list[CompetitionFixtureSyncResult] = []
     stopped: str | None = None  # motivo por el que ya no se llama al proveedor
@@ -95,14 +115,9 @@ async def _sync_fixtures(
             except ProviderError as exc:
                 logger.warning("No se pudieron obtener los partidos de %s: %s", comp.name, exc)
                 result.error = exc.message
-                if isinstance(exc, ProviderRateLimitError):
-                    stopped = f"No sincronizada: se detuvo la sync por el límite del proveedor ({exc.message})"
-                    logger.warning("Límite del proveedor: no se piden las competiciones restantes")
-                elif isinstance(exc, ProviderAuthError):
-                    stopped = (
-                        f"No sincronizada: se detuvo la sync porque el proveedor rechazó las credenciales ({exc.message})"
-                    )
-                    logger.warning("Credenciales rechazadas: no se piden las competiciones restantes")
+                if provider_failure_action(exc) is SyncAction.ABORT_PROVIDER_RUN:
+                    stopped = f"No sincronizada: {provider_abort_reason(exc)}"
+                    logger.warning("%s: no se piden las competiciones restantes", exc.__class__.__name__)
                 continue
 
             try:
@@ -113,8 +128,12 @@ async def _sync_fixtures(
                 db.commit()
             except _ISOLATED_DB_ERRORS as exc:
                 db.rollback()
-                logger.exception("Error de BD guardando los partidos de %s: se deshacen sus cambios", result.name)
-                result.error = f"Error de BD al guardar los partidos ({exc.__class__.__name__}); cambios deshechos"
+                kind = classify_db_error(exc)
+                logger.exception("Error de BD (%s) guardando los partidos de %s: se deshacen sus cambios", kind, result.name)
+                result.error = f"Error de BD al guardar los partidos ({exc.__class__.__name__}: {kind}); cambios deshechos"
+                if db_failure_action(kind) is SyncAction.ABORT_PROVIDER_RUN:
+                    stopped = "No sincronizada: se detuvo la sync porque se perdió la conexión con la BD"
+                    logger.warning("Conexión con la BD perdida: no se piden las competiciones restantes")
                 continue
             result.fixtures = saved
         except BaseException:

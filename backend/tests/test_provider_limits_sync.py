@@ -7,17 +7,21 @@ se prueba la cadena completa: reintentos en ApiFootballProvider._get() y corte e
 import asyncio
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import ProgrammingError
 
 from app.integrations.exceptions import (
     ProviderAuthError,
+    ProviderConnectionError,
     ProviderRateLimitError,
     ProviderResponseError,
     ProviderTimeoutError,
 )
 from app.integrations.football import api_football
 from app.integrations.football.api_football import ApiFootballProvider
+from app.db.database import engine
 from app.models import Competition, Fixture
+from app.repositories import fixture_repository
 from app.services import catalog_sync_service, fixture_sync_service
 from tests.conftest import load_json, make_competition
 
@@ -70,6 +74,7 @@ PERSISTENT_LIMITS = {
 TRANSIENT_FAILURES = {
     "timeout": lambda: ProviderTimeoutError(P, "Timeout tras 1s"),
     "503": lambda: ProviderResponseError(P, "Respuesta HTTP 503", 503),
+    "connection": lambda: ProviderConnectionError(P, "Error de conexión: ConnectError"),
 }
 # Lo que get_json lanzaría con 401/403 y lo que la API devuelve con HTTP 200 y errors.token
 AUTH_FAILURES = {
@@ -360,3 +365,87 @@ def test_fixtures_sync_run_reuses_one_http_client_and_closes_it(db_session, thre
     second_run = api.clients[len(first_run):]
     assert len(second_run) == 3 and all(c is second_run[0] for c in second_run)
     assert second_run[0] is not first_run[0] and second_run[0].is_closed
+
+
+# --- Aislamiento de fallos (sync_failures): qué corta el run y qué solo falla una competición ---
+
+
+def test_fixtures_failure_recovered_by_retry_does_not_stop_the_run(db_session, three_competitions, api, retry_sleeps):
+    api.on("/fixtures", 265, ProviderConnectionError(P, "Error de conexión: ConnectError"), EMPTY)
+    result, _ = _sync_fixtures(db_session)
+
+    assert api.calls_to("/fixtures", 265) == 2 and retry_sleeps == [1.0]
+    assert api.calls_to("/fixtures", 39) == api.calls_to("/fixtures", 140) == 1
+    assert all(r.error is None for r in result.competitions)
+
+
+def test_fixtures_provider_not_configured_stops_remaining(db_session, three_competitions, api, monkeypatch):
+    provider = ApiFootballProvider(api_key="", base_url="https://example.invalid", timeout=1)
+    monkeypatch.setattr(fixture_sync_service, "get_football_provider", lambda: provider)
+    _, by_id = _sync_fixtures(db_session)
+
+    assert api.calls == [] and provider.request_stats.attempts == 0
+    assert "Falta API_FOOTBALL_KEY" in by_id[three_competitions[265]].error
+    for league in (39, 140):  # antes: cada competición repetía el mismo error; ahora se corta el run
+        assert "se detuvo la sync porque el proveedor no está configurado" in by_id[three_competitions[league]].error
+
+
+def _sabotage_first_save(monkeypatch, sabotage) -> None:
+    """La primera llamada a upsert_fixtures ejecuta `sabotage(db)` antes de guardar (error real de PostgreSQL)."""
+    original = fixture_repository.upsert_fixtures
+    pending = [True]
+
+    def upsert_fixtures(db, *args, **kwargs):
+        if pending:
+            pending.clear()
+            sabotage(db)
+        return original(db, *args, **kwargs)
+
+    monkeypatch.setattr(fixture_repository, "upsert_fixtures", upsert_fixtures)
+
+
+def _terminate_own_connection(db) -> None:
+    pid = db.execute(text("SELECT pg_backend_pid()")).scalar_one()
+    with engine.connect() as killer:
+        killer.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": pid})
+    db.execute(text("SELECT 1"))  # OperationalError con la conexión invalidada (57P01)
+
+
+def test_fixtures_db_connection_lost_stops_remaining(db_session, three_competitions, api, retry_sleeps, monkeypatch):
+    db_session.commit()  # el catálogo ya existe: el rollback de la competición fallida no lo deshace
+    _sabotage_first_save(monkeypatch, _terminate_own_connection)
+    result, by_id = _sync_fixtures(db_session)
+
+    assert "conexión perdida" in by_id[three_competitions[265]].error
+    # lo que se pidiera al proveedor no se podría guardar: no se piden las demás
+    assert api.calls_to("/fixtures", 39) == api.calls_to("/fixtures", 140) == 0
+    for league in (39, 140):
+        assert by_id[three_competitions[league]].error == (
+            "No sincronizada: se detuvo la sync porque se perdió la conexión con la BD"
+        )
+    assert result.fixtures_synced == 0
+    assert api.clients[0].is_closed  # DI-A4A: el cliente del run se cierra igual
+
+
+def test_fixtures_statement_timeout_fails_only_that_competition(db_session, three_competitions, api, retry_sleeps, monkeypatch):
+    db_session.commit()  # el catálogo ya existe: el rollback de la competición fallida no lo deshace
+    def slow_query(db):
+        db.execute(text("SET LOCAL statement_timeout = 50"))
+        db.execute(text("SELECT pg_sleep(2)"))  # QueryCanceled (57014)
+
+    _sabotage_first_save(monkeypatch, slow_query)
+    _, by_id = _sync_fixtures(db_session)
+
+    error = by_id[three_competitions[265]].error
+    assert "consulta cancelada (SQLSTATE 57014)" in error and "conexión" not in error and "proveedor" not in error
+    assert api.calls_to("/fixtures", 39) == api.calls_to("/fixtures", 140) == 1  # el run sigue
+    assert by_id[three_competitions[39]].error is None and by_id[three_competitions[140]].error is None
+
+
+def test_fixtures_programming_error_propagates(db_session, three_competitions, api, retry_sleeps, monkeypatch):
+    db_session.commit()  # el catálogo ya existe: el rollback de la competición fallida no lo deshace
+    _sabotage_first_save(monkeypatch, lambda db: db.execute(text("SELEC 1")))
+    with pytest.raises(ProgrammingError):
+        _sync_fixtures(db_session)
+    assert api.calls_to("/fixtures", 39) == api.calls_to("/fixtures", 140) == 0
+    assert api.clients[0].is_closed
