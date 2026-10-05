@@ -18,7 +18,8 @@ de abrir la BD o llamar al proveedor. El destino se muestra siempre saneado (sin
 en 'running' de ese par (si es más antiguo que --stale-after-minutes) y NO lanza ningún backfill.
 
 Códigos de salida: 0 completed/dry_run_completed/recuperado · 1 blocked o recuperación
-rechazada/sin run · 2 failed o error de uso.
+rechazada/sin run (rechazo por regla, sin escrituras) · 2 failed, error de uso, otro run en curso
+del par o cualquier excepción inesperada (nunca se muestra la URL de la BD).
 """
 
 import argparse
@@ -165,11 +166,23 @@ def _recover(args: argparse.Namespace) -> StaleRunRecovery:
         return fail_stale_run(db, args.competition_id, args.season, args.stale_after_minutes)
 
 
+def _unexpected(exc: Exception) -> int:
+    # Solo el tipo: el mensaje de un error de BD puede incluir el destino de la conexión
+    print(f"Error inesperado ({exc.__class__.__name__}); revisa el run en season_backfill_runs", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     setup_logging("WARNING")
     if args.fail_stale_run:
-        recovery = _recover(args)
+        try:
+            recovery = _recover(args)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        except Exception as exc:
+            return _unexpected(exc)
         print(format_recovery(recovery))
         return RECOVERY_EXIT_CODES[recovery.outcome]
     try:
@@ -186,6 +199,8 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
+    except Exception as exc:
+        return _unexpected(exc)
     print(format_result(result))
     return EXIT_CODES.get(result.status, 2)
 

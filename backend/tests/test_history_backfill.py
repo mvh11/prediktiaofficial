@@ -253,8 +253,10 @@ def test_real_run_imports_pair_with_teams_season_teams_and_mappings(db_session, 
     assert count(db_session, TeamProviderMapping, TeamProviderMapping.external_id.in_(["1", "2", "3", "4"])) == 4
     run = run_row(db_session, result.run_id)
     assert run.status == "completed" and not run.is_dry_run
-    assert {c["id"] for c in run.checks} >= {f"Q{i}" for i in range(1, 16)}  # resumen estructurado persistido
-    assert not any(c["id"] == "PARITY" for c in run.checks)
+    assert {c["id"] for c in run.checks} >= {f"Q{i}" for i in range(1, 17)} | {"PARITY"}  # resumen persistido
+    parity = next(c for c in run.checks if c["id"] == "PARITY")
+    assert parity["passed"] and "2 comparados (nuevos 2, existentes 0)" in parity["detail"]
+    assert [c["id"] for c in run.checks].count("Q3") == 1 and [c["id"] for c in run.checks].count("Q4") == 1
 
 
 def test_completed_pair_is_not_repeated_without_refresh(db_session, setup):
@@ -281,7 +283,8 @@ def test_refresh_reevaluates_with_real_counters(db_session, setup):
     real = backfill(db_session, setup, FakeHistoryProvider(refreshed), refresh=True)
     assert real.status == "completed"
     assert (real.new, real.changed, real.unchanged) == (1, 1, 1)
-    assert not any(c.id == "PARITY" for c in real.checks)  # la predicción coincide con la BD
+    parity = next(c for c in real.checks if c.id == "PARITY")  # la predicción coincide con la BD
+    assert parity.passed and "3 comparados (nuevos 1, existentes 2)" in parity.detail
     db_session.expire_all()
     assert db_session.scalars(select(Fixture.home_goals).where(Fixture.external_id == 2)).one() == 2
 

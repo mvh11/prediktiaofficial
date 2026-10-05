@@ -24,14 +24,15 @@ def _ids(check: CheckResult) -> list[int]:
 # --- Severidades -----------------------------------------------------------------------------
 
 
-def test_all_sixteen_checks_have_explicit_severity():
-    assert set(qc.SEVERITY) == {f"Q{i}" for i in range(1, 17)}
+def test_all_checks_have_explicit_severity():
+    assert set(qc.SEVERITY) == {f"Q{i}" for i in range(1, 17)} | {"PARITY"}
     blocking = {k for k, v in qc.SEVERITY.items() if v == "blocking"}
     warning = {k for k, v in qc.SEVERITY.items() if v == "warning"}
     assert {"Q3", "Q4", "Q5", "Q8", "Q12", "Q13", "Q15"} <= blocking
     assert {"Q7", "Q9", "Q10", "Q11", "Q14"} <= warning
     assert qc.SEVERITY["Q1"] == "blocking" and qc.SEVERITY["Q6"] == "warning"
     assert qc.SEVERITY["Q16"] == "warning"  # su salvaguarda blocking va en el propio CheckResult
+    assert qc.SEVERITY["PARITY"] == "blocking"
 
 
 # --- Q1 ---------------------------------------------------------------------------------------
@@ -128,10 +129,25 @@ def test_q14_unfinished_past_fixture_in_closed_season():
 
 
 def test_q2_and_q13_semantics():
-    assert qc.q2_fixture_count(100, None).passed  # dry-run: sin deletes
-    assert qc.q2_fixture_count(100, 99).is_blocking_failure
+    assert qc.q2_season_fixtures_kept({1, 2}, None).passed  # dry-run: no aplica
+    assert qc.q2_season_fixtures_kept({1, 2}, {1, 2, 3}).passed  # solo se añaden
+    missing = qc.q2_season_fixtures_kept({1, 2, 3}, {1, 3, 4})
+    assert missing.is_blocking_failure and missing.samples == [2]
     assert qc.q13_mappings([], True, would_create=7).passed
     assert qc.q13_mappings([5], False).is_blocking_failure
+
+
+def test_parity_semantics():
+    assert qc.parity_not_applicable().passed and "no aplica" in qc.parity_not_applicable().detail
+    ok = qc.parity([], 380, 380, 0)
+    assert ok.passed and ok.count == 0 and "380 comparados (nuevos 380, existentes 0)" in ok.detail
+    bad = qc.parity([7, 8], 10, 5, 5)
+    assert bad.is_blocking_failure and bad.count == 2 and bad.samples == [7, 8]
+
+
+def test_q3_q4_are_documented_as_pre_write_global():
+    assert "Pre-write, global" in qc.q3_duplicate_mappings(0).detail
+    assert "Pre-write, global" in qc.q4_orphan_mappings(0).detail
 
 
 def test_samples_are_limited():
@@ -478,3 +494,48 @@ def test_service_rejects_invalid_range_before_db_or_provider(dry_run, expected_r
         # db=None: si el servicio llegara a tocar la BD fallaría con AttributeError, no ValueError
         asyncio.run(run_backfill(None, 5, 2025, dry_run=dry_run, expected_range=expected_range, provider=provider))
     assert provider.calls == []
+
+
+# --- Códigos de salida ante errores inesperados ------------------------------------------------
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("bug"), KeyError("x")])
+def test_cli_unexpected_exception_exits_2_without_traceback(monkeypatch, capsys, exc):
+    async def broken(_args):
+        raise exc
+
+    monkeypatch.setattr(cli, "_configured_target", lambda: cli.database_target(SECRET_URL))
+    monkeypatch.setattr(cli, "_run", broken)
+    assert cli.main(BASE + ["--dry-run"]) == 2
+    err = capsys.readouterr().err
+    assert f"Error inesperado ({exc.__class__.__name__})" in err
+    assert "Traceback" not in err and "s3cr3t" not in err and "prediktia_user" not in err
+
+
+def test_cli_run_already_in_progress_exits_2(monkeypatch, capsys):
+    async def busy(_args):
+        raise ValueError("Ya hay un run en curso ('running') de este par")
+
+    monkeypatch.setattr(cli, "_configured_target", lambda: cli.database_target(SECRET_URL))
+    monkeypatch.setattr(cli, "_run", busy)
+    assert cli.main(BASE + ["--dry-run"]) == 2
+    assert "en curso" in capsys.readouterr().err
+
+
+def test_cli_stale_recovery_unexpected_exception_exits_2(monkeypatch, capsys):
+    def broken(_args):
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(cli, "_recover", broken)
+    assert cli.main(BASE + ["--fail-stale-run"]) == 2
+    assert "Error inesperado (RuntimeError)" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("status", "code"), [("completed", 0), ("dry_run_completed", 0), ("blocked", 1), ("failed", 2)])
+def test_cli_status_exit_codes(monkeypatch, status, code):
+    async def run(_args):
+        return _completed(status)
+
+    monkeypatch.setattr(cli, "_configured_target", lambda: cli.database_target(SECRET_URL))
+    monkeypatch.setattr(cli, "_run", run)
+    assert cli.main(BASE + ["--dry-run"]) == code
