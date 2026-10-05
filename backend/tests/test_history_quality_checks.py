@@ -24,13 +24,14 @@ def _ids(check: CheckResult) -> list[int]:
 # --- Severidades -----------------------------------------------------------------------------
 
 
-def test_all_fifteen_checks_have_explicit_severity():
-    assert set(qc.SEVERITY) == {f"Q{i}" for i in range(1, 16)}
+def test_all_sixteen_checks_have_explicit_severity():
+    assert set(qc.SEVERITY) == {f"Q{i}" for i in range(1, 17)}
     blocking = {k for k, v in qc.SEVERITY.items() if v == "blocking"}
     warning = {k for k, v in qc.SEVERITY.items() if v == "warning"}
     assert {"Q3", "Q4", "Q5", "Q8", "Q12", "Q13", "Q15"} <= blocking
     assert {"Q7", "Q9", "Q10", "Q11", "Q14"} <= warning
     assert qc.SEVERITY["Q1"] == "blocking" and qc.SEVERITY["Q6"] == "warning"
+    assert qc.SEVERITY["Q16"] == "warning"  # su salvaguarda blocking va en el propio CheckResult
 
 
 # --- Q1 ---------------------------------------------------------------------------------------

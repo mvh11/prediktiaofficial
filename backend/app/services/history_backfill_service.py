@@ -11,13 +11,14 @@ Flujo de run_backfill:
    anterior a hoy) y no tiene ya un backfill `completed` salvo que se pida --refresh.
 3. Descarga de la temporada del proveedor (el adapter normaliza los marcadores).
 4. Análisis contra el estado previo de la BD, solo con lecturas: contadores nuevo/existente/
-   cambiaría/sin cambios, equipos y season_teams que faltarían, protección cross-season y
-   checks Q1, Q3–Q12, Q14, Q15.
+   cambiaría/sin cambios, equipos y season_teams que faltarían, protección cross-season,
+   membresía de la temporada (season_membership) y checks Q1, Q3–Q12, Q14, Q15, Q16.
 5. Si hay algún check bloqueante: rollback y status=blocked (cero escrituras de dominio).
 6. Dry-run: rollback y status=dry_run_completed. No se escribe en fixtures, teams, season_teams
    ni mappings; el run sí queda registrado para auditar lo evaluado.
 7. Ejecución real, en una sola transacción: equipos (ensure_teams), fixtures (upsert no
-   destructivo), mapeos (escritura doble del repositorio) y season_teams. Después Q2, Q3, Q4 y
+   destructivo), mapeos (escritura doble del repositorio) y season_teams. Teams, mapeos y
+   fixtures reciben a TODOS los participantes; season_teams solo a los miembros. Después Q2, Q3, Q4 y
    Q13 sobre el estado resultante. Si alguno bloquea: rollback y status=blocked. Si todo pasa:
    commit y status=completed. Un error de BD: rollback y status=failed.
 8. Cierre del run (contadores, checks y mensaje) en otra transacción.
@@ -43,6 +44,7 @@ from app.repositories.fixture_repository import _FIXTURE_COLUMNS, predict_score_
 from app.schemas.backfill import BackfillResult, CheckResult, StaleRunRecovery
 from app.schemas.fixture import FixtureData
 from app.services import history_quality_checks as qc
+from app.services.season_membership import season_members
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +134,7 @@ async def run_backfill(
     competition = db.get(Competition, competition_id)
     if competition is None:
         raise ValueError(f"No existe la competición con id interno {competition_id}")
-    competition_name, league_external_id = competition.name, competition.external_id
+    competition_name, league_external_id, competition_type = competition.name, competition.external_id, competition.type
     season = db.scalars(select(Season).where(Season.competition_id == competition_id, Season.year == year)).first()
     season_id = season.id if season else None
     season_is_current = bool(season and season.is_current)
@@ -163,7 +165,16 @@ async def run_backfill(
 
     try:
         await _execute(
-            db, result, provider, league_external_id, season_is_current, season_end_date, refresh, expected_range, now
+            db,
+            result,
+            provider,
+            league_external_id,
+            season_is_current,
+            season_end_date,
+            refresh,
+            expected_range,
+            now,
+            competition_type=competition_type,
         )
     except Exception as exc:  # cualquier fallo no previsto: el run no puede quedarse en 'running'
         db.rollback()
@@ -185,6 +196,8 @@ async def _execute(
     refresh: bool,
     expected_range: tuple[int, int] | None,
     now: datetime,
+    *,
+    competition_type: str | None,
 ) -> None:
     # 2. Precondiciones
     blocked_reason = None
@@ -217,6 +230,8 @@ async def _execute(
     team_external_ids = sorted({f.home_team.external_id for f in fixtures} | {f.away_team.external_id for f in fixtures})
     known_teams = runs.known_teams(db, team_external_ids)
     in_season = runs.season_team_ids(db, result.season_id)
+    # Todos los participantes se guardan (teams, mapeos, fixtures); solo los miembros van a season_teams
+    membership = season_members(fixtures, competition_type)
     changed = sum(
         1
         for f in fixtures
@@ -229,7 +244,7 @@ async def _execute(
     result.changed = changed
     result.unchanged = result.existing - changed
     result.new_teams = len(set(team_external_ids) - set(known_teams))
-    result.new_season_teams = sum(1 for e in team_external_ids if known_teams.get(e) not in in_season)
+    result.new_season_teams = sum(1 for e in membership.members if known_teams.get(e) not in in_season)
 
     before = runs.count_fixtures(db)
     checks = qc.evaluate_incoming(
@@ -243,7 +258,11 @@ async def _execute(
         now=now,
         expected_range=expected_range,
     )
-    checks += [qc.q3_duplicate_mappings(runs.duplicate_mapping_count(db)), qc.q4_orphan_mappings(runs.orphan_mapping_count(db))]
+    checks += [
+        qc.q3_duplicate_mappings(runs.duplicate_mapping_count(db)),
+        qc.q4_orphan_mappings(runs.orphan_mapping_count(db)),
+        qc.q16_season_membership(membership),
+    ]
 
     if any(c.is_blocking_failure for c in checks):  # 5. Bloqueo antes de escribir
         db.rollback()
@@ -265,7 +284,8 @@ async def _execute(
         teams = [f.home_team for f in fixtures] + [f.away_team for f in fixtures]
         team_ids = fixture_repository.ensure_teams(db, teams, provider.name)
         fixture_repository.upsert_fixtures(db, result.season_id, fixtures, team_ids, provider.name)
-        catalog_repository.link_teams_to_season(db, result.season_id, sorted(set(team_ids.values())))
+        member_ids = {team_ids[e] for e in membership.members}
+        catalog_repository.link_teams_to_season(db, result.season_id, sorted(member_ids))
 
         # Paridad: el estado real tras el upsert debe ser exactamente el que predijo el análisis
         after_state = runs.existing_fixtures(db, list(existing))
