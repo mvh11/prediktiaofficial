@@ -72,6 +72,7 @@ class CompetitionSyncResult(BaseModel):
     external_id: int
     name: str | None = None
     season: int | None = None
+    previous_season: int | None = None  # temporada actual en la BD antes de esta sync
     teams: int = 0
     error: str | None = None
 
