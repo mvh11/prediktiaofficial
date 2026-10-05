@@ -546,3 +546,50 @@ def test_engine_on_other_port_blocked_before_destructive_operation(monkeypatch, 
     with pytest.raises(RuntimeError, match="no apunta a la BD de pruebas autorizada"):
         conftest.alembic_run("downgrade", "base")
     assert alembic_calls == []
+
+
+# --- Payload estructuralmente inválido ------------------------------------------------------------
+
+
+def _mixed_payload_with(fixture_index: int, **changes) -> dict:
+    payload = load_json("api_football/fixtures_mixed.json")
+    fixture = payload["response"][fixture_index]["fixture"]
+    for key, value in changes.items():
+        if value is _REMOVE:
+            fixture.pop(key, None)
+        else:
+            fixture[key] = value
+    return payload
+
+
+_REMOVE = object()
+
+
+@pytest.mark.parametrize("date_value", [_REMOVE, None, ""], ids=["sin-clave", "null", "vacia"])
+def test_fixture_without_date_is_typed_provider_error(provider, respond_with, retry_sleeps, date_value):
+    payload = _mixed_payload_with(2, date=date_value)
+    respond_with(payload)
+    bad_id = payload["response"][2]["fixture"]["id"]
+    with pytest.raises(ProviderResponseError, match=f"partido {bad_id} sin fixture.date") as exc:
+        asyncio.run(provider.get_fixtures(265, 2026))
+    assert exc.value.status_code is None
+    assert retry_sleeps == []  # un payload inválido no se reintenta
+
+
+def test_fixture_with_unparseable_date_is_typed_provider_error(provider, respond_with):
+    payload = _mixed_payload_with(0, date="no es una fecha")
+    respond_with(payload)
+    with pytest.raises(ProviderResponseError, match="campos no válidos: kickoff_at"):
+        asyncio.run(provider.get_fixtures(265, 2026))
+
+
+def test_programming_error_while_parsing_still_propagates(provider, respond_with, monkeypatch):
+    # Un fallo de código (no del payload) no se disfraza de error del proveedor
+    respond_with(load_json("api_football/fixtures_mixed.json"))
+
+    def broken(*_args, **_kwargs):
+        raise TypeError("bug simulado")
+
+    monkeypatch.setattr(api_football, "_fulltime_pair", broken)
+    with pytest.raises(TypeError, match="bug simulado"):
+        asyncio.run(provider.get_fixtures(265, 2026))

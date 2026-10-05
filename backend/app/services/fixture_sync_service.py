@@ -5,6 +5,7 @@ Coste en peticiones: 1 llamada a /fixtures por competición (26 con la lista por
 """
 
 import logging
+import time
 from datetime import date
 
 from sqlalchemy.exc import DataError, IntegrityError, OperationalError
@@ -12,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.integrations.exceptions import ProviderAuthError, ProviderError, ProviderRateLimitError
+from app.integrations.request_stats import describe, stats_of
 from app.repositories import catalog_repository, fixture_repository
 from app.schemas.fixture import CompetitionFixtureSyncResult, FixtureSyncResult
 from app.services.provider_service import get_football_provider
@@ -41,8 +43,12 @@ async def sync_fixtures(
     (ProviderAuthError: HTTP 401/403 o errors.token), las competiciones restantes no se piden
     y quedan con el motivo en su error.
     Solo se sincronizan las competiciones de TRACKED_LEAGUE_IDS (IDs de API-Football).
+    Registra en el log la duración y las peticiones (con reintentos) de cada competición y del total.
     """
+    sync_started = time.perf_counter()
     provider = get_football_provider()
+    stats = stats_of(provider)
+    stats_at_start = stats.snapshot() if stats else None
     tracked = set(get_settings().tracked_league_ids)
     competitions = catalog_repository.list_competitions(db)
     if competition_id is not None:
@@ -62,41 +68,65 @@ async def sync_fixtures(
             result.error = stopped
             continue
 
-        season = catalog_repository.get_season(db, comp.id, None)
-        if season is None:
-            result.error = "Sin temporada actual (ejecuta antes POST /sync/catalog)"
-            continue
-        result.season = season.year
-
+        competition_started = time.perf_counter()
+        stats_before = stats.snapshot() if stats else None
+        crashed = False
         try:
-            fixtures = await provider.get_fixtures(comp.external_id, season.year, date_from, date_to)
-        except ProviderError as exc:
-            logger.warning("No se pudieron obtener los partidos de %s: %s", comp.name, exc)
-            result.error = exc.message
-            if isinstance(exc, ProviderRateLimitError):
-                stopped = f"No sincronizada: se detuvo la sync por el límite del proveedor ({exc.message})"
-                logger.warning("Límite del proveedor: no se piden las competiciones restantes")
-            elif isinstance(exc, ProviderAuthError):
-                stopped = (
-                    f"No sincronizada: se detuvo la sync porque el proveedor rechazó las credenciales ({exc.message})"
+            season = catalog_repository.get_season(db, comp.id, None)
+            if season is None:
+                result.error = "Sin temporada actual (ejecuta antes POST /sync/catalog)"
+                continue
+            result.season = season.year
+
+            try:
+                fixtures = await provider.get_fixtures(comp.external_id, season.year, date_from, date_to)
+            except ProviderError as exc:
+                logger.warning("No se pudieron obtener los partidos de %s: %s", comp.name, exc)
+                result.error = exc.message
+                if isinstance(exc, ProviderRateLimitError):
+                    stopped = f"No sincronizada: se detuvo la sync por el límite del proveedor ({exc.message})"
+                    logger.warning("Límite del proveedor: no se piden las competiciones restantes")
+                elif isinstance(exc, ProviderAuthError):
+                    stopped = (
+                        f"No sincronizada: se detuvo la sync porque el proveedor rechazó las credenciales ({exc.message})"
+                    )
+                    logger.warning("Credenciales rechazadas: no se piden las competiciones restantes")
+                continue
+
+            try:
+                team_ids = fixture_repository.ensure_teams(
+                    db, [f.home_team for f in fixtures] + [f.away_team for f in fixtures], provider.name
                 )
-                logger.warning("Credenciales rechazadas: no se piden las competiciones restantes")
-            continue
-
-        try:
-            team_ids = fixture_repository.ensure_teams(
-                db, [f.home_team for f in fixtures] + [f.away_team for f in fixtures], provider.name
+                saved = fixture_repository.upsert_fixtures(db, season.id, fixtures, team_ids, provider.name)
+                db.commit()
+            except _ISOLATED_DB_ERRORS as exc:
+                db.rollback()
+                logger.exception("Error de BD guardando los partidos de %s: se deshacen sus cambios", result.name)
+                result.error = f"Error de BD al guardar los partidos ({exc.__class__.__name__}); cambios deshechos"
+                continue
+            result.fixtures = saved
+        except BaseException:
+            crashed = True  # error no previsto: se propaga, pero el log no debe decir "ok"
+            raise
+        finally:
+            logger.info(
+                "Sync fixtures · %s: %s · %d partidos · %.0f ms · %s",
+                comp.name,
+                "excepción no controlada" if crashed else ("ok" if result.error is None else f"error ({result.error})"),
+                result.fixtures,
+                (time.perf_counter() - competition_started) * 1000,
+                describe(stats.since(stats_before) if stats else None),
             )
-            saved = fixture_repository.upsert_fixtures(db, season.id, fixtures, team_ids, provider.name)
-            db.commit()
-        except _ISOLATED_DB_ERRORS as exc:
-            db.rollback()
-            logger.exception("Error de BD guardando los partidos de %s: se deshacen sus cambios", result.name)
-            result.error = f"Error de BD al guardar los partidos ({exc.__class__.__name__}); cambios deshechos"
-            continue
-        result.fixtures = saved
-        logger.info("%s %s: %d partidos", comp.name, season.year, result.fixtures)
 
+    failed = sum(1 for r in results if r.error is not None)
+    logger.info(
+        "Sync fixtures · total: %d competiciones (%d con error) · %d partidos · %.0f ms · %s",
+        len(results),
+        failed,
+        sum(r.fixtures for r in results),
+        (time.perf_counter() - sync_started) * 1000,
+        describe(stats.since(stats_at_start) if stats else None),
+    )
     return FixtureSyncResult(
         fixtures_synced=sum(r.fixtures for r in results),
         competitions=results,

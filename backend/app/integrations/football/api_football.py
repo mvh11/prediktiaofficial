@@ -10,8 +10,11 @@ Documentación oficial: https://www.api-football.com/documentation-v3
 
 import asyncio
 import logging
+import time
 from datetime import date
 from typing import Any
+
+from pydantic import ValidationError
 
 from app.integrations.exceptions import (
     ProviderAuthError,
@@ -25,6 +28,7 @@ from app.integrations.exceptions import (
 )
 from app.integrations.football.base import FootballDataProvider
 from app.integrations.http import get_json
+from app.integrations.request_stats import RequestStats
 from app.schemas.catalog import CompetitionData, SeasonData, TeamData
 from app.schemas.fixture import FINISHED_STATUSES, FixtureData
 from app.schemas.provider import ProviderStatus
@@ -126,6 +130,9 @@ class ApiFootballProvider(FootballDataProvider):
         self._api_key = api_key
         self._base_url = base_url
         self._timeout = timeout
+        # Intentos HTTP iniciados por esta instancia (cada reintento cuenta como un intento más;
+        # no es el consumo de cuota confirmado por el proveedor)
+        self.request_stats = RequestStats()
 
     async def _get(
         self, path: str, params: dict[str, Any] | None = None, *, allow_paging: bool = False
@@ -140,28 +147,44 @@ class ApiFootballProvider(FootballDataProvider):
         if not self._api_key:
             raise ProviderNotConfiguredError(self.name, "Falta API_FOOTBALL_KEY en el archivo .env")
 
+        self.request_stats.calls += 1
         waited = 0.0
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            self.request_stats.attempts += 1
+            if attempt > 1:
+                self.request_stats.retries += 1
+            started = time.perf_counter()
             try:
-                return await self._get_once(path, params, allow_paging=allow_paging)
+                data = await self._get_once(path, params, allow_paging=allow_paging)
             except ProviderError as exc:
+                self.request_stats.failed_attempts += 1
+                elapsed_ms = (time.perf_counter() - started) * 1000
                 delay = _retry_delay(exc, attempt - 1) if attempt < MAX_ATTEMPTS else None
                 if delay is not None and waited + delay > MAX_TOTAL_WAIT:
                     logger.warning(
-                        "%s %s: no se reintenta, la espera total pasaría de %.0fs (%.1fs + %.1fs)",
-                        self.name, path, MAX_TOTAL_WAIT, waited, delay,
+                        "%s %s: intento %d/%d falló en %.0f ms (%s); no se reintenta, la espera total pasaría de %.0fs"
+                        " (%.1fs + %.1fs)",
+                        self.name, path, attempt, MAX_ATTEMPTS, elapsed_ms, exc, MAX_TOTAL_WAIT, waited, delay,
                     )
                     raise
                 if delay is None:
-                    if attempt > 1:
-                        logger.warning("%s %s: falla tras %d intentos: %s", self.name, path, attempt, exc)
+                    logger.warning(
+                        "%s %s: intento %d/%d falló en %.0f ms (%s); no se reintenta",
+                        self.name, path, attempt, MAX_ATTEMPTS, elapsed_ms, exc,
+                    )
                     raise
                 logger.warning(
-                    "%s %s: intento %d/%d falló (%s), reintento en %.1fs",
-                    self.name, path, attempt, MAX_ATTEMPTS, exc, delay,
+                    "%s %s: intento %d/%d falló en %.0f ms (%s), reintento en %.1fs",
+                    self.name, path, attempt, MAX_ATTEMPTS, elapsed_ms, exc, delay,
                 )
                 await _sleep(delay)
                 waited += delay
+                continue
+            logger.info(
+                "%s %s: intento %d/%d ok en %.0f ms",
+                self.name, path, attempt, MAX_ATTEMPTS, (time.perf_counter() - started) * 1000,
+            )
+            return data
         raise AssertionError("inalcanzable: el último intento siempre devuelve o lanza")
 
     async def _get_once(self, path: str, params: dict[str, Any] | None, *, allow_paging: bool) -> Any:
@@ -289,6 +312,10 @@ class ApiFootballProvider(FootballDataProvider):
         """Llama a GET /fixtures?league=X&season=Y (y from/to si se indican).
 
         Devuelve todos los partidos de la temporada en una sola petición.
+        Si un partido llega estructuralmente inválido (sin fecha, o con valores que no encajan
+        en FixtureData) se lanza ProviderResponseError para TODA la respuesta: no se inventa
+        kickoff_at ni se devuelve un partido incompleto, y quien llama trata la competición
+        como fallida. No se reintenta: la misma petición devolvería lo mismo.
         """
         params: dict[str, Any] = {"league": competition_external_id, "season": season}
         if date_from:
@@ -317,14 +344,20 @@ class ApiFootballProvider(FootballDataProvider):
             extratime = _score_pair(score.get("extratime"), "extratime", fixture_id)
             penalty = _score_pair(score.get("penalty"), "penalty", fixture_id)
             fulltime = _fulltime_pair(status_short, score, goals, fixture_id)
+            kickoff_at = fixture.get("date")
+            if not kickoff_at:
+                raise ProviderResponseError(
+                    self.name,
+                    f"Respuesta inválida de /fixtures (liga {competition_external_id}): partido {fixture_id} sin fixture.date",
+                )
 
-            fixtures.append(
-                FixtureData(
+            try:
+                parsed = FixtureData(
                     external_id=fixture_id,
                     competition_external_id=competition_external_id,
                     season=season,
                     round=(item.get("league") or {}).get("round"),
-                    kickoff_at=fixture["date"],
+                    kickoff_at=kickoff_at,
                     status_short=status_short,
                     status_long=status.get("long"),
                     elapsed=status.get("elapsed"),
@@ -344,5 +377,12 @@ class ApiFootballProvider(FootballDataProvider):
                     fulltime_home=fulltime[0],
                     fulltime_away=fulltime[1],
                 )
-            )
+            except ValidationError as exc:
+                fields = sorted({".".join(str(p) for p in err["loc"]) for err in exc.errors()})
+                raise ProviderResponseError(
+                    self.name,
+                    f"Respuesta inválida de /fixtures (liga {competition_external_id}): partido {fixture_id}, "
+                    f"campos no válidos: {', '.join(fields)}",
+                ) from exc
+            fixtures.append(parsed)
         return fixtures

@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Carpeta backend/ (este archivo está en backend/app/core/config.py)
@@ -23,6 +23,12 @@ class Settings(BaseSettings):
 
     # Base de datos (obligatoria)
     database_url: str
+    # Límites para que una BD inaccesible o una consulta bloqueada no cuelguen un proceso.
+    # Segundos de espera para abrir una conexión (mínimo 1).
+    db_connect_timeout_seconds: int = Field(default=10, ge=1)
+    # Milisegundos máximos por sentencia SQL; 0 = sin límite. Se aplica con SET LOCAL al empezar
+    # cada transacción, así funciona también a través de un pooler en modo transacción.
+    db_statement_timeout_ms: int = Field(default=60_000, ge=0)
 
     # Proveedores externos (opcionales: la app arranca aunque estén vacías)
     api_football_key: SecretStr = SecretStr("")

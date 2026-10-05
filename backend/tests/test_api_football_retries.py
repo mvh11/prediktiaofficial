@@ -379,3 +379,68 @@ def test_odds_provider_not_retried(monkeypatch, retry_sleeps):
     with pytest.raises(ProviderResponseError):
         asyncio.run(odds.check_status())
     assert len(calls) == 1 and retry_sleeps == []
+
+
+# --- Instrumentación: peticiones, reintentos y logs ---------------------------------------------
+
+
+def test_request_stats_count_every_http_attempt(provider, responses):
+    responses.set(ProviderResponseError(P, "HTTP 503", 503), ProviderTimeoutError(P, "Timeout"), OK)
+    _fixtures(provider)
+    s = provider.request_stats
+    assert (s.calls, s.attempts, s.retries, s.failed_attempts) == (1, 3, 2, 2)
+
+
+def test_request_stats_quota_and_permanent_errors_are_one_attempt(provider, responses):
+    responses.set(load_json("api_football/errors_daily_quota.json"))
+    with pytest.raises(ProviderQuotaExceededError):
+        _fixtures(provider)
+    responses.set(ProviderResponseError(P, "HTTP 404", 404))
+    with pytest.raises(ProviderResponseError):
+        _fixtures(provider)
+    s = provider.request_stats
+    assert (s.calls, s.attempts, s.retries, s.failed_attempts) == (2, 2, 0, 2)
+
+
+def test_request_stats_since_snapshot():
+    from app.integrations.request_stats import RequestStats
+
+    stats = RequestStats(calls=2, attempts=5, retries=3, failed_attempts=3)
+    before = stats.snapshot()
+    stats.calls, stats.attempts = 3, 6
+    assert stats.since(before) == RequestStats(calls=1, attempts=1, retries=0, failed_attempts=0)
+
+
+def test_attempt_logs_have_number_and_duration_but_no_secrets(provider, responses, caplog):
+    import logging
+
+    responses.set(ProviderResponseError(P, "HTTP 503", 503), OK)
+    with caplog.at_level(logging.INFO, logger=api_football.__name__):
+        _fixtures(provider)
+    assert "intento 1/3 falló en" in caplog.text and "intento 2/3 ok en" in caplog.text
+    assert " ms" in caplog.text
+    assert "test-key" not in caplog.text  # la API key del provider nunca aparece
+
+
+def test_safe_target_strips_credentials_and_query():
+    assert http.safe_target("https://user:secret@api.example.com/v3/fixtures?league=39&season=2025") == "api.example.com/v3/fixtures"
+
+
+def test_get_json_logs_duration_without_url_secrets(http_handler, caplog):
+    import logging
+
+    http_handler(lambda r: httpx.Response(200, json={"ok": True}))
+    with caplog.at_level(logging.DEBUG, logger=http.__name__):
+        asyncio.run(
+            http.get_json(
+                provider=P,
+                base_url="https://user:secret@example.invalid",
+                path="/fixtures",
+                headers={"x-apisports-key": "super-secret-key"},
+                timeout=1,
+                params={"league": 39},
+            )
+        )
+    assert "example.invalid/fixtures" in caplog.text and "HTTP 200 en" in caplog.text
+    for secret in ("secret", "super-secret-key", "league=39"):
+        assert secret not in caplog.text

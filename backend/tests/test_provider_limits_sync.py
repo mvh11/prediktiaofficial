@@ -300,3 +300,50 @@ def test_catalog_non_auth_permanent_error_continues(db_session, api, retry_sleep
     assert (api.calls_to("/teams", 265), api.calls_to("/teams", 39), api.calls_to("/teams", 140)) == (1, 1, 1)
     assert by_ext[265].error is not None
     assert by_ext[39].error is None and by_ext[140].error is None
+
+
+# --- Payload inválido y medición ------------------------------------------------------------------
+
+
+def _payload_without_date(index: int = 0) -> dict:
+    payload = load_json("api_football/fixtures_mixed.json")
+    payload["response"][index]["fixture"].pop("date")
+    return payload
+
+
+def test_fixtures_invalid_payload_fails_only_that_competition(db_session, three_competitions, api, retry_sleeps):
+    # Liga A trae un partido sin fecha: falla entera y no se guarda NINGÚN partido suyo
+    api.on("/fixtures", 265, _payload_without_date())
+    api.on("/fixtures", 39, load_json("api_football/fixtures_mixed.json"))
+    result, by_id = _sync_fixtures(db_session)
+
+    assert (api.calls_to("/fixtures", 265), api.calls_to("/fixtures", 39), api.calls_to("/fixtures", 140)) == (1, 1, 1)
+    assert retry_sleeps == []
+    assert "sin fixture.date" in by_id[three_competitions[265]].error
+    assert by_id[three_competitions[265]].fixtures == 0
+    assert by_id[three_competitions[39]].error is None and by_id[three_competitions[39]].fixtures == 6
+    assert by_id[three_competitions[140]].error is None
+    db_session.expire_all()
+    from app.models import Season
+
+    season_a = db_session.scalars(select(Season.id).where(Season.competition_id == three_competitions[265])).one()
+    assert db_session.scalars(select(Fixture.id).where(Fixture.season_id == season_a)).all() == []  # nada de Liga A
+    assert result.fixtures_synced == 6
+
+
+def test_fixtures_sync_logs_duration_and_request_counts(db_session, three_competitions, api, retry_sleeps, caplog, monkeypatch):
+    import logging
+
+    # alembic/env.py (fileConfig) desactiva los loggers existentes al migrar la BD de tests en
+    # migrated_db; se reactiva solo el de este servicio para poder leer sus mensajes
+    monkeypatch.setattr(logging.getLogger(fixture_sync_service.__name__), "disabled", False)
+    api.on("/fixtures", 265, ProviderResponseError(P, "Respuesta HTTP 503", 503), EMPTY)  # 1 reintento
+    with caplog.at_level(logging.INFO, logger=fixture_sync_service.__name__):
+        _sync_fixtures(db_session)
+    lines = [r.getMessage() for r in caplog.records if r.name == fixture_sync_service.__name__]
+    per_competition = [m for m in lines if m.startswith("Sync fixtures · Liga")]
+    assert len(per_competition) == 3 and all(" ms · peticiones " in m for m in per_competition)
+    assert "peticiones 2 (reintentos 1, fallidas 1)" in per_competition[0]
+    total = [m for m in lines if m.startswith("Sync fixtures · total")]
+    assert len(total) == 1 and "peticiones 4 (reintentos 1, fallidas 1)" in total[0]
+    assert "test-key" not in caplog.text
