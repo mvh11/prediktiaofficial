@@ -39,6 +39,10 @@ RATE_LIMIT_BACKOFF = (5.0, 10.0)  # límite de peticiones sin Retry-After utiliz
 # espera y se lanza el error (con un límite de peticiones, el service corta la sync)
 MAX_TOTAL_WAIT = 60.0
 RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
+# Estados (ya canónicos, en mayúsculas) de un partido no jugado: cualquier marcador que el
+# proveedor envíe con ellos (p. ej. CANC con goals 0-0) no es un resultado y se descarta.
+# ABD, AWD y WO no están: pueden llevar marcador de un partido iniciado o adjudicado.
+UNPLAYED_STATUSES = frozenset({"NS", "TBD", "PST", "CANC"})
 
 
 async def _sleep(seconds: float) -> None:
@@ -311,12 +315,16 @@ class ApiFootballProvider(FootballDataProvider):
             if fixture.get("id") is None or home.get("id") is None or away.get("id") is None:
                 continue
             fixture_id = fixture["id"]
-            status_short = status.get("short") or "TBD"
-            goals = _score_pair(item.get("goals"), "goals", fixture_id)
-            halftime = _score_pair(score.get("halftime"), "halftime", fixture_id)
-            extratime = _score_pair(score.get("extratime"), "extratime", fixture_id)
-            penalty = _score_pair(score.get("penalty"), "penalty", fixture_id)
-            fulltime = _fulltime_pair(status_short, score, goals, fixture_id)
+            # El proveedor no siempre respeta las mayúsculas del código corto (p. ej. "Canc")
+            status_short = (status.get("short") or "TBD").upper()
+            if status_short in UNPLAYED_STATUSES:
+                goals = halftime = extratime = penalty = fulltime = (None, None)
+            else:
+                goals = _score_pair(item.get("goals"), "goals", fixture_id)
+                halftime = _score_pair(score.get("halftime"), "halftime", fixture_id)
+                extratime = _score_pair(score.get("extratime"), "extratime", fixture_id)
+                penalty = _score_pair(score.get("penalty"), "penalty", fixture_id)
+                fulltime = _fulltime_pair(status_short, score, goals, fixture_id)
 
             fixtures.append(
                 FixtureData(
