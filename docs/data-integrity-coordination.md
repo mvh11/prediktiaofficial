@@ -94,6 +94,16 @@ PostgreSQL-local p50/p95/p99 benchmarks and query plans before index optimizatio
 
 ## QUEUE
 
+### DI-A5B — Failure Isolation Without Schema
+
+Owner: unassigned
+
+Status: BLOCKED_BY_DI_A2
+
+Design: `docs/di-a5a-recovery-failure-isolation-audit.md` §10.
+
+No migration.
+
 ### Provider Budget & Freshness Policy
 
 Inputs:
@@ -130,6 +140,18 @@ answer:
 
 Includes future odds snapshots and model outputs.
 
+## DONE
+
+### DI-A5A — Recovery & Failure-Isolation Design Audit
+
+Owner: Claude
+
+Status: DONE — DESIGN APPROVED
+
+Report: `docs/di-a5a-recovery-failure-isolation-audit.md`
+
+Read-only/design; no code, migrations, provider calls or Neon.
+
 ## CROSS-LANE
 
 Modular Data is developing M4.3 separately.
@@ -155,3 +177,7 @@ DI-A3A: ACTIVE — OpenCode.
 DI-A4A: BLOCKED by DI-A2 recovery.
 
 DI-A3B: READY after DI-A3A review.
+
+DI-A5A: DONE — DESIGN APPROVED (Claude).
+
+DI-A5B: BLOCKED_BY_DI_A2 — unassigned.
