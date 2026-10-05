@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.integrations.exceptions import ProviderAuthError, ProviderError, ProviderRateLimitError
+from app.integrations.football.base import FootballDataProvider
 from app.integrations.request_stats import describe, stats_of
 from app.repositories import catalog_repository as repo
 from app.schemas.catalog import CatalogSyncResult, CompetitionSyncResult
@@ -29,9 +30,14 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
     competiciones restantes (sus datos de /leagues sí se guardan) y quedan con el motivo.
     Los errores de la llamada inicial a /leagues sí se propagan (sin ella no hay nada que hacer).
     Registra en el log la duración y las peticiones (con reintentos) de cada competición y del total.
+    Todas las peticiones de la sync comparten un cliente HTTP, que se cierra al terminar.
     """
+    async with get_football_provider() as provider:
+        return await _sync_catalog(db, provider)
+
+
+async def _sync_catalog(db: Session, provider: FootballDataProvider) -> CatalogSyncResult:
     sync_started = time.perf_counter()
-    provider = get_football_provider()
     stats = stats_of(provider)
     stats_at_start = stats.snapshot() if stats else None
     tracked_ids = get_settings().tracked_league_ids

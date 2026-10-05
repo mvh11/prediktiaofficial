@@ -14,6 +14,7 @@ import time
 from datetime import date
 from typing import Any
 
+import httpx
 from pydantic import ValidationError
 
 from app.integrations.exceptions import (
@@ -27,7 +28,7 @@ from app.integrations.exceptions import (
     ProviderTimeoutError,
 )
 from app.integrations.football.base import FootballDataProvider
-from app.integrations.http import get_json
+from app.integrations.http import get_json, new_client
 from app.integrations.request_stats import RequestStats
 from app.schemas.catalog import CompetitionData, SeasonData, TeamData
 from app.schemas.fixture import FINISHED_STATUSES, FixtureData
@@ -133,6 +134,21 @@ class ApiFootballProvider(FootballDataProvider):
         # Intentos HTTP iniciados por esta instancia (cada reintento cuenta como un intento más;
         # no es el consumo de cuota confirmado por el proveedor)
         self.request_stats = RequestStats()
+        # Cliente HTTP del run abierto con `async with provider:` (None fuera de un run)
+        self._client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> "ApiFootballProvider":
+        """Abre el cliente HTTP del run: todas sus peticiones, reintentos incluidos, lo reutilizan."""
+        if self._client is not None:
+            raise RuntimeError(f"{self.name}: ya hay un run abierto con este provider")
+        self._client = new_client(self._timeout)
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        """Cierra el cliente del run, termine bien o con una excepción."""
+        client, self._client = self._client, None
+        if client is not None:
+            await client.aclose()
 
     async def _get(
         self, path: str, params: dict[str, Any] | None = None, *, allow_paging: bool = False
@@ -196,6 +212,7 @@ class ApiFootballProvider(FootballDataProvider):
             headers={"x-apisports-key": self._api_key},
             timeout=self._timeout,
             params=params,
+            client=self._client,  # None fuera de un run: get_json abre uno solo para esta petición
         )
         if not isinstance(data, dict):
             raise ProviderResponseError(self.name, "Formato de respuesta inesperado")

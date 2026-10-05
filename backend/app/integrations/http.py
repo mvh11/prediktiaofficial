@@ -25,6 +25,11 @@ def safe_target(url: str) -> str:
     return f"{parsed.host}{parsed.path}"
 
 
+def new_client(timeout: float) -> httpx.AsyncClient:
+    """Cliente HTTP para varias peticiones (p. ej. un run de un provider). Quien lo crea lo cierra."""
+    return httpx.AsyncClient(timeout=timeout)
+
+
 def parse_retry_after(value: str | None, now: datetime | None = None) -> float | None:
     """Segundos de espera de una cabecera Retry-After (segundos o fecha HTTP).
 
@@ -55,9 +60,12 @@ async def get_json(
     headers: dict[str, str],
     timeout: float,
     params: dict[str, Any] | None = None,
+    client: httpx.AsyncClient | None = None,
 ) -> Any:
     """Hace un GET y devuelve el JSON. Traduce los errores de red/HTTP a ProviderError.
 
+    Con `client` reutiliza ese cliente (y sus conexiones) y no lo cierra: es de quien lo creó.
+    Sin él, abre y cierra un cliente solo para esta petición.
     Nunca registra las cabeceras (contienen la API key) ni la URL completa: solo host y ruta.
     Registra en DEBUG la duración de la petición (los reintentos y su duración los registra el
     adapter que llama).
@@ -67,8 +75,11 @@ async def get_json(
     started = time.perf_counter()
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(url, headers=headers, params=params)
+        if client is not None:
+            response = await client.get(url, headers=headers, params=params, timeout=timeout)
+        else:
+            async with new_client(timeout) as own_client:
+                response = await own_client.get(url, headers=headers, params=params)
     except httpx.TimeoutException as exc:
         logger.debug("GET %s (%s): timeout en %.0f ms", target, provider, (time.perf_counter() - started) * 1000)
         raise ProviderTimeoutError(provider, f"Timeout tras {timeout}s") from exc

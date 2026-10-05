@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.integrations.exceptions import ProviderAuthError, ProviderError, ProviderRateLimitError
+from app.integrations.football.base import FootballDataProvider
 from app.integrations.request_stats import describe, stats_of
 from app.repositories import catalog_repository, fixture_repository
 from app.schemas.fixture import CompetitionFixtureSyncResult, FixtureSyncResult
@@ -44,9 +45,20 @@ async def sync_fixtures(
     y quedan con el motivo en su error.
     Solo se sincronizan las competiciones de TRACKED_LEAGUE_IDS (IDs de API-Football).
     Registra en el log la duración y las peticiones (con reintentos) de cada competición y del total.
+    Todas las peticiones de la sync comparten un cliente HTTP, que se cierra al terminar.
     """
+    async with get_football_provider() as provider:
+        return await _sync_fixtures(db, provider, competition_id, date_from, date_to)
+
+
+async def _sync_fixtures(
+    db: Session,
+    provider: FootballDataProvider,
+    competition_id: int | None,
+    date_from: date | None,
+    date_to: date | None,
+) -> FixtureSyncResult:
     sync_started = time.perf_counter()
-    provider = get_football_provider()
     stats = stats_of(provider)
     stats_at_start = stats.snapshot() if stats else None
     tracked = set(get_settings().tracked_league_ids)

@@ -34,6 +34,7 @@ class RoutedApi:
     def __init__(self) -> None:
         self.queues: dict[tuple[str, int | None], list] = {}
         self.calls: list[tuple[str, int | None]] = []
+        self.clients: list = []  # cliente HTTP recibido en cada petición
 
     def on(self, path: str, league: int | None, *items) -> None:
         self.queues[(path, league)] = list(items)
@@ -41,9 +42,10 @@ class RoutedApi:
     def calls_to(self, path: str, league: int | None = None) -> int:
         return self.calls.count((path, league))
 
-    async def get_json(self, *, path, params=None, **_kwargs):
+    async def get_json(self, *, path, params=None, client=None, **_kwargs):
         key = (path, (params or {}).get("league"))
         self.calls.append(key)
+        self.clients.append(client)
         queue = self.queues.get(key)
         item = queue.pop(0) if queue else EMPTY
         if isinstance(item, Exception):
@@ -344,3 +346,17 @@ def test_fixtures_sync_logs_duration_and_request_counts(db_session, three_compet
     total = [m for m in lines if m.startswith("Sync fixtures · total")]
     assert len(total) == 1 and "peticiones 4 (reintentos 1, fallidas 1)" in total[0]
     assert "test-key" not in caplog.text
+
+
+def test_fixtures_sync_run_reuses_one_http_client_and_closes_it(db_session, three_competitions, api, retry_sleeps):
+    api.on("/fixtures", 265, ProviderResponseError(P, "Respuesta HTTP 503", 503), EMPTY)  # 1 reintento
+    _sync_fixtures(db_session)
+    first_run = api.clients[:]
+    assert len(first_run) == 4  # 3 competiciones + 1 reintento, todas con el mismo cliente
+    assert first_run[0] is not None and all(c is first_run[0] for c in first_run)
+    assert first_run[0].is_closed
+
+    _sync_fixtures(db_session)  # otra sync: otro cliente, también cerrado al terminar
+    second_run = api.clients[len(first_run):]
+    assert len(second_run) == 3 and all(c is second_run[0] for c in second_run)
+    assert second_run[0] is not first_run[0] and second_run[0].is_closed
