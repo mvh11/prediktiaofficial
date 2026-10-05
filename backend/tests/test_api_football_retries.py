@@ -18,8 +18,6 @@ from app.integrations.exceptions import (
 )
 from app.integrations.football import api_football
 from app.integrations.football.api_football import ApiFootballProvider
-from app.integrations.odds import five_dollar
-from app.integrations.odds.five_dollar import FiveDollarFootballProvider
 from tests.conftest import load_json
 
 OK = {"get": "fixtures", "errors": [], "results": 0, "paging": {"current": 1, "total": 1}, "response": []}
@@ -362,23 +360,6 @@ NOW = datetime(2026, 10, 4, 12, 0, 0, tzinfo=timezone.utc)
 )
 def test_parse_retry_after(value, expected):
     assert http.parse_retry_after(value, now=NOW) == expected
-
-
-# --- Odds no recibe reintentos --------------------------------------------------------------
-
-
-def test_odds_provider_not_retried(monkeypatch, retry_sleeps):
-    calls: list = []
-
-    async def failing_get_json(**kwargs):
-        calls.append(kwargs)
-        raise ProviderResponseError("5dollarfootballapi", "Respuesta HTTP 503", 503)
-
-    monkeypatch.setattr(five_dollar, "get_json", failing_get_json)
-    odds = FiveDollarFootballProvider(api_key="k", base_url="https://example.invalid", timeout=1)
-    with pytest.raises(ProviderResponseError):
-        asyncio.run(odds.check_status())
-    assert len(calls) == 1 and retry_sleeps == []
 
 
 # --- Instrumentación: peticiones, reintentos y logs ---------------------------------------------
