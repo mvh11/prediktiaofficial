@@ -21,14 +21,22 @@ la última observación raw. Merge no destructivo:
 - cualquier pérdida frente a lo normalizado es un WARNING degraded_observation.
 observation_id de una fila = última observación que aportó estadísticas de ese equipo.
 
-Disponibilidad temporal: en backfill (source='backfill') available_at = kickoff + 6 h, una
-disponibilidad SINTÉTICA (no es cuándo publicó el proveedor); observed_at = ahora real.
+Política temporal (por temporada, decidida antes de crear el run; nunca se mezcla en un run):
+- HISTÓRICA: source='backfill', available_at = kickoff + 6 h, una disponibilidad SINTÉTICA
+  (no es cuándo publicó el proveedor); observed_at = ahora real.
+- OPERATIVA (is_current, o terminada hace como mucho OPERATIONAL_SEASON_GRACE_DAYS días):
+  source='manual', available_at = observed_at (el mismo instante: una sola lectura del reloj por
+  lote). Nunca se backdata una observación de una temporada en curso. Exige
+  --allow-operational-season; sin él no se crea run ni se llama al proveedor.
+  source='live' queda reservado para la ingestión automática (M5.6).
+Deuda conocida (no resuelta aquí): en una temporada HISTÓRICA, una revisión del proveedor
+descubierta con --refresh mucho después recibe también kickoff + 6 h.
 """
 
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -55,6 +63,12 @@ NORMALIZER_VERSION = 1
 DEFAULT_STATS_DAILY_BUDGET = 1500
 DEFAULT_PROVIDER_DAILY_CAP = 6000  # margen bajo el límite del plan (7500) para la live sync
 REQUEST_HEADROOM = 3  # una petición puede convertirse en hasta 3 con los reintentos del adapter
+# Una temporada en curso, o que terminó hace como mucho estos días, es OPERATIVA
+OPERATIONAL_SEASON_GRACE_DAYS = 7
+
+HISTORICAL, OPERATIONAL = "historical", "operational"
+REASON_IS_CURRENT, REASON_RECENTLY_ENDED, REASON_HISTORICAL = "is_current", "recently_ended", "historical"
+POLICY_KICKOFF_PLUS_6H, POLICY_OBSERVED_AT = "kickoff_plus_6h", "observed_at"
 
 # Motivos de parada global (run sin terminar el recorrido)
 STOP_BUDGET = "budget_exhausted"
@@ -71,6 +85,67 @@ class SeasonMismatch(Exception):
     """La temporada no pertenece a la competición indicada."""
 
 
+class UnknownSeasonEnd(Exception):
+    """Temporada no current sin end_date: no se puede clasificar con seguridad (fail closed)."""
+
+
+@dataclass(frozen=True)
+class TemporalPolicy:
+    classification: str  # historical | operational
+    reason: str  # is_current | recently_ended | historical
+    source: str  # backfill | manual
+    availability_policy: str  # kickoff_plus_6h | observed_at
+
+    def available_at(self, kickoff_at: datetime, observed_at: datetime) -> datetime:
+        if self.availability_policy == POLICY_OBSERVED_AT:
+            return observed_at  # el mismo objeto: available_at == observed_at exactamente
+        return kickoff_at + BACKFILL_AVAILABILITY_DELAY
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "season_temporal_classification": self.classification,
+            "season_temporal_reason": self.reason,
+            "observation_source": self.source,
+            "availability_policy": self.availability_policy,
+            "operational_grace_days": OPERATIONAL_SEASON_GRACE_DAYS,
+        }
+
+
+class OperationalSeasonNotAllowed(Exception):
+    """Temporada operativa sin --allow-operational-season."""
+
+    def __init__(self, policy: TemporalPolicy) -> None:
+        self.policy = policy
+        super().__init__(
+            f"temporada OPERATIVA (criterio: {policy.reason}); su política es source={policy.source} y "
+            f"available_at={policy.availability_policy}. Para procesarla hay que pasar --allow-operational-season"
+        )
+
+
+def season_temporal_policy(is_current: bool, end_date: date | None, today: date) -> TemporalPolicy:
+    """Clasificación determinista de una TEMPORADA (no de un partido)."""
+    if is_current:
+        return TemporalPolicy(OPERATIONAL, REASON_IS_CURRENT, "manual", POLICY_OBSERVED_AT)
+    if end_date is None:
+        raise UnknownSeasonEnd("temporada no current sin end_date: no se puede clasificar (fail closed)")
+    if end_date >= today - timedelta(days=OPERATIONAL_SEASON_GRACE_DAYS):
+        return TemporalPolicy(OPERATIONAL, REASON_RECENTLY_ENDED, "manual", POLICY_OBSERVED_AT)
+    return TemporalPolicy(HISTORICAL, REASON_HISTORICAL, "backfill", POLICY_KICKOFF_PLUS_6H)
+
+
+def resolve_season_policy(db: Session, season_id: int, *, allow_operational: bool, today: date) -> TemporalPolicy:
+    """Política de la temporada. Solo lee. Lanza OperationalSeasonNotAllowed si es operativa y
+    no se autorizó, o UnknownSeasonEnd si no se puede clasificar. El flag autoriza procesar una
+    temporada operativa; no cambia la política de una histórica."""
+    season = db.get(Season, season_id)
+    if season is None:
+        raise SeasonMismatch(f"La temporada {season_id} no existe")
+    policy = season_temporal_policy(season.is_current, season.end_date, today)
+    if policy.classification == OPERATIONAL and not allow_operational:
+        raise OperationalSeasonNotAllowed(policy)
+    return policy
+
+
 @dataclass
 class BackfillOptions:
     mode: str = "dry_run"  # dry_run | apply
@@ -80,6 +155,7 @@ class BackfillOptions:
     stats_daily_budget: int = DEFAULT_STATS_DAILY_BUDGET
     provider_daily_cap: int = DEFAULT_PROVIDER_DAILY_CAP
     batch_size: int = BATCH_SIZE
+    allow_operational_season: bool = False  # autoriza una temporada operativa; no fuerza su política
 
 
 @dataclass
@@ -197,6 +273,7 @@ def evaluate_fixture(
     mode: str,
     run_id: int,
     observed_at: datetime,
+    policy: TemporalPolicy,
 ) -> FixturePlan:
     pid = target.provider_fixture_id
     ctx = {"provider_fixture_id": pid, "fixture_id": target.fixture_id}
@@ -270,11 +347,11 @@ def evaluate_fixture(
             provider=provider,
             provider_fixture_id=pid,
             payload=payload,
-            source="backfill",
+            source=policy.source,
             availability=availability,
             teams_returned=len(with_stats),
             observed_at=observed_at,
-            available_at=fixture.kickoff_at + BACKFILL_AVAILABILITY_DELAY,
+            available_at=policy.available_at(fixture.kickoff_at, observed_at),
             fixture_status_at_fetch=data.provider_status,
             run_id=run_id,
         )
@@ -376,6 +453,8 @@ async def run_season_backfill(
     season = db.get(Season, season_id)
     if season is None or season.competition_id != competition_id:
         raise SeasonMismatch(f"La temporada {season_id} no pertenece a la competición {competition_id}")
+    # Antes de crear el run y de cualquier petición: una temporada operativa sin autorizar se rechaza
+    policy = resolve_season_policy(db, season_id, allow_operational=options.allow_operational_season, today=clock().date())
     after = None
     if options.resume:
         previous = runs.latest_resumable_run(db, season_id, options.mode)
@@ -398,6 +477,7 @@ async def run_season_backfill(
         targets, awarded, skipped = select_targets(db, season_id, provider_code, refresh=options.refresh, after_fixture_id=after)
         coverage = CoverageAccumulator(competition_id, season_id, excluded_awarded=awarded, skipped_existing=skipped)
         runs.add_counters(db, run_id, fixtures_targeted=len(targets))
+        runs.append_detail(db, run_id, {"kind": "temporal_policy", **policy.as_dict()})
         info = []
         if awarded:
             info.append(qc.Issue(qc.AWARDED_WITHOUT_STATISTICS, detail={"count": awarded}).as_dict())
@@ -440,7 +520,7 @@ async def run_season_backfill(
                 db.commit()
                 break
 
-            plans, extra_issues = _process_batch(db, batch, requested, response, provider_code, options.mode, run_id, clock())
+            plans, extra_issues = _process_batch(db, batch, requested, response, provider_code, options.mode, run_id, clock(), policy)
             _record_batch(db, run_id, batch, requested, response, plans, extra_issues, coverage, request_delta, retry_delta)
             db.commit()
     except Exception as exc:
@@ -491,6 +571,7 @@ def _process_batch(
     mode: str,
     run_id: int,
     observed_at: datetime,
+    policy: TemporalPolicy,
 ) -> tuple[list[FixturePlan], list[qc.Issue]]:
     by_id: dict[int, list[FixtureStatisticsData]] = {}
     for item in response:
@@ -511,7 +592,7 @@ def _process_batch(
         elif len(by_id[pid]) > 1:
             plans.append(FixturePlan(target, "blocked", [qc.Issue(qc.DUPLICATE_FIXTURE_IN_RESPONSE, detail={"times": len(by_id[pid])}, **ctx)]))
         else:
-            plans.append(evaluate_fixture(db, target, by_id[pid][0], provider=provider, mode=mode, run_id=run_id, observed_at=observed_at))
+            plans.append(evaluate_fixture(db, target, by_id[pid][0], provider=provider, mode=mode, run_id=run_id, observed_at=observed_at, policy=policy))
     return plans, extra
 
 

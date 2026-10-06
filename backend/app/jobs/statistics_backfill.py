@@ -8,6 +8,12 @@ Uso (desde backend/):
 Destino: --confirm-target o PREDIKTIA_EXPECTED_DB_TARGET debe coincidir con el destino saneado
 de DATABASE_URL; si falta o no coincide sale con 2 sin crear run ni llamar al proveedor.
 
+Política temporal (ver statistics_service): una temporada HISTÓRICA usa source=backfill y
+available_at = kickoff + 6 h; una OPERATIVA (current, o terminada hace <= 7 días) usa
+source=manual y available_at = observed_at, y solo se procesa con --allow-operational-season.
+Sin el flag sale con 2 antes de crear el run o llamar al proveedor. El flag sobre una temporada
+histórica no cambia su política.
+
 Presupuesto diario (UTC): --budget (por defecto 1500) limita las peticiones de estadísticas del
 día (todos los statistics_runs); --provider-daily-cap (por defecto 6000) limita estadísticas +
 live sync. Si el siguiente lote no cabe, el run se cierra 'aborted' y se reanuda con --resume.
@@ -18,7 +24,8 @@ Códigos de salida:
      dry_run_completed con BLOCKING/ausentes, o parada por presupuesto (aborted, reanudable);
      con --fail-stale-run: no había run abandonado o era demasiado reciente;
 - 2: destino ausente o distinto, lock ocupado, credenciales rechazadas, límite/cuota del
-     proveedor, error del proveedor, nada que reanudar, temporada inexistente o excepción.
+     proveedor, error del proveedor, nada que reanudar, temporada inexistente, temporada
+     operativa sin --allow-operational-season, temporada sin end_date clasificable o excepción.
 """
 
 import argparse
@@ -26,6 +33,7 @@ import asyncio
 import logging
 import os
 import sys
+from datetime import datetime, timezone
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
@@ -62,6 +70,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="pide y evalúa, pero no escribe observaciones ni estadísticas")
     parser.add_argument("--refresh", action="store_true", help="vuelve a pedir partidos que ya tienen observación")
     parser.add_argument("--resume", action="store_true", help="continúa tras el cursor del último run interrumpido")
+    parser.add_argument(
+        "--allow-operational-season",
+        action="store_true",
+        help="autoriza una temporada operativa (source=manual, available_at=observed_at)",
+    )
     parser.add_argument("--budget", type=int, default=service.DEFAULT_STATS_DAILY_BUDGET, help="peticiones de estadísticas por día (UTC)")
     parser.add_argument("--provider-daily-cap", type=int, default=service.DEFAULT_PROVIDER_DAILY_CAP, help="estadísticas + live sync por día (UTC)")
     parser.add_argument("--confirm-target", help=f"<host>:<puerto>/<bd> esperado (o la variable {TARGET_ENV})")
@@ -176,6 +189,16 @@ def main(argv: list[str] | None = None) -> int:
             db.rollback()
             if season_id is None:
                 return _err(f"no existe la temporada {args.season} de la competición {args.competition_id}")
+            # Política temporal ANTES de construir el proveedor o crear el run
+            try:
+                policy = service.resolve_season_policy(
+                    db, season_id, allow_operational=args.allow_operational_season, today=datetime.now(timezone.utc).date()
+                )
+            except (service.OperationalSeasonNotAllowed, service.UnknownSeasonEnd) as exc:
+                return _err(f"{exc}; no se ha tocado nada")
+            finally:
+                db.rollback()
+            print(f"Política temporal: {policy.classification} ({policy.reason}) -> source={policy.source}, available_at={policy.availability_policy}")
             options = service.BackfillOptions(
                 mode="dry_run" if args.dry_run else "apply",
                 trigger=args.trigger,
@@ -183,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
                 resume=args.resume,
                 stats_daily_budget=args.budget,
                 provider_daily_cap=args.provider_daily_cap,
+                allow_operational_season=args.allow_operational_season,
             )
             try:
                 outcome = asyncio.run(
@@ -190,7 +214,7 @@ def main(argv: list[str] | None = None) -> int:
                         db, competition_id=args.competition_id, season_id=season_id, provider=default_provider(), options=options
                     )
                 )
-            except service.NothingToResume as exc:
+            except (service.NothingToResume, service.OperationalSeasonNotAllowed, service.UnknownSeasonEnd) as exc:
                 return _err(str(exc))
             _print_outcome(outcome)
             return exit_code(outcome)

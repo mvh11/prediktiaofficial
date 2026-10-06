@@ -4,7 +4,7 @@ dry-run, runs y CLI. Ninguna llamada real al proveedor."""
 
 import asyncio
 from contextlib import nullcontext
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -13,7 +13,7 @@ from sqlalchemy import func, select, text, update
 from app.integrations.exceptions import ProviderAuthError, ProviderRateLimitError, ProviderResponseError
 from app.integrations.football.api_football_statistics import normalize_fixture_ids, parse_fixture_statistics
 from app.jobs import statistics_backfill as cli
-from app.models import Fixture, FixtureStatisticsObservation, FixtureTeamStatistics, StatisticsRun
+from app.models import Fixture, FixtureStatisticsObservation, FixtureTeamStatistics, Season, StatisticsRun
 from app.repositories import fixture_repository
 from app.repositories import statistics_run_repository as runs
 from app.services import statistics_service as service
@@ -79,6 +79,8 @@ class FakeStatsProvider:
 def season(db_session):
     """Temporada con partidos FT: external_id 1001.. con equipos (2n+1, 2n+2). Devuelve un dict."""
     cid, sid = make_competition(db_session, 39, name="Premier League", current_year=2025)
+    # Temporada HISTÓRICA (no current y terminada hace más de 7 días): la de los pilotos M5.4A/B
+    db_session.execute(update(Season).where(Season.id == sid).values(is_current=False, end_date=date.today() - timedelta(days=60)))
     db_session.commit()  # el código hace rollback de sus lecturas: lo preparado no debe perderse
 
     def add(n, start=1001, status="FT"):
@@ -121,6 +123,10 @@ def the_run(db, run_id):
     return db.get(StatisticsRun, run_id)
 
 
+def batches(db, run_id):
+    return [d for d in the_run(db, run_id).details if "fixture_ids" in d]
+
+
 def codes(db, run_id):
     return [c["code"] for c in the_run(db, run_id).checks]
 
@@ -149,7 +155,7 @@ def test_available_fixtures_are_normalized_with_synthetic_availability(db_sessio
     run_row = the_run(db_session, out.run_id)
     assert run_row.cursor_fixture_id == fixture_id(db_session, 1002)
     assert run_row.coverage["xg_pct"] == 100.0 and run_row.coverage["core_pct"] == 100.0
-    assert run_row.details[0]["requested"] == [1001, 1002] and run_row.details[0]["available"] == 2
+    assert batches(db_session, out.run_id)[0]["requested"] == [1001, 1002] and batches(db_session, out.run_id)[0]["available"] == 2
 
 
 def test_partial_fixture(db_session, season):
@@ -169,7 +175,7 @@ def test_empty_final_fixture(db_session, season):
     (obs,) = observations(db_session, fid)
     assert (obs.availability, obs.teams_returned) == ("empty", 0)
     assert rows(db_session, fid) == []  # no se inventan ceros
-    assert the_run(db_session, out.run_id).details[0]["issues"]["INFO"] == {"final_fixture_empty": 1}
+    assert batches(db_session, out.run_id)[0]["issues"]["INFO"] == {"final_fixture_empty": 1}
 
 
 # --- BLOCKING --------------------------------------------------------------------------------
@@ -258,7 +264,7 @@ def test_unparseable_unknown_and_consistency(db_session, season):
     found = codes(db_session, out.run_id)
     for code in ("unparseable_value", "shot_components_mismatch", "shot_zones_mismatch", "passes_accurate_over_total", "possession_sum_out_of_range"):
         assert code in found
-    issues = the_run(db_session, out.run_id).details[0]["issues"]
+    issues = batches(db_session, out.run_id)[0]["issues"]
     assert issues["INFO"] == {"raw_only_stat_type": 1, "unknown_stat_type": 1}  # INFO no cuenta como warning
     home_row = rows(db_session, fid)[0]
     assert home_row.fouls is None and home_row.passes_accurate == 900  # el dato raro se conserva
@@ -355,7 +361,7 @@ def test_batches_of_twenty_without_open_transaction_during_http(db_session, seas
     out = run(db_session, season, provider)
     assert [len(c) for c in provider.calls] == [20, 5] and seen == [False, False]
     assert out.counters["provider_requests"] == 2 and out.counters["fixtures_available"] == 25
-    assert [len(d["fixture_ids"]) for d in the_run(db_session, out.run_id).details] == [20, 5]
+    assert [len(d["fixture_ids"]) for d in batches(db_session, out.run_id)] == [20, 5]
 
 
 def test_provider_error_rolls_back_only_the_failing_batch_and_resume_finishes(db_session, season):
