@@ -63,6 +63,28 @@ def append_checks(db: Session, run_id: int, entries: list[dict[str, Any]]) -> No
         )
 
 
+def record_batch(
+    db: Session,
+    run_id: int,
+    *,
+    increments: dict[str, int],
+    detail: dict[str, Any],
+    checks: list[dict[str, Any]],
+    cursor: int,
+    coverage: dict[str, Any],
+) -> None:
+    """Todo lo que un lote deja en el run, en UN solo UPDATE: contadores (suma atómica), detail
+    del lote al final de details, checks al final de checks, cursor y cobertura. Mismo resultado
+    que add_counters + append_detail + append_checks + set_cursor + set_coverage."""
+    values: dict[str, Any] = {name: getattr(StatisticsRun, name) + n for name, n in increments.items() if n}
+    values["details"] = StatisticsRun.details.op("||")(bindparam("detail_entry", value=[detail], type_=JSONB))
+    if checks:
+        values["checks"] = StatisticsRun.checks.op("||")(bindparam("check_entries", value=checks, type_=JSONB))
+    values["cursor_fixture_id"] = cursor
+    values["coverage"] = coverage
+    db.execute(update(StatisticsRun).where(StatisticsRun.id == run_id).values(**values))
+
+
 def set_cursor(db: Session, run_id: int, fixture_id: int) -> None:
     db.execute(update(StatisticsRun).where(StatisticsRun.id == run_id).values(cursor_fixture_id=fixture_id))
 
@@ -107,10 +129,11 @@ def is_older_than(db: Session, run_id: int, minutes: int) -> bool:
 
 
 def requests_since(db: Session, since: datetime) -> tuple[int, int]:
-    """Peticiones al proveedor registradas desde `since`: (estadísticas, live sync)."""
-    stats = db.scalar(select(func.coalesce(func.sum(StatisticsRun.provider_requests), 0)).where(StatisticsRun.started_at >= since))
-    live = db.scalar(select(func.coalesce(func.sum(LiveSyncRun.provider_requests), 0)).where(LiveSyncRun.started_at >= since))
-    return int(stats), int(live)
+    """Peticiones al proveedor registradas desde `since`: (estadísticas, live sync), en una consulta."""
+    stats = select(func.coalesce(func.sum(StatisticsRun.provider_requests), 0)).where(StatisticsRun.started_at >= since).scalar_subquery()
+    live = select(func.coalesce(func.sum(LiveSyncRun.provider_requests), 0)).where(LiveSyncRun.started_at >= since).scalar_subquery()
+    row = db.execute(select(stats, live)).one()
+    return int(row[0]), int(row[1])
 
 
 def now(db: Session) -> datetime:

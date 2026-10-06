@@ -448,7 +448,7 @@ def test_unexpected_exception_marks_run_failed(db_session, season, monkeypatch):
     def boom(*_a, **_k):
         raise RuntimeError("bug")
 
-    monkeypatch.setattr(service, "evaluate_fixture", boom)
+    monkeypatch.setattr(service, "plan_fixture", boom)  # M5.4D: el plan puro sustituye a evaluate_fixture
     with pytest.raises(RuntimeError):
         run(db_session, season, FakeStatsProvider({fid: full_item(fid, h, a)}))
     (run_row,) = list(db_session.scalars(select(StatisticsRun)))
