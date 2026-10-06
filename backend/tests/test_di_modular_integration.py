@@ -323,16 +323,19 @@ def test_adapter_unplayed_status_is_normalized_and_still_requires_kickoff(api):
 
 
 class ClientSpy:
+    """Sustituye httpx.AsyncClient: cada cliente creado responde con `handler` y se registra."""
+
     def __init__(self) -> None:
         self.clients: list[httpx.AsyncClient] = []
         self.requests: list[tuple[int, str]] = []
+        self.handler = lambda request: httpx.Response(200, json=EMPTY)
 
     def factory(self, **kwargs) -> httpx.AsyncClient:
         index = len(self.clients)
 
         def respond(request: httpx.Request) -> httpx.Response:
             self.requests.append((index, request.url.path))
-            return httpx.Response(200, json=EMPTY)
+            return self.handler(request)
 
         client = REAL_ASYNC_CLIENT(transport=httpx.MockTransport(respond), **kwargs)
         self.clients.append(client)
@@ -342,19 +345,77 @@ class ClientSpy:
 REAL_ASYNC_CLIENT = httpx.AsyncClient
 
 
-def test_live_sync_fixtures_job_uses_one_client_for_the_whole_run(db_session, competitions, monkeypatch, retry_sleeps):
+@pytest.fixture
+def job(db_session, monkeypatch, retry_sleeps):
+    """main() con la sesión de test y el CountingApiFootballProvider real (HTTP falso, sin red)."""
     spy = ClientSpy()
+    state = {"spy": spy, "api_key": "k", "providers": []}
     monkeypatch.setattr(http.httpx, "AsyncClient", spy.factory)
     monkeypatch.setattr(cli, "_configured_target", lambda: TARGET)
     monkeypatch.setattr("app.db.session.SessionLocal", lambda: nullcontext(db_session))
-    monkeypatch.setattr(
-        cli, "default_provider", lambda: cli.CountingApiFootballProvider(api_key="k", base_url="https://example.invalid", timeout=1)
-    )
-    monkeypatch.delenv(cli.TARGET_ENV, raising=False)
 
+    def default_provider():
+        provider = cli.CountingApiFootballProvider(api_key=state["api_key"], base_url="https://example.invalid", timeout=1)
+        state["providers"].append(provider)
+        return provider
+
+    monkeypatch.setattr(cli, "default_provider", default_provider)
+    monkeypatch.delenv(cli.TARGET_ENV, raising=False)
+    return state
+
+
+def _fixtures_run(db):
+    db.expire_all()
+    (run,) = db.scalars(select(LiveSyncRun).where(LiveSyncRun.job_type == "fixtures"))
+    return run
+
+
+def test_live_sync_fixtures_job_uses_one_client_for_the_whole_run(db_session, competitions, job):
+    spy = job["spy"]
     assert cli.main(["fixtures", "--confirm-target", TARGET]) == 0
     assert len(spy.clients) == 1 and spy.clients[0].is_closed
     assert [i for i, _ in spy.requests] == [0, 0, 0]
-    db_session.expire_all()
-    (run,) = db_session.scalars(select(LiveSyncRun).where(LiveSyncRun.job_type == "fixtures"))
+    run = _fixtures_run(db_session)
     assert (run.status, run.provider_requests, run.provider_retries, run.competitions_attempted) == ("completed", 3, 0, 3)
+
+
+# --- Job live_sync: contrato de salida. La clasificación interna (sync_failures) y el código de
+# salida del proceso son contratos distintos y se comprueban los dos ---------------------------
+
+
+def test_live_sync_fixtures_job_without_api_key_aborts_run_and_exits_2(db_session, competitions, job):
+    job["api_key"] = ""
+    assert cli.main(["fixtures", "--confirm-target", TARGET]) == 2
+
+    # Interno: la primera competición falla por configuración y el resto se corta (no se intenta)
+    (provider,) = job["providers"]
+    assert provider.config_failed and not provider.auth_failed
+    assert provider.logical_calls == 1 and provider.http_requests == 0 and job["spy"].requests == []
+    run = _fixtures_run(db_session)
+    assert run.status == "completed_with_errors" and run.competitions_failed == 3
+    assert (run.provider_requests, run.auth_failed, run.rate_limited) == (0, False, False)
+    first, *rest = run.details
+    assert "Falta API_FOOTBALL_KEY" in first["error"]
+    assert len(rest) == 2 and all("se detuvo la sync porque el proveedor no está configurado" in d["error"] for d in rest)
+
+
+def test_live_sync_catalog_job_without_api_key_exits_2(db_session, job):
+    job["api_key"] = ""
+    assert cli.main(["catalog", "--confirm-target", TARGET]) == 2
+    (provider,) = job["providers"]
+    assert provider.config_failed and job["spy"].requests == []
+
+
+def test_live_sync_ordinary_competition_failure_still_exits_1(db_session, competitions, job):
+    def handler(request):
+        if request.url.params.get("league") == "265":
+            return httpx.Response(404, json={})
+        return httpx.Response(200, json=EMPTY)
+
+    job["spy"].handler = handler
+    assert cli.main(["fixtures", "--confirm-target", TARGET]) == 1
+    (provider,) = job["providers"]
+    assert not provider.config_failed and not provider.auth_failed
+    run = _fixtures_run(db_session)
+    assert run.status == "completed_with_errors" and run.competitions_failed == 1
+    assert run.provider_requests == 3  # el 404 no corta el run: las otras dos se piden

@@ -19,7 +19,8 @@ caído) NO se sincronizan fixtures: un cambio de temporada a medias podría mand
 temporada equivocada. El check se ejecuta igualmente (solo lee) y la salida es 2.
 
 Códigos de salida: 0 completed y frescura PASS · 1 completed_with_errors o frescura WARNING ·
-2 failed, frescura ERROR, credenciales rechazadas, lock ocupado, destino incorrecto o excepción.
+2 failed, frescura ERROR, credenciales rechazadas, proveedor sin configurar, lock ocupado, destino
+incorrecto o excepción.
 """
 
 import argparse
@@ -33,7 +34,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.core.config import get_settings
 from app.core.logging import setup_logging
-from app.integrations.exceptions import ProviderAuthError, ProviderRateLimitError
+from app.integrations.exceptions import ProviderAuthError, ProviderNotConfiguredError, ProviderRateLimitError
 from app.integrations.football.api_football import ApiFootballProvider
 from app.jobs.history_backfill import database_target
 from app.repositories import live_sync_repository as runs
@@ -55,6 +56,9 @@ class CountingApiFootballProvider(ApiFootballProvider):
         self.http_requests = 0  # peticiones HTTP reales (_get_once)
         self.rate_limited = False
         self.auth_failed = False
+        # Sin API key: la sync corta el run (sync_failures) y el proceso sale con 2. No se guarda
+        # en live_sync_runs: el error ya queda en el detalle de cada competición
+        self.config_failed = False
 
     async def _get_once(self, path, params=None, *, allow_paging=False):
         self.http_requests += 1
@@ -69,6 +73,9 @@ class CountingApiFootballProvider(ApiFootballProvider):
             raise
         except ProviderAuthError:
             self.auth_failed = True
+            raise
+        except ProviderNotConfiguredError:
+            self.config_failed = True
             raise
 
     @property
@@ -264,7 +271,7 @@ def fail_stale_run(db, lock_scope: str, minutes: int) -> tuple[str, int | None]:
 
 
 def _sync_exit(status: str, provider) -> int:
-    if status == "locked" or status == "failed" or getattr(provider, "auth_failed", False):
+    if status in ("locked", "failed") or getattr(provider, "auth_failed", False) or getattr(provider, "config_failed", False):
         return EXIT_ERROR
     return EXIT_OK if status == "completed" else EXIT_WARNING
 
