@@ -15,6 +15,7 @@ from app.models.provider_mapping import (
     TeamProviderMapping,
 )
 from app.models.season import Season, SeasonTeam
+from app.models.statistics import FixtureStatisticsObservation, FixtureTeamStatistics, StatisticsRun
 from app.models.team import Team
 
 __all__ = [
@@ -23,11 +24,14 @@ __all__ = [
     "CompetitionProviderMapping",
     "Fixture",
     "FixtureProviderMapping",
+    "FixtureStatisticsObservation",
+    "FixtureTeamStatistics",
     "LiveSyncRun",
     "Provider",
     "Season",
     "SeasonBackfillRun",
     "SeasonTeam",
+    "StatisticsRun",
     "Team",
     "TeamProviderMapping",
 ]
