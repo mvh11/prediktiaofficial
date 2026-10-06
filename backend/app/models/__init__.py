@@ -7,6 +7,7 @@ from app.db.database import Base
 from app.models.backfill import SeasonBackfillRun
 from app.models.competition import Competition
 from app.models.fixture import Fixture
+from app.models.live_sync import LiveSyncRun
 from app.models.provider import Provider
 from app.models.provider_mapping import (
     CompetitionProviderMapping,
@@ -14,6 +15,7 @@ from app.models.provider_mapping import (
     TeamProviderMapping,
 )
 from app.models.season import Season, SeasonTeam
+from app.models.statistics import FixtureStatisticsObservation, FixtureTeamStatistics, StatisticsRun
 from app.models.team import Team
 
 __all__ = [
@@ -22,10 +24,14 @@ __all__ = [
     "CompetitionProviderMapping",
     "Fixture",
     "FixtureProviderMapping",
+    "FixtureStatisticsObservation",
+    "FixtureTeamStatistics",
+    "LiveSyncRun",
     "Provider",
     "Season",
     "SeasonBackfillRun",
     "SeasonTeam",
+    "StatisticsRun",
     "Team",
     "TeamProviderMapping",
 ]

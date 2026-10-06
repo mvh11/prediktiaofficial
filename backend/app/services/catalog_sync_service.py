@@ -21,7 +21,7 @@ from app.services.sync_failures import SyncAction, provider_abort_reason, provid
 logger = logging.getLogger(__name__)
 
 
-async def sync_catalog(db: Session) -> CatalogSyncResult:
+async def sync_catalog(db: Session, *, provider: FootballDataProvider | None = None) -> CatalogSyncResult:
     """Guarda las competiciones seguidas, sus temporadas y los equipos de la temporada actual.
 
     Si falla una competición se anota el error y se sigue con las demás.
@@ -31,11 +31,20 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
     competiciones restantes (sus datos de /leagues sí se guardan) y quedan con el motivo
     (ver sync_failures).
     Los errores de la llamada inicial a /leagues sí se propagan (sin ella no hay nada que hacer).
+
+    Ninguna llamada al proveedor ocurre con una transacción de BD abierta: /leagues se pide antes
+    de tocar la BD y cada /teams después del commit de su competición. Cada resultado guarda la
+    temporada actual anterior (previous_season) para auditar los cambios de temporada.
     Registra en el log la duración y las peticiones (con reintentos) de cada competición y del total.
-    Todas las peticiones de la sync comparten un cliente HTTP, que se cierra al terminar.
+
+    Todas las peticiones de la sync comparten un cliente HTTP: sin proveedor inyectado la sync abre
+    el suyo con `async with` y lo cierra al terminar; un proveedor inyectado es de quien lo creó,
+    que abre y cierra su run (ver app.jobs.live_sync).
     """
-    async with get_football_provider() as provider:
+    if provider is not None:
         return await _sync_catalog(db, provider)
+    async with get_football_provider() as owned:
+        return await _sync_catalog(db, owned)
 
 
 async def _sync_catalog(db: Session, provider: FootballDataProvider) -> CatalogSyncResult:
@@ -62,6 +71,8 @@ async def _sync_catalog(db: Session, provider: FootballDataProvider) -> CatalogS
         crashed = False
         try:
             competition_id = repo.upsert_competition(db, comp, provider.name)
+            previous = repo.get_season(db, competition_id, None)
+            result.previous_season = previous.year if previous else None
             repo.clear_current_flag(db, competition_id)
             season_ids = repo.upsert_seasons(db, competition_id, comp.seasons)
             db.commit()

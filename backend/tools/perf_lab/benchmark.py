@@ -173,7 +173,7 @@ def repository_write(db: Session, groups: dict) -> int:
     for season_id, fixtures in groups.items():
         teams = [f.home_team for f in fixtures] + [f.away_team for f in fixtures]
         ids = ensure_teams(db, teams, "api-football")
-        count += upsert_fixtures(db, season_id, fixtures, ids, "api-football")
+        count += upsert_fixtures(db, season_id, fixtures, ids, "api-football").received
     return count
 
 

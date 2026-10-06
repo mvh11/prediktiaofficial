@@ -12,7 +12,7 @@ from app.repositories import catalog_repository
 from app.schemas.catalog import SeasonData
 from app.services import history_backfill_service as service
 from tests.conftest import make_competition
-from tests.test_history_backfill import NOW, YEAR, FakeHistoryProvider, fx
+from tests.test_history_backfill import END_DATE, NOW, WIDE_RANGE, YEAR, FakeHistoryProvider, fx
 
 pytestmark = pytest.mark.db
 
@@ -20,7 +20,9 @@ pytestmark = pytest.mark.db
 @pytest.fixture
 def pair(db_session) -> int:
     competition_id, _ = make_competition(db_session, 39, name="Premier Test", current_year=2026)
-    catalog_repository.upsert_seasons(db_session, competition_id, [SeasonData(year=YEAR, is_current=False)])
+    catalog_repository.upsert_seasons(
+        db_session, competition_id, [SeasonData(year=YEAR, end_date=END_DATE, is_current=False)]
+    )
     db_session.commit()  # como en producción: datos ya confirmados antes de la operación administrativa
     return competition_id
 
@@ -104,7 +106,9 @@ def test_after_recovery_a_new_run_can_start(db_session, pair):
         with db_session.begin_nested():
             _run(db_session, pair, minutes_ago=0)
     assert service.fail_stale_run(db_session, pair, YEAR, 120).outcome == "recovered"
-    result = asyncio.run(service.run_backfill(db_session, pair, YEAR, provider=FakeHistoryProvider([fx(1)]), now=NOW))
+    result = asyncio.run(
+        service.run_backfill(db_session, pair, YEAR, provider=FakeHistoryProvider([fx(1)]), now=NOW, expected_range=WIDE_RANGE)
+    )
     assert result.status == "completed"
 
 

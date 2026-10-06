@@ -1,27 +1,32 @@
 """CLI del backfill histórico de UN par competición-temporada.
 
 Uso (desde backend/):
-    python -m app.jobs.history_backfill --competition-id 5 --season 2025 --dry-run
-    python -m app.jobs.history_backfill --competition-id 5 --season 2025
-    python -m app.jobs.history_backfill --competition-id 5 --season 2025 --refresh [--dry-run]
-    python -m app.jobs.history_backfill --competition-id 5 --season 2025 --expected-min 370 --expected-max 390
+    python -m app.jobs.history_backfill --competition-id 5 --season 2025 --dry-run [--refresh]
+    python -m app.jobs.history_backfill --competition-id 5 --season 2025 --expected-min 370 --expected-max 390         --confirm-target ep-xxx.region.aws.neon.tech:5432/neondb [--refresh]
     python -m app.jobs.history_backfill --competition-id 5 --season 2025 --fail-stale-run [--stale-after-minutes 120]
 
 --competition-id es el id INTERNO de Prediktia (GET /competitions); --season es el año de la
 temporada tal como lo usa el proveedor (p. ej. 2025 = 2025/26 en ligas que cruzan años).
 Escribe en la BD de DATABASE_URL y hace 1 petición al proveedor por invocación.
 
---expected-min/--expected-max (los dos o ninguno): rango de partidos esperado para Q1.
+--expected-min/--expected-max: rango de partidos esperado para Q1. Van siempre juntos; en una
+ejecución real son obligatorios (en dry-run son opcionales, sirve para descubrir el rango).
+--confirm-target <host>:<puerto>/<bd>: obligatorio en una ejecución real (opcional en dry-run).
+Si se indica, debe coincidir exactamente con el destino de DATABASE_URL; si no, se aborta antes
+de abrir la BD o llamar al proveedor. El destino se muestra siempre saneado (sin usuario ni contraseña).
 --fail-stale-run es una operación administrativa SEPARADA: marca como failed el run abandonado
 en 'running' de ese par (si es más antiguo que --stale-after-minutes) y NO lanza ningún backfill.
 
 Códigos de salida: 0 completed/dry_run_completed/recuperado · 1 blocked o recuperación
-rechazada/sin run · 2 failed o error de uso.
+rechazada/sin run (rechazo por regla, sin escrituras) · 2 failed, error de uso, otro run en curso
+del par o cualquier excepción inesperada (nunca se muestra la URL de la BD).
 """
 
 import argparse
 import asyncio
 import sys
+
+from sqlalchemy.engine import make_url
 
 from app.core.logging import setup_logging
 from app.schemas.backfill import BackfillResult, StaleRunRecovery
@@ -43,6 +48,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--expected-min", type=int, help="Q1: mínimo de partidos esperados (con --expected-max)")
     parser.add_argument("--expected-max", type=int, help="Q1: máximo de partidos esperados (con --expected-min)")
     parser.add_argument(
+        "--confirm-target",
+        help="ejecución real: destino <host>:<puerto>/<bd> que debe coincidir con DATABASE_URL",
+    )
+    parser.add_argument(
         "--fail-stale-run",
         action="store_true",
         help="operación administrativa: marca como failed el run 'running' abandonado del par (no hace backfill)",
@@ -63,15 +72,36 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         if args.expected_max < args.expected_min:
             parser.error("--expected-max no puede ser menor que --expected-min")
     if args.fail_stale_run:
-        if args.dry_run or args.refresh or args.expected_min is not None:
-            parser.error("--fail-stale-run es una operación separada: no admite --dry-run, --refresh ni --expected-*")
+        if args.dry_run or args.refresh or args.expected_min is not None or args.confirm_target is not None:
+            parser.error(
+                "--fail-stale-run es una operación separada: no admite --dry-run, --refresh, --expected-* ni --confirm-target"
+            )
         if args.stale_after_minutes is None:
             args.stale_after_minutes = DEFAULT_STALE_AFTER_MINUTES
         if args.stale_after_minutes < 1:
             parser.error("--stale-after-minutes debe ser >= 1")
     elif args.stale_after_minutes is not None:
         parser.error("--stale-after-minutes solo se usa con --fail-stale-run")
+    if not args.fail_stale_run and not args.dry_run:
+        if args.expected_min is None:
+            parser.error("una ejecución real exige --expected-min y --expected-max (usa --dry-run para descubrir el rango)")
+        if args.confirm_target is None:
+            parser.error("una ejecución real exige --confirm-target <host>:<puerto>/<bd>")
     return args
+
+
+def database_target(url: str) -> str:
+    """Destino saneado "<host>:<puerto>/<bd>" de una URL: nunca incluye usuario ni contraseña."""
+    parsed = make_url(url)
+    if not parsed.host or not parsed.database:
+        raise ValueError("DATABASE_URL no tiene un host y una base de datos identificables")
+    return f"{parsed.host.lower()}:{parsed.port or 5432}/{parsed.database}"
+
+
+def _configured_target() -> str:
+    from app.core.config import get_settings
+
+    return database_target(get_settings().database_url)
 
 
 def expected_range(args: argparse.Namespace) -> tuple[int, int] | None:
@@ -136,18 +166,41 @@ def _recover(args: argparse.Namespace) -> StaleRunRecovery:
         return fail_stale_run(db, args.competition_id, args.season, args.stale_after_minutes)
 
 
+def _unexpected(exc: Exception) -> int:
+    # Solo el tipo: el mensaje de un error de BD puede incluir el destino de la conexión
+    print(f"Error inesperado ({exc.__class__.__name__}); revisa el run en season_backfill_runs", file=sys.stderr)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     setup_logging("WARNING")
     if args.fail_stale_run:
-        recovery = _recover(args)
+        try:
+            recovery = _recover(args)
+        except ValueError as exc:
+            print(f"Error: {exc}", file=sys.stderr)
+            return 2
+        except Exception as exc:
+            return _unexpected(exc)
         print(format_recovery(recovery))
         return RECOVERY_EXIT_CODES[recovery.outcome]
+    try:
+        target = _configured_target()
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    print(f"Destino BD:  {target}")
+    if args.confirm_target is not None and args.confirm_target.strip() != target:
+        print(f"Error: --confirm-target no coincide con el destino de DATABASE_URL ({target}); no se ha escrito nada", file=sys.stderr)
+        return 2
     try:
         result = asyncio.run(_run(args))
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
+    except Exception as exc:
+        return _unexpected(exc)
     print(format_result(result))
     return EXIT_CODES.get(result.status, 2)
 

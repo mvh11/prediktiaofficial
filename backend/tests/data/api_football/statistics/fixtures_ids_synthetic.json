@@ -1,0 +1,68 @@
+{
+ "get": "fixtures",
+ "parameters": {"ids": "900001-900002-900003-900004-900005"},
+ "errors": [],
+ "results": 5,
+ "paging": {"current": 1, "total": 1},
+ "_comment": "SINTÉTICO (no es una respuesta real): casos límite del parser de estadísticas que la muestra real de M5.0 no contiene.",
+ "response": [
+  {
+   "fixture": {"id": 900001, "status": {"short": "ft", "long": "Match Finished"}},
+   "teams": {"home": {"id": 1, "name": "Local"}, "away": {"id": 2, "name": "Visitante"}},
+   "statistics": [
+    {
+     "team": {"id": 1, "name": "Local"},
+     "statistics": [
+      {"type": "Shots on Goal", "value": -1},
+      {"type": "Shots off Goal", "value": "4"},
+      {"type": "Total Shots", "value": 5},
+      {"type": "Total Shots", "value": 6},
+      {"type": "Fouls", "value": "-"},
+      {"type": "Corner Kicks", "value": true},
+      {"type": "Ball Possession", "value": "105%"},
+      {"type": "Yellow Cards", "value": "2"},
+      {"type": "Red Cards", "value": 0},
+      {"type": "Offsides", "value": 1.5},
+      {"type": "Passes %", "value": "n/a"},
+      {"type": "expected_goals", "value": 2},
+      {"type": "Expected Assists", "value": "1.20"},
+      {"type": "goals_prevented", "value": "-0.40"},
+      {"value": 3}
+     ]
+    },
+    {
+     "team": {"id": 2, "name": "Visitante"},
+     "statistics": [
+      {"type": "Shots on Goal", "value": 0},
+      {"type": "Ball Possession", "value": "0%"},
+      {"type": "Passes %", "value": "47.5"},
+      {"type": "Yellow Cards", "value": 1},
+      {"type": "Yellow Cards", "value": 1},
+      {"type": "expected_goals", "value": "-0.10"},
+      {"type": "Red Cards", "value": null}
+     ]
+    }
+   ]
+  },
+  {
+   "fixture": {"id": 900002, "status": {"short": "FT"}},
+   "statistics": [
+    {"team": {"id": 1, "name": "Local"}, "statistics": [{"type": "Corner Kicks", "value": 3}]}
+   ]
+  },
+  {
+   "fixture": {"id": 900003, "status": {"short": "FT"}},
+   "statistics": []
+  },
+  {
+   "fixture": {"id": 900004, "status": {"short": "FT"}}
+  },
+  {
+   "fixture": {"id": 900005, "status": {"short": "FT"}},
+   "statistics": [
+    {"team": {"name": "Sin id"}, "statistics": [{"type": "Fouls", "value": 9}]},
+    {"team": {"id": "7", "name": "Id en texto"}, "statistics": []}
+   ]
+  }
+ ]
+}

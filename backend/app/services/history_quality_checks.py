@@ -1,4 +1,4 @@
-"""Controles de calidad Q1–Q15 del backfill histórico.
+"""Controles de calidad Q1–Q16 del backfill histórico.
 
 Cada check devuelve un CheckResult con id, severidad, passed, count, un detalle corto y como
 mucho unos pocos external_id de ejemplo. Los checks DETECTAN anomalías; nunca las corrigen.
@@ -13,6 +13,8 @@ Decisiones documentadas:
 - Q6 es warning: el adapter descarta pares de marcador inválidos y el partido se guarda con
   goals NULL. Bloquear toda la temporada por un partido así perdería el resto; las features
   solo usan partidos con marcador, así que basta con registrarlo.
+- Q16 (membresía de season_teams) es warning, salvo su salvaguarda estructural, que se emite
+  como blocking en el propio CheckResult (ver q16_season_membership).
 """
 
 from collections.abc import Iterable
@@ -20,6 +22,7 @@ from datetime import datetime
 
 from app.schemas.backfill import MAX_SAMPLES, CheckResult
 from app.schemas.fixture import FINAL_STATUSES, FINISHED_STATUSES, FixtureData
+from app.services.season_membership import SeasonMembership
 
 SEVERITY: dict[str, str] = {
     "Q1": "blocking",
@@ -37,6 +40,8 @@ SEVERITY: dict[str, str] = {
     "Q13": "blocking",
     "Q14": "warning",
     "Q15": "blocking",
+    "Q16": "warning",
+    "PARITY": "blocking",
 }
 
 # Estados terminales: finales deportivos/administrativos más cancelado y abandonado
@@ -170,26 +175,85 @@ def q15_same_team(fixtures: list[FixtureData]) -> CheckResult:
 # --- Checks sobre el estado de la BD --------------------------------------------------------
 
 
-def q2_fixture_count(before: int, after: int | None) -> CheckResult:
-    """El conteo global de fixtures nunca disminuye. after=None: dry-run (el plan no tiene deletes)."""
+def q2_season_fixtures_kept(before: set[int], after: set[int] | None) -> CheckResult:
+    """Post-write, acotado a la temporada destino: ningún fixture que la temporada tenía antes de
+    escribir desaparece ni cambia de temporada. before/after: external_id de la temporada.
+    after=None: dry-run (el plan solo inserta/actualiza)."""
     if after is None:
-        return _result("Q2", count=0, detail=f"Dry-run: el plan solo inserta/actualiza ({before} fixtures)")
-    decrease = max(before - after, 0)
-    return _result("Q2", count=decrease, detail=f"fixtures antes {before}, después {after}")
+        return _result("Q2", count=0, detail=f"Dry-run: no aplica; la temporada tiene {len(before)} fixtures y el plan no borra")
+    missing = sorted(before - after)
+    return _result("Q2", missing, f"Fixtures de la temporada: {len(before)} antes, {len(after)} después; {len(missing)} desaparecidos")
 
 
 def q3_duplicate_mappings(count: int) -> CheckResult:
-    return _result("Q3", count=count, detail="(provider, external_id) duplicados en fixture_provider_mappings")
+    """Pre-write, global: precondición del entorno (la restricción UNIQUE ya lo impide)."""
+    return _result("Q3", count=count, detail="Pre-write, global: (provider, external_id) duplicados en fixture_provider_mappings")
 
 
 def q4_orphan_mappings(count: int) -> CheckResult:
-    return _result("Q4", count=count, detail="Mapeos de fixtures sin fixture")
+    """Pre-write, global: precondición del entorno (la FK con CASCADE ya lo impide)."""
+    return _result("Q4", count=count, detail="Pre-write, global: mapeos de fixtures sin fixture")
 
 
 def q13_mappings(missing: list[int], is_dry_run: bool, would_create: int = 0) -> CheckResult:
     if is_dry_run:
         return _result("Q13", count=0, detail=f"Dry-run: se crearían {would_create} mapeos de fixtures")
     return _result("Q13", missing, "Partidos recibidos sin mapeo del proveedor tras la escritura")
+
+
+def q16_season_membership(membership: SeasonMembership) -> CheckResult:
+    """Participantes que no son miembros de la temporada (no se vinculan a season_teams).
+
+    - Sin excluidos, o con excluidos y la señal de rounds numerados de acuerdo: PASS. Excluir a
+      un club de otra división que solo jugó un playoff es lo esperado, así que no es warning;
+      count y samples registran a los excluidos.
+    - Señales en desacuerdo (membership.ambiguous): warning. samples = equipos en desacuerdo.
+    - Salvaguarda: menos miembros que la mitad de los participantes es una clasificación absurda
+      y bloquea antes de escribir. Es la única variante blocking de Q16, así que la severidad se
+      fija en este CheckResult en lugar de en SEVERITY (que es la severidad por defecto).
+    """
+    excluded = sorted(membership.excluded)
+    summary = f"{len(membership.members)} miembros de {len(membership.participants)} participantes"
+    if len(membership.members) < len(membership.participants) / 2:
+        return CheckResult(
+            id="Q16",
+            severity="blocking",
+            passed=False,
+            count=len(excluded),
+            detail=f"Membresía inverosímil: {summary} (menos de la mitad); no se escribe la temporada",
+            samples=excluded[:MAX_SAMPLES],
+        )
+    if membership.ambiguous:
+        disagreement = sorted(membership.members ^ (membership.numbered_members or frozenset()))
+        return _result(
+            "Q16",
+            disagreement,
+            f"Membresía ambigua: {summary}; los rounds numerados no coinciden con los miembros inferidos",
+        )
+    if excluded:
+        return CheckResult(
+            id="Q16",
+            severity=SEVERITY["Q16"],
+            passed=True,
+            count=len(excluded),
+            detail=f"{summary}: {len(excluded)} participan en partidos de la temporada pero no son miembros (no van a season_teams)",
+            samples=excluded[:MAX_SAMPLES],
+        )
+    return _result("Q16", detail=f"{summary}: todos los participantes son miembros")
+
+
+def parity_not_applicable() -> CheckResult:
+    return _result("PARITY", detail="Dry-run: no aplica (no hay escritura que comparar)")
+
+
+def parity(mismatched: list[int], compared: int, new: int, existing: int) -> CheckResult:
+    """Real, antes del commit: cada partido recibido quedó guardado exactamente como se previó
+    (mismas columnas, temporada y equipos) y con un único mapeo del proveedor. Blocking."""
+    return _result(
+        "PARITY",
+        mismatched,
+        f"{compared} comparados (nuevos {new}, existentes {existing}); {len(mismatched)} discrepancias",
+    )
 
 
 def evaluate_incoming(
