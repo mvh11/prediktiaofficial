@@ -2,6 +2,21 @@
 
 Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Integrada con M4.2 en `checkpoint/m42-data-integrity` (ver [Checkpoint M4.2](#checkpoint-m42-ebcb076)). Ver [workstreams.md](workstreams.md).
 
+## Baseline reconciliado DI + Modular (vigente)
+
+**Estado:** `integration/di-modular-m43-reconcile` es el baseline canónico de Data Integrity integrado con Modular. Lo que diga la rama (Git, migraciones, tests) manda sobre este documento.
+
+- **Contenido:** Data Integrity `feature/data-integrity-next` @ `f6ec512` + Modular `feature/modular-data-m43` @ `b72b036` (merges reales, con el linaje de Modular). Commits: `d1f11cd` (reconciliación de M4.3 hasta `cbc00dd`), `015e545` (CLI `live_sync` sale con 2 si el proveedor no está configurado) y `1ee2f9d`, merge de `b72b036` (persistencia de estadísticas por lotes, solo Modular).
+- **Validación del baseline:** suite completa 1055 passed, 0 failed, 0 skipped, contra PostgreSQL local desechable (nunca Neon).
+- **Contratos compartidos acordados:**
+  - `upsert_fixtures` devuelve `UpsertCounts(received, created, updated, unchanged)`; `CompetitionFixtureSyncResult.fixtures` = `received` (recibidos sin duplicados).
+  - El ciclo de vida del proveedor es del run, nunca de cada competición: sin proveedor inyectado la sync abre el suyo con `async with`; uno inyectado es de quien lo creó (`app.jobs.live_sync` abre el run). Ninguna transacción de BD abierta durante el HTTP.
+  - La clasificación de `sync_failures` (corte del run por credenciales, proveedor sin configurar, límite/cuota o conexión con la BD perdida) convive con el hook `on_competition`, la elegibilidad del polling y la revalidación de temporada de Modular.
+  - `history_backfill_service.py` es de Modular en comportamiento.
+- **Migraciones:** cabeza única `0007` (`0005` → `0006` Modular → `0007` Modular). Reservas: **`0008` = DI-A6**, **`0009` = DI-A5D**. Ninguna creada todavía.
+- **Siguiente carril:** DI-A6 (evidencia temporal de fixtures), una vez cumplidas todas las puertas (suite verde, cabeza `0007`, documentación al día, rama de integración publicada). **DI-A5D: HOLD.**
+- **Separación semántica obligatoria:** la evidencia temporal de estadísticas NO es evidencia temporal de fixtures. `observed_at` / `last_observed_at` de `fixture_statistics_observations` (Modular, M5) son un dominio aparte y no se reutilizan para `fixture_observations.observed_at`, `fixtures.last_observed_at` ni `fixtures.last_state_hash` (DI-A6).
+
 ## Auditoría hecha
 
 Se revisaron estos puntos:
