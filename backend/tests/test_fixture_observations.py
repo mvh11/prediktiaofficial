@@ -296,3 +296,28 @@ def test_conflict_error_happens_inside_the_transaction(db_session, season_id):
     savepoint.rollback()
     assert (row_state(fixture(db_session)), fixture(db_session).last_observed_at) == before
     assert len(observations(db_session)) == 1
+
+
+# --- Lecturas para quien verifica escrituras (paridad del backfill) ------------------------
+
+
+@pytest.mark.parametrize("minutes", [-10, 0, 10])
+@pytest.mark.parametrize("values", [FT_1_0, FT_2_0], ids=["same", "changed"])
+def test_evidence_wins_matches_the_real_upsert(db_session, season_id, minutes, values):
+    upsert(db_session, season_id, at(0), make_fixture_data(1, **FT_1_0))
+    key = fixture_repository.ordering_keys(db_session, [1])[1]
+    incoming = make_fixture_data(1, **values)
+    evidence = at(minutes)
+    incoming_hash = state_hashes(db_session, [row_state_of(db_session, season_id, incoming)])[0]
+    predicted = fixture_repository.evidence_wins(evidence, incoming_hash, key)
+    upsert(db_session, season_id, evidence, incoming)
+    assert (fixture_repository.ordering_keys(db_session, [1])[1] != key) == predicted  # solo cambia si gana
+    assert fixture_repository.evidence_wins(evidence, incoming_hash, None)
+
+
+def test_observed_external_ids_lists_one_per_fixture(db_session, season_id):
+    ev = at(0)
+    upsert(db_session, season_id, ev, make_fixture_data(1), make_fixture_data(2, home=3, away=4))
+    upsert(db_session, season_id, at(1), make_fixture_data(1))
+    assert sorted(fixture_repository.observed_external_ids(db_session, ev.evidence_id)) == [1, 2]
+    assert fixture_repository.ordering_keys(db_session, []) == {}

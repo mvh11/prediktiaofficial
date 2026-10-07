@@ -320,6 +320,32 @@ def _check_replay(db: Session, evidence: FixtureEvidence, replayed: list[dict]) 
 # --- Lecturas -----------------------------------------------------------------------------
 
 
+def ordering_keys(db: Session, external_ids: list[int]) -> dict[int, tuple[datetime, bytes]]:
+    """{external_id: (last_observed_at, last_state_hash)} de los partidos que ya existen."""
+    if not external_ids:
+        return {}
+    rows = db.execute(
+        select(Fixture.external_id, Fixture.last_observed_at, Fixture.last_state_hash).where(Fixture.external_id.in_(external_ids))
+    )
+    return {e: (observed_at, bytes(h)) for e, observed_at, h in rows}
+
+
+def evidence_wins(evidence: FixtureEvidence, state_hash: bytes, stored_key: tuple[datetime, bytes] | None) -> bool:
+    """La misma regla que el WHERE de upsert_fixtures: la evidencia actualiza fixtures si su clave es mayor."""
+    return stored_key is None or (evidence.observed_at, state_hash) > stored_key
+
+
+def observed_external_ids(db: Session, evidence_id) -> list[int]:
+    """external_id de cada observación de esa evidencia (una por partido; repetidos si hubiera más)."""
+    return list(
+        db.scalars(
+            select(Fixture.external_id)
+            .join(FixtureObservation, FixtureObservation.fixture_id == Fixture.id)
+            .where(FixtureObservation.evidence_id == evidence_id)
+        )
+    )
+
+
 def list_fixtures(
     db: Session,
     *,
