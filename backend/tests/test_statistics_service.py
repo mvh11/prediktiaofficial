@@ -18,7 +18,7 @@ from app.repositories import fixture_repository
 from app.repositories import statistics_run_repository as runs
 from app.services import statistics_service as service
 from app.services.statistics_service import BackfillOptions
-from tests.conftest import make_competition, make_fixture_data
+from tests.conftest import make_competition, make_evidence, make_fixture_data
 
 pytestmark = pytest.mark.db
 
@@ -86,7 +86,7 @@ def season(db_session):
     def add(n, start=1001, status="FT"):
         data = [make_fixture_data(start + i, home=2 * (start + i) + 1, away=2 * (start + i) + 2, status=status) for i in range(n)]
         team_ids = fixture_repository.ensure_teams(db_session, [t for f in data for t in (f.home_team, f.away_team)], PROVIDER)
-        fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, PROVIDER)
+        fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, PROVIDER, make_evidence(provider=PROVIDER))
         db_session.commit()
         return [(f.external_id, f.home_team.external_id, f.away_team.external_id) for f in data]
 

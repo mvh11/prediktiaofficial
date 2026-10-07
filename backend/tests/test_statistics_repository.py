@@ -11,7 +11,7 @@ from app.models import Fixture, FixtureStatisticsObservation, FixtureTeamStatist
 from app.repositories import fixture_repository
 from app.repositories import statistics_repository as repo
 from app.schemas.statistics import TeamStatisticValues
-from tests.conftest import load_json, make_competition, make_fixture_data
+from tests.conftest import load_json, make_competition, make_evidence, make_fixture_data
 
 pytestmark = pytest.mark.db
 
@@ -27,7 +27,7 @@ def match(db_session):
     _, sid = make_competition(db_session, 39, name="Premier League")
     data = [make_fixture_data(1557402, home=63, away=34, status="FT", kickoff_at=KICKOFF, home_goals=2, away_goals=1, fulltime_home=2, fulltime_away=1)]
     team_ids = fixture_repository.ensure_teams(db_session, [data[0].home_team, data[0].away_team], PROVIDER)
-    fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, PROVIDER)
+    fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, PROVIDER, make_evidence(provider=PROVIDER))
     return db_session.execute(select(Fixture.id, Fixture.home_team_id, Fixture.away_team_id)).one()
 
 
