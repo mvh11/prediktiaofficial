@@ -20,6 +20,7 @@ concurrency:
 jobs:
   tick:
     if: ${{ vars.PREDIKTIA_SCHEDULER_ENABLED == 'true' }}
+    environment: production
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
