@@ -134,3 +134,29 @@ class StrictKnowledgeReport:
     @property
     def counts(self) -> dict[KnowledgeStatus, int]:
         return {s: len(self._with(s)) for s in KnowledgeStatus}
+
+
+@dataclass(frozen=True)
+class RetrospectiveFinalResult:
+    """RETROSPECTIVE_FINAL_RESULTS: resultado final de un partido según el estado operativo ACTUAL
+    de fixtures.
+
+    Es retrospectivo: puede llevar pares fusionados de respuestas distintas y correcciones
+    posteriores a cualquier corte. No tiene t* ni evidencia: no es conocimiento a fecha T y no se
+    puede usar como sustituto ni como relleno de STRICT_KNOWLEDGE.
+    """
+
+    mode: ClassVar[EvaluationMode] = EvaluationMode.RETROSPECTIVE_FINAL_RESULTS
+
+    fixture_id: int
+    status_short: str
+    home_goals: int | None
+    away_goals: int | None
+    halftime_home: int | None
+    halftime_away: int | None
+    fulltime_home: int | None
+    fulltime_away: int | None
+    extratime_home: int | None
+    extratime_away: int | None
+    penalty_home: int | None
+    penalty_away: int | None
