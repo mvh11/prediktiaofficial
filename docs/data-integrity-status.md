@@ -14,12 +14,12 @@ Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Int
   - La clasificación de `sync_failures` (corte del run por credenciales, proveedor sin configurar, límite/cuota o conexión con la BD perdida) convive con el hook `on_competition`, la elegibilidad del polling y la revalidación de temporada de Modular.
   - `history_backfill_service.py` es de Modular en comportamiento.
 - **Migraciones:** cabeza única `0007` (`0005` → `0006` Modular → `0007` Modular). Reservas: **`0008` = DI-A6**, **`0009` = DI-A5D**. Ninguna creada todavía.
-- **Siguiente carril:** DI-A6 (evidencia temporal de fixtures), una vez cumplidas todas las puertas (suite verde, cabeza `0007`, documentación al día, rama de integración publicada). El contrato está ratificado ([DI-A6C](#di-a6c-contrato-de-evidencia-temporal-de-fixtures)), pero la implementación sigue en **HOLD** hasta que el Chief la autorice. **DI-A5D: HOLD.**
+- **Siguiente carril:** DI-A6 (evidencia temporal de fixtures), una vez cumplidas todas las puertas (suite verde, cabeza `0007`, documentación al día, rama de integración publicada). El contrato está ratificado ([DI-A6C](#di-a6c-contrato-de-evidencia-temporal-de-fixtures)). Implementación autorizada y en curso en `feature/data-integrity-a6`: ver [DI-A6: implementación](#di-a6-implementación-checkpoint-a). **DI-A5D: HOLD.**
 - **Separación semántica obligatoria:** la evidencia temporal de estadísticas NO es evidencia temporal de fixtures. `observed_at` / `last_observed_at` de `fixture_statistics_observations` (Modular, M5) son un dominio aparte y no se reutilizan para `fixture_observations.observed_at`, `fixtures.last_observed_at` ni `fixtures.last_state_hash` (DI-A6).
 
 ## DI-A6C: contrato de evidencia temporal de fixtures
 
-**Estado:** arquitectura **congelada y ratificada** por el Chief, con G1, G2 y G3 resueltas (ver [decisiones ratificadas](#a6c-decisiones-ratificadas-g1g3)). Implementación en **HOLD** hasta que el Chief la autorice. Migración **`0008`** reservada, sin crear. Este apartado es autosuficiente: una sesión nueva no necesita los transcripts para reconstruir el contrato.
+**Estado:** arquitectura **congelada y ratificada** por el Chief, con G1, G2 y G3 resueltas (ver [decisiones ratificadas](#a6c-decisiones-ratificadas-g1g3)). Implementación autorizada por el Chief; Checkpoint A hecho en `feature/data-integrity-a6` (ver [DI-A6: implementación](#di-a6-implementación-checkpoint-a)). Migración **`0008`** creada en esa rama. Este apartado es autosuficiente: una sesión nueva no necesita los transcripts para reconstruir el contrato.
 
 Cada punto lleva su clase:
 
@@ -337,7 +337,50 @@ Ratificadas por el Chief el 2026-10-06. Todas son **[FROZEN]** y ya están en lo
 - rama de integración publicada en origin;
 - entorno de medición (F);
 - versión de PostgreSQL de Neon (A);
-- autorización del Chief para empezar la implementación.
+- ~~autorización del Chief para empezar la implementación~~ (concedida; ver abajo).
+
+## DI-A6: implementación (Checkpoint A)
+
+**Estado:** Checkpoint A hecho y pendiente de revisión. Rama `feature/data-integrity-a6` (worktree `prediktia-di-a6`), base `9a5a5f2`, **sin push**. HEAD de implementación: `1920590`; este registro va en el commit de documentación siguiente. No se ha tocado `main`, `feature/data-integrity-next` ni la rama de Modular. **DI-A5D: HOLD** (`0009` sin crear).
+
+- **Commits (DI):**
+  - `9ea08aa`: migración `0008`, modelos, `FixtureEvidence` y escritor.
+  - `c55fd2d`: sync.
+  - `ec58d37`: lecturas para verificar escrituras.
+- **Commits Modular-facing, marcados `[MODULAR-REVIEW]`:**
+  - `7c41705`: `history_backfill_service.py`.
+  - `1920590`: tests de Modular.
+- **Migración `0008_fixture_observations`** (`0007 → 0008`, una sola cabeza):
+  - función `fixture_state_hash_v1` (solo SQL, IMMUTABLE);
+  - tabla `fixture_observations` con el esquema congelado;
+  - `fixtures.last_observed_at` y `last_state_hash` NOT NULL, con CHECK de 32 bytes.
+- **Bootstrap** (dentro de la transacción de la migración):
+  - `lock_timeout` de 5 s desde el primer bloqueo y `LOCK TABLE fixtures`;
+  - un `bootstrap_at` (reloj de la app, tomado después del bloqueo) y un `evidence_id`;
+  - validación de recuentos antes de `SET NOT NULL`; el índice temporal se crea al final.
+  - Cualquier fallo deshace todo y se puede volver a lanzar; con un escritor activo falla por `lock_timeout`.
+  - **Solo se ha ejecutado en BD de tests:** nunca en Neon ni en producción.
+- **Escritor (`upsert_fixtures(..., provider, evidence)`):**
+  - una consulta SQL calcula los hashes;
+  - el upsert lleva `WHERE (last_observed_at, last_state_hash) < (excluded…)`, con la fusión de pares de siempre, y `updated_at` solo se mueve si cambian datos;
+  - una observación por partido con lo observado, con `ON CONFLICT (fixture_id, evidence_id) DO NOTHING`, y relectura que lanza `EvidenceIdentityConflict` si se reutiliza un `evidence_id` con otro contenido;
+  - filas ordenadas por `external_id`;
+  - `UpsertCounts`: los mismos cuatro campos y significados, calculados con una lectura previa (informativos).
+- **Evidencia:** `FixtureEvidence.received(source, provider)` se crea justo después de que `get_fixtures` vuelva con éxito, fuera de toda transacción. Lo hacen la sync (`source='sync'`) y el backfill (`source='backfill'`).
+- **Backfill (Modular-facing):** `PARITY` sigue la regla de orden y exige una observación de la evidencia por partido recibido. El resto del comportamiento de Modular no cambia.
+- **Tests:**
+  - **Nuevos (101):** `test_migration_0008` 23, `test_fixture_state_hash` 29 (con vectores de oro congelados), `test_fixture_observations` 33, `test_fixture_observations_concurrency` 8 (dos conexiones reales, con espera de bloqueo comprobada), `test_fixture_sync_evidence` 3 y `test_history_backfill_evidence` 5.
+  - **Suite completa combinada:** 1156 passed, 0 failed, 0 skipped, 0 errors, en PostgreSQL 18.6 local desechable (`127.0.0.1:55443`). Nunca Neon.
+  - **Mutaciones:** quitar el `WHERE` de orden rompe 8 tests; ignorar el orden en `PARITY` rompe 1.
+- **Revisión de Modular:** **PENDIENTE.** El dueño de Modular tiene que revisar `7c41705` y `1920590`. Ningún test de estadísticas se ha debilitado; solo se pasa evidencia y se borra la evidencia antes de borrar fixtures.
+- **Riesgos conocidos:**
+  - **Límite de parámetros:** el INSERT de `fixtures` pasa de 22 a 24 parámetros por fila (la consulta de hashes usa 16 y la de observaciones 21), así que el techo de PostgreSQL (65 535 por sentencia) baja de ~2 970 a ~2 730 partidos por respuesta. Ya existía, no hay troceado, y se medirá en el Checkpoint C sin cambiar la semántica.
+  - **`tools/perf_lab` no está adaptado a `0008`:** la siembra por COPY y las llamadas a `upsert_fixtures` lo rompen. Queda para el Checkpoint C.
+  - **Mapeos:** `last_seen_at` del mapeo sigue avanzando con evidencia antigua (comportamiento previo, ajeno a A6C).
+  - **Pendiente operativo:** versión de PostgreSQL de Neon (al menos 14).
+- **Siguiente punto seguro:**
+  - el Checkpoint B (lectura `STRICT_KNOWLEDGE` / `UNKNOWN_AT_T` / `TEMPORAL_AMBIGUITY` AS_OBSERVED y el modo `RETROSPECTIVE_FINAL_RESULTS` separado), una vez revisado el A;
+  - en paralelo, la revisión de Modular.
 
 ## Auditoría hecha
 
