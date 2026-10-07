@@ -27,3 +27,7 @@ node_modules/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Salidas generadas por backend/tools/perf_lab (seed/bench/profile). Las ya versionadas se
+# conservan (el README de perf_lab las cita como evidencia); las nuevas no se versionan.
+backend/tools/perf_lab/results/*.json
