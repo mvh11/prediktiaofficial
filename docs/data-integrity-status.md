@@ -749,6 +749,71 @@ Se mide `strict_knowledge()` real (consulta + construcción de los tipos) con id
   - revisión del Chief de esta corrección;
   - verificación empírica en PostgreSQL 14–17: aquí solo se ha ejecutado en 18.6; las primitivas usadas son portables según la documentación.
 
+### C.12 Transporte UNNEST en el escritor de la opción A (candidato de producción)
+
+**Estado:** implementado y validado en local por autorización del Chief; **candidato de producción pendiente de decisión del Chief**. Aceptación de A6 para producción: **HOLD**. Sin cambio de esquema (cabeza única `0008`, `0009` sin crear), sin migraciones, sin advisory locks, sin `xmax`, sin `RETURNING OLD/NEW` de PG18 y sin cambiar el aislamiento.
+
+- **Commits:**
+  - `7a8643f`: el transporte (`app/repositories/bulk_rows.py`) y su uso en `fixture_repository` y `provider_mapping_repository`;
+  - `afa686c`: tests del transporte.
+- **Origen:** el mecanismo de DI-A3F (`7a521fe`, cierre `e04cd9e`), portado **dentro** del escritor actual de la opción A, no como el clon de DI-A3F (que era anterior a la opción A y conservaba la carrera de los contadores).
+- **Qué cambia:** solo el transporte de las sentencias multi-fila. Cada columna viaja como un array tipado y se lee con `unnest()`:
+  - el hash (`fixture_state_hash_v1`, el mismo);
+  - el INSERT de equipos;
+  - el `INSERT ... ON CONFLICT DO NOTHING RETURNING` de los partidos ausentes;
+  - el `INSERT ... ON CONFLICT DO UPDATE ... WHERE` de orden sobre las filas bloqueadas;
+  - el INSERT de observaciones;
+  - el upsert de mappings de origen (también usado por la sync de catálogo).
+- **Qué no cambia:**
+  - las filas, columnas, expresiones (`now()`), conflictos, predicados, RETURNING y defaults de la BD;
+  - la transacción;
+  - el `SELECT ... FOR UPDATE ORDER BY external_id` y la clasificación de la opción A;
+  - las sentencias de partidos fijan su orden de proceso con `ORDER BY external_id`, el mismo orden ascendente que antes;
+  - las cadenas viajan como `text[]`, así que un valor demasiado largo se rechaza y no se trunca;
+  - los arrays se validan antes de construir el SQL.
+- **Paridad semántica (MEDIDA):**
+  - escenario diferencial de 14 pasos con `ensure_teams` + `upsert_fixtures` y los mismos ids internos: VALUES (`4309e15`) frente a UNNEST, con contadores **idénticos** en cada paso;
+  - los pasos cubren: inserción con FT/AET/PEN/parcial/en vivo, actualización, confirmación, repetición, evidencia antigua, empate en el instante, respuesta parcial que conserva pares, corrección AET → FT, PST que limpia marcadores, lote mixto, duplicados en la entrada, cambio de nombre/logo de equipo, actualización deshecha y entrada vacía;
+  - instantánea final **idéntica**: fixtures con `last_state_hash` y evidencia ganadora; 24 observaciones con su `state_hash` (todos canónicos); equipos (incluido `is_national`); mappings de partidos y equipos (`raw_name` y `last_seen_at`).
+- **Concurrencia (MEDIDA):** los 24 tests de la opción A pasan con UNNEST, con contadores exactos por escritor, el mismo punto de espera, sin deadlocks y sin lock timeouts.
+- **Rollback:** los tests del hueco cerrado siguen verdes con UNNEST: error de BD tras escribir, refresh fallido y escritor que falla tras la contención.
+- **Regresiones:**
+  - dirigidas (escritor, concurrencia, rollback, `PARITY` del backfill, Modular, estadísticas, C6, sync, lecturas temporales): 696 passed;
+  - **suite completa combinada: 1355 passed, 0 failed, 0 skipped, 0 errors, 1 warning** (`StarletteDeprecationWarning`, ajeno; 1355 = 1349 + 6).
+- **Rendimiento (MEDIDO; mismo arnés de C, mismo cluster y misma sesión, 100 000 partidos, 30 + 5 muestras; referencia: la opción A con VALUES):**
+
+  | Lote | Aceleración p50 (mín–máx por modo; mediana) | UNNEST p50 |
+  |---:|---|---:|
+  | 10 | 1,54–1,90×; 1,79× | 9–14 ms |
+  | 100 | 4,42–4,78×; 4,50× | 24–28 ms |
+  | 380 | 5,88–6,97×; 6,54× | 66–78 ms (p95 79–96) |
+  | 1000 | 5,98–6,84×; 6,37× | 181–210 ms |
+  | 2000 | 6,13–6,87×; 6,32× | 362–413 ms |
+
+  - Por clase de carga (lotes de 380 a 2000, mediana): insert 6,33×, update 6,32×, unchanged 6,26×, older 6,77×, mixed 5,98×, tie 6,61× y replay 6,87×.
+  - **Con 380, UNNEST queda por debajo del escritor pre-A6** (~72 ms frente a ~175 ms). Es muy inferior a los umbrales aceptados (≤ 600/750 ms; el sobrecoste frente a pre-A6 pasa a ~0,4×).
+  - La ganancia está en SQLAlchemy antes del cursor: con 1000 filas, 625–676 → 11–14 ms. El round-trip del cursor baja a menos de la mitad.
+  - El COMMIT sube algo con lotes de 2000 (1,4–2,9 → 2,0–8,3 ms), igual que vio DI-A3F, pero es despreciable en el total.
+  - La parte del hash en el escritor baja al ~10 %.
+- **WAL:** sin cambio (0,88–1,02×).
+- **HOT (lectura del umbral aceptado "≥ 90 % con lotes ≤ 1000 EN ESTADO ESTABLE"):**
+  - en la matriz, UNNEST queda igual o por encima de VALUES (confirmaciones con 1000: 95,8 % frente a 94,6 %; con 2000: 88,5 % frente a 75,3 %);
+  - en el experimento pareado (una sola BD, alternando), el HOT sube con el estado de las páginas en ambos transportes: 12,5 → 40,5 → 77,1 → 83,7 → **99,2 → 97,8 %**;
+  - en estado estable los dos cumplen ≥ 90 %. El HOT bajo justo tras el bootstrap no es una regresión del transporte.
+- **Memoria Python (pico de asignaciones en una respuesta, MEDIDO):** 380: 11,1 → 2,4 MiB; 1000: 30,0 → 5,0 MiB; 2000: 60,9 → 9,3 MiB.
+- **Parámetros (capacidad técnica, separada de la política):**
+  - con UNNEST, el máximo de parámetros enlazados en una sentencia es igual al número de partidos: solo quedan las listas `IN`;
+  - una sola respuesta funciona con 2730, 4000, 5000, 10 000 y 20 000 partidos (20 000: 3,7 s y 96 MiB), siempre con rollback;
+  - el siguiente límite técnico serían las listas `IN` (~65 535 ids por sentencia): DERIVADO, no medido;
+  - **la política no cambia:** tope operativo **≤ 2000** y techo duro global **2729**. Subirlos exige una decisión aparte del Chief.
+- **Revisión de Modular:** `3c5f12a` (tests del rollback del backfill) sigue **PENDIENTE** de la revisión de comportamiento del dueño de Modular. UNNEST no cambia el comportamiento del backfill (paridad de su suite y de `PARITY`).
+- **Puertas que siguen abiertas:**
+  - decisión del Chief sobre este candidato;
+  - nueva medición en el entorno de destino;
+  - arquitectura de almacenamiento y particionado de la evidencia;
+  - verificación empírica en PostgreSQL 14–17 (aquí solo 18.6; `unnest()` de varios arrays y `INSERT ... SELECT ... ON CONFLICT` están documentados desde mucho antes de la 14);
+  - revisión de Modular de `3c5f12a`.
+
 ## Auditoría hecha
 
 Se revisaron estos puntos:
