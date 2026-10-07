@@ -9,13 +9,14 @@ from sqlalchemy.exc import IntegrityError
 from app.models import (
     CompetitionProviderMapping,
     Fixture,
+    FixtureObservation,
     FixtureProviderMapping,
     Provider,
     TeamProviderMapping,
 )
 from app.repositories import fixture_repository
 from app.repositories.provider_mapping_repository import upsert_origin_mappings
-from tests.conftest import make_competition, make_fixture_data
+from tests.conftest import make_competition, make_evidence, make_fixture_data
 
 pytestmark = pytest.mark.db
 
@@ -27,7 +28,7 @@ def _two_fixtures(db) -> tuple[int, int]:
     data = [make_fixture_data(9001), make_fixture_data(9002)]
     teams = [d.home_team for d in data] + [d.away_team for d in data]
     team_ids = fixture_repository.ensure_teams(db, teams, "api-football")
-    fixture_repository.upsert_fixtures(db, season_id, data, team_ids, "api-football")
+    fixture_repository.upsert_fixtures(db, season_id, data, team_ids, "api-football", make_evidence())
     ids = dict(db.execute(select(Fixture.external_id, Fixture.id)).all())
     return ids[9001], ids[9002]
 
@@ -148,6 +149,11 @@ def test_fk_integrity(db_session):
         with db_session.begin_nested():
             db_session.execute(delete(Provider).where(Provider.code == FIVE))
 
+    with pytest.raises(IntegrityError):  # RESTRICT (DI-A6): un fixture con historia no se borra en silencio
+        with db_session.begin_nested():
+            db_session.execute(delete(Fixture).where(Fixture.id == f1))
+    # Borrado explícito: primero su evidencia temporal y después el fixture, cuyos mapeos van en CASCADE
+    db_session.execute(delete(FixtureObservation).where(FixtureObservation.fixture_id == f1))
     db_session.execute(delete(Fixture).where(Fixture.id == f1))  # CASCADE
     assert db_session.scalar(select(FixtureProviderMapping.id).where(FixtureProviderMapping.fixture_id == f1)) is None
 

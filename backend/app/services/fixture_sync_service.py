@@ -11,7 +11,9 @@ Transacciones, por competición:
 3. Nueva transacción: se revalida que esa temporada sigue siendo la actual (la sync del catálogo
    pudo cambiarla durante la descarga); si no, no se escribe nada (skipped).
 4. Equipos, partidos y mapeos de esa competición y commit: cada competición es atómica y una
-   competición que falla no afecta a las demás.
+   competición que falla no afecta a las demás. Con los partidos va su evidencia temporal
+   (fixture_observations, DI-A6), en la misma transacción: una respuesta = un FixtureEvidence
+   (source='sync'), creado al recibirla, entre los pasos 2 y 3.
 
 Ciclo de vida del proveedor: es del nivel del run, nunca de cada competición. Sin proveedor
 inyectado la sync abre el suyo con `async with` (un cliente HTTP compartido por todas las
@@ -34,6 +36,7 @@ from app.integrations.football.base import FootballDataProvider
 from app.integrations.request_stats import describe, stats_of
 from app.repositories import catalog_repository, fixture_repository
 from app.schemas.fixture import CompetitionFixtureSyncResult, FixtureSyncResult
+from app.schemas.fixture_evidence import FixtureEvidence
 from app.services.polling_eligibility import polling_eligibility
 from app.services.provider_service import get_football_provider
 from app.services.sync_failures import (
@@ -164,6 +167,9 @@ async def _sync_fixtures(
                     logger.warning("%s: no se piden las competiciones restantes", exc.__class__.__name__)
                 _report(db, on_competition, result)
                 continue
+            # La respuesta acaba de llegar (reintentos incluidos): esta es su identidad y su observed_at
+            # (DI-A6), capturados antes de abrir la transacción de escritura
+            evidence = FixtureEvidence.received("sync", provider.name)
 
             # 3. Revalidación y 4. escritura atómica de la competición
             try:
@@ -177,7 +183,7 @@ async def _sync_fixtures(
                 team_external_ids = list({t.external_id for t in teams})
                 existing_teams = fixture_repository.count_existing_teams(db, team_external_ids)
                 team_ids = fixture_repository.ensure_teams(db, teams, provider.name)
-                counts = fixture_repository.upsert_fixtures(db, season_id, fixtures, team_ids, provider.name)
+                counts = fixture_repository.upsert_fixtures(db, season_id, fixtures, team_ids, provider.name, evidence)
                 result.fixtures, result.created, result.updated, result.unchanged = (
                     counts.received, counts.created, counts.updated, counts.unchanged,
                 )
