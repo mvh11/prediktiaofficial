@@ -419,3 +419,53 @@ def test_live_sync_ordinary_competition_failure_still_exits_1(db_session, compet
     run = _fixtures_run(db_session)
     assert run.status == "completed_with_errors" and run.competitions_failed == 1
     assert run.provider_requests == 3  # el 404 no corta el run: las otras dos se piden
+
+
+# --- C6 sobre el árbol integrado: ops_tick + live_sync de DI ---------------------------------
+
+
+def test_ops_tick_live_keeps_scheduler_skip_di_config_failure_and_provider_lifecycle(db_session, competitions, job):
+    """A: scheduler + lock ocupado → SKIPPED / exit 0 sin peticiones. B: sin API key (config_failed
+    de DI) → exit 2. C: un run normal usa UN cliente HTTP y lo cierra. D: ops_tick clasifica el run
+    cortado por DI como FAILED (no como un DEGRADED de competiciones)."""
+    from datetime import datetime, timezone
+
+    from app.jobs import ops_tick
+    from app.repositories import live_sync_repository as runs
+
+    spy = job["spy"]
+
+    def tick():
+        def runner(module, args):
+            assert module == ops_tick.LIVE_SYNC  # live solo lanza live_sync (fixtures y check)
+            return cli.main(args)
+
+        return ops_tick.run_tick("live", target=TARGET, now=datetime.now(timezone.utc),
+                                 session_factory=lambda: nullcontext(db_session), runner=runner)
+
+    def fixtures_step(result):
+        return next(s for s in result.steps if s["step"] == "fixtures")
+
+    # A
+    holder = runs.create_run(db_session, job_type="catalog", trigger="cli")
+    db_session.commit()
+    skipped = tick()
+    assert fixtures_step(skipped)["class"] == "SKIPPED" and fixtures_step(skipped)["exit"] == 0
+    assert spy.requests == [] and job["providers"][-1].http_requests == 0
+    runs.finish_run(db_session, holder, status="completed")
+    db_session.commit()
+
+    # C (el run saltado también abrió y cerró su cliente al entrar en `async with provider`)
+    before = len(spy.clients)
+    ok = tick()
+    assert fixtures_step(ok)["class"] == "SUCCESS"
+    assert len(spy.clients) == before + 1 and all(c.is_closed for c in spy.clients)
+    assert [i for i, _ in spy.requests] == [before] * 3  # un solo cliente para las 3 competiciones
+
+    # B + D
+    job["api_key"] = ""
+    cut = tick()
+    step = fixtures_step(cut)
+    assert step["exit"] == 2 and step["class"] == "FAILED" and cut.cls == "FAILED"
+    assert cut.reason == "job_exit_error" and job["providers"][-1].config_failed
+    assert "job_failed" in [e["event"] for e in cut.events] and cut.exit_code() == 2

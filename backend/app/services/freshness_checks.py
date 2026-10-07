@@ -15,6 +15,14 @@ Umbrales (cadencia horaria de la sync de fixtures):
   competición fallida WARNING.
 - F8 PST/TBD con kickoff de hace más de 7 días: INFO (nunca error: depende del proveedor).
 - F9 temporadas pendientes de conciliación histórica: INFO (no se ejecuta nada).
+
+Estadísticas (C6; temporadas operativas no dormant, las mismas que el reconciliador live):
+- S1 finales sin ninguna observación dentro de la ventana de primera adquisición (7 días) con el
+  primer fetch (kickoff + 4 h 30) vencido hace más de 2 h: WARNING; alguno vencido hace más de
+  24 h: ERROR.
+- S2 finales sin observación fuera de esa ventana (backlog para la puesta al día explícita): INFO.
+- S3 último reconciliador live (apply) terminado: > 2 h WARNING, > 24 h ERROR; ninguno: INFO
+  (todavía no se ha encendido el scheduler).
 """
 
 from datetime import datetime, timedelta
@@ -23,10 +31,12 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.repositories import live_sync_repository as runs
+from app.services import statistics_reconcile_service as reconcile
 from app.services.polling_eligibility import polling_eligibility
 
 LIVE_STATUSES = ("1H", "HT", "2H", "ET", "BT", "P", "LIVE")
 SUSPENDED_STATUSES = ("SUSP", "INT")
+STATISTICS_PROVIDER = "api-football"
 SEVERITY_ORDER = {"PASS": 0, "INFO": 0, "WARNING": 1, "ERROR": 2}
 MAX_SAMPLES = 5
 
@@ -142,6 +152,8 @@ def run_checks(db: Session, now: datetime) -> dict:
         _check("F9_pending_reconciliation", "INFO", f"Temporadas cerradas con datos y sin backfill completed: {len(pending)}", len(pending), [f"{n} {y}" for n, y in pending])
     )
 
+    checks.extend(statistics_checks(db, now))
+
     overall = max((c["status"] for c in checks), key=lambda s: SEVERITY_ORDER[s])
     overall = "PASS" if overall == "INFO" else overall
     return {
@@ -152,3 +164,52 @@ def run_checks(db: Session, now: datetime) -> dict:
         "errors": sum(1 for c in checks if c["status"] == "ERROR"),
         "checks": checks,
     }
+
+
+def statistics_checks(db: Session, now: datetime) -> list[dict]:
+    """S1–S3: solo lecturas (ni escribe ni llama al proveedor)."""
+    seasons, _excluded = reconcile.operational_seasons(db, now.date())
+    ids = [s.id for s in seasons] or [-1]
+    first_fetch = reconcile.FIXTURE_END_ESTIMATE + reconcile.CHECKPOINTS["T1"]
+    window_start = now - reconcile.FIRST_ACQUISITION_LOOKBACK - first_fetch
+    without = db.execute(
+        text(
+            "SELECT f.external_id, f.kickoff_at FROM fixtures f WHERE f.season_id = ANY(:ids) "
+            "AND f.status_short IN ('FT', 'AET', 'PEN') AND f.kickoff_at <= :due "
+            "AND NOT EXISTS (SELECT 1 FROM fixture_statistics_observations o WHERE o.fixture_id = f.id AND o.provider = :p) "
+            "ORDER BY f.kickoff_at"
+        ),
+        {"ids": ids, "due": now - first_fetch - timedelta(hours=2), "p": STATISTICS_PROVIDER},
+    ).all()
+    overdue = [(e, (now - (k + first_fetch)).total_seconds() / 3600) for e, k in without if k >= window_start]
+    if not overdue:
+        s1 = _check("S1_first_acquisition_overdue", "PASS", "Finales (≤ 7 días) con el primer fetch vencido hace más de 2 h: 0")
+    else:
+        worst = max(h for _, h in overdue)
+        s1 = _check(
+            "S1_first_acquisition_overdue", "ERROR" if worst > 24 else "WARNING",
+            f"Finales (≤ 7 días) sin estadísticas con el primer fetch vencido: {len(overdue)} (el más antiguo hace {worst:.1f} h)",
+            len(overdue), [e for e, _ in overdue],
+        )
+    backlog = db.execute(
+        text(
+            "SELECT count(*) FROM fixtures f WHERE f.season_id = ANY(:ids) AND f.status_short IN ('FT', 'AET', 'PEN') "
+            "AND f.kickoff_at < :start "
+            "AND NOT EXISTS (SELECT 1 FROM fixture_statistics_observations o WHERE o.fixture_id = f.id AND o.provider = :p)"
+        ),
+        {"ids": ids, "start": window_start, "p": STATISTICS_PROVIDER},
+    ).scalar()
+    s2 = _check("S2_backlog_outside_lookback", "INFO", f"Finales sin estadísticas fuera de la ventana de 7 días (puesta al día explícita): {backlog}", backlog)
+    last = db.execute(
+        text(
+            "SELECT id, finished_at FROM statistics_runs WHERE scope = 'live' AND mode = 'apply' "
+            "AND status IN ('completed', 'completed_with_errors') ORDER BY finished_at DESC LIMIT 1"
+        )
+    ).first()
+    if last is None:
+        s3 = _check("S3_statistics_reconcile_last_run", "INFO", "El reconciliador live de estadísticas no se ha ejecutado todavía")
+    else:
+        hours = (now - last.finished_at).total_seconds() / 3600
+        status = "ERROR" if hours > 24 else ("WARNING" if hours > 2 else "PASS")
+        s3 = _check("S3_statistics_reconcile_last_run", status, f"Último reconciliador live (run #{last.id}) hace {hours:.1f} h")
+    return [s1, s2, s3]

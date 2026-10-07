@@ -36,6 +36,13 @@ class CoverageAccumulator:
     def add_outcome(self, outcome: str) -> None:
         self.fixtures[outcome] += 1
 
+    def add_plan(self, plan) -> None:
+        """Resultado de un partido evaluado (FixturePlan): su desenlace y, si no quedó bloqueado
+        ni ausente, los valores de sus equipos."""
+        self.add_outcome(plan.outcome)
+        if plan.outcome in ("available", "partial"):
+            self.add_fixture_values(plan.values_for_coverage)
+
     def add_fixture_values(self, teams: list[TeamStatisticValues]) -> None:
         """Valores normalizados de los equipos (con estadísticas) de un partido no bloqueado."""
         if not teams:
