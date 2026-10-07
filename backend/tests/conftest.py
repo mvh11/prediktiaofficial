@@ -305,3 +305,22 @@ def make_fixture_data(external_id: int, home: int = 1, away: int = 2, status: st
     }
     values.update(kwargs)
     return FixtureData(**values)
+
+
+_last_evidence_at: list = []
+
+
+def make_evidence(observed_at=None, source: str = "sync", provider: str | None = "api-football", evidence_id=None):
+    """FixtureEvidence de una respuesta nueva (DI-A6). Sin observed_at, un instante real y siempre
+    estrictamente posterior al anterior, para que dos respuestas seguidas de un test nunca empaten."""
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from app.schemas.fixture_evidence import FixtureEvidence
+
+    if observed_at is None:
+        observed_at = datetime.now(timezone.utc)
+        if _last_evidence_at and observed_at <= _last_evidence_at[-1]:
+            observed_at = _last_evidence_at[-1] + timedelta(microseconds=1)
+        _last_evidence_at[:] = [observed_at]
+    return FixtureEvidence(source=source, provider=provider, observed_at=observed_at, evidence_id=evidence_id or uuid.uuid4())

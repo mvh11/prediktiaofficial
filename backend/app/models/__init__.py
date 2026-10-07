@@ -7,6 +7,7 @@ from app.db.database import Base
 from app.models.backfill import SeasonBackfillRun
 from app.models.competition import Competition
 from app.models.fixture import Fixture
+from app.models.fixture_observation import FixtureObservation
 from app.models.live_sync import LiveSyncRun
 from app.models.provider import Provider
 from app.models.provider_mapping import (
@@ -23,6 +24,7 @@ __all__ = [
     "Competition",
     "CompetitionProviderMapping",
     "Fixture",
+    "FixtureObservation",
     "FixtureProviderMapping",
     "FixtureStatisticsObservation",
     "FixtureTeamStatistics",

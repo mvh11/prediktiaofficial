@@ -5,19 +5,27 @@ por lote para no hacer una ida y vuelta a la BD por cada fila, y registran tambi
 los IDs del proveedor en las tablas de mapeo (escritura doble).
 
 El upsert de fixtures no es destructivo con los marcadores: ver _fixture_update_values.
+
+Evidencia temporal (DI-A6, contrato en docs/data-integrity-status.md, "DI-A6C"): cada partido de
+una respuesta del proveedor se guarda además en fixture_observations TAL COMO SE OBSERVÓ, en la
+misma transacción. fixtures solo se actualiza si la evidencia gana la clave de orden
+(observed_at, state_hash) a la que fijó su estado: la evidencia más antigua entra en la historia
+pero nunca pisa un estado actual más nuevo, sea cual sea el orden de commit (READ COMMITTED: el
+WHERE del ON CONFLICT se vuelve a evaluar sobre la última versión confirmada de la fila).
 """
 
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import and_, case, func, null, or_, select
+from sqlalchemy import DateTime, Integer, Text, and_, case, cast, func, literal, null, or_, select, tuple_, union_all
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, joinedload
 
-from app.models import Fixture, FixtureProviderMapping, Season, Team, TeamProviderMapping
+from app.models import Fixture, FixtureObservation, FixtureProviderMapping, Season, Team, TeamProviderMapping
 from app.repositories.provider_mapping_repository import upsert_origin_mappings
 from app.schemas.catalog import TeamData
 from app.schemas.fixture import FINISHED_STATUSES, FixtureData
+from app.schemas.fixture_evidence import PROVIDER_SOURCES, FixtureEvidence
 
 # Campos de FixtureData que se copian tal cual a la tabla
 _FIXTURE_COLUMNS = [
@@ -32,6 +40,13 @@ _EXTRATIME_PAIR = ("extratime_home", "extratime_away")
 _PENALTY_PAIR = ("penalty_home", "penalty_away")
 _SCORE_PAIRS = [_GOALS_PAIR, _HALFTIME_PAIR, _EXTRATIME_PAIR, _PENALTY_PAIR]
 _FULLTIME_PAIR = ("fulltime_home", "fulltime_away")
+# Estado temporal de una observación, en el orden fijo de fixture_state_hash_v1 (migración 0008)
+STATE_COLUMNS = (
+    "kickoff_at", "status_short", "season_id", "home_team_id", "away_team_id",
+    "home_goals", "away_goals", "halftime_home", "halftime_away", "fulltime_home", "fulltime_away",
+    "extratime_home", "extratime_away", "penalty_home", "penalty_away",
+)
+_STATE_TYPES = {"kickoff_at": DateTime(timezone=True), "status_short": Text()}
 # Estados en los que el partido no se está jugando ni se ha jugado (o se anuló, o aún no tiene
 # fecha): un NULL entrante en ellos limpia los marcadores guardados. En el resto (terminado,
 # adjudicado, en vivo, suspendido, interrumpido...) un NULL entrante es una respuesta parcial
@@ -104,12 +119,44 @@ def _fixture_update_values(excluded, columns: list[str]) -> dict:
 
 @dataclass(frozen=True)
 class UpsertCounts:
-    """Resultado de upsert_fixtures: received = created + updated + unchanged (sin duplicados)."""
+    """Resultado de upsert_fixtures: received = created + updated + unchanged (sin duplicados).
+
+    created: partidos nuevos. updated: existentes cuyos DATOS cambiaron. unchanged: el resto
+    (confirmaciones, evidencia más antigua que el estado actual y repeticiones de una respuesta).
+    Son informativos: la corrección del estado no depende de ellos.
+    """
 
     received: int
     created: int
     updated: int
     unchanged: int
+
+
+class EvidenceIdentityConflict(Exception):
+    """El mismo (fixture_id, evidence_id) ya existe con otro contenido: reutilización incoherente.
+
+    Es un error de programación, no un fallo aislable de la competición: se propaga.
+    """
+
+
+def _state_type(column: str):
+    return _STATE_TYPES.get(column, Integer())
+
+
+def state_hashes(db: Session, states: list[dict]) -> list[bytes]:
+    """fixture_state_hash_v1 de cada estado, en el mismo orden. El hash solo se define en SQL."""
+    selects = [
+        select(
+            literal(i, Integer).label("i"),
+            func.fixture_state_hash_v1(*(cast(literal(state[c], _state_type(c)), _state_type(c)) for c in STATE_COLUMNS)).label("h"),
+        )
+        for i, state in enumerate(states)
+    ]
+    if not selects:
+        return []
+    stmt = selects[0] if len(selects) == 1 else union_all(*selects)
+    by_index = dict(db.execute(stmt).all())
+    return [bytes(by_index[i]) for i in range(len(states))]
 
 
 def count_existing_teams(db: Session, external_ids: list[int]) -> int:
@@ -142,21 +189,34 @@ def ensure_teams(db: Session, teams: list[TeamData], provider: str) -> dict[int,
 
 
 def upsert_fixtures(
-    db: Session, season_id: int, fixtures: list[FixtureData], team_ids: dict[int, int], provider: str
+    db: Session,
+    season_id: int,
+    fixtures: list[FixtureData],
+    team_ids: dict[int, int],
+    provider: str,
+    evidence: FixtureEvidence,
 ) -> UpsertCounts:
-    """Guarda los partidos de una temporada en una sola sentencia y devuelve los contadores.
+    """Guarda los partidos de UNA respuesta del proveedor (evidence) y su evidencia temporal.
 
-    Las filas que no cambian no se reescriben (ni se toca su updated_at). Contadores exactos sin
-    depender de updated_at ni de columnas de sistema: se leen antes los external_id que ya
-    existen (1 consulta) y el upsert devuelve con RETURNING solo las filas insertadas o
-    realmente actualizadas (el WHERE del ON CONFLICT descarta las que no cambian):
-    created = devueltas y no existentes; updated = devueltas y existentes; unchanged = el resto.
+    En la transacción del llamante, sin commit:
+    1. fixtures: INSERT ... ON CONFLICT DO UPDATE solo si (observed_at, state_hash) de la evidencia
+       supera a (last_observed_at, last_state_hash) de la fila. Con la fusión de pares de siempre
+       y updated_at solo si algún dato cambia; una confirmación más nueva solo adelanta el orden.
+    2. fixture_observations: una fila por partido con lo OBSERVADO (sin fusión), gane o no.
+       Repetir la misma respuesta (mismo evidence_id) no crea filas; si el (fixture_id, evidence_id)
+       ya existe con otro contenido se lanza EvidenceIdentityConflict.
+    3. Mapeos del proveedor (last_seen_at), como antes.
+
+    Contadores exactos sin concurrencia: se leen antes los datos de las filas existentes y RETURNING
+    devuelve las filas en las que ganó la evidencia; updated = las existentes cuyos datos cambian.
     """
-    unique = list({f.external_id: f for f in fixtures}.values())
+    if evidence.source not in PROVIDER_SOURCES or evidence.provider != provider:
+        raise ValueError(f"evidencia {evidence.source}/{evidence.provider} no válida para el proveedor {provider!r}")
+    # Orden estable por external_id: dos escritores concurrentes bloquean las filas en el mismo orden
+    unique = sorted({f.external_id: f for f in fixtures}.values(), key=lambda f: f.external_id)
     if not unique:
         return UpsertCounts(received=0, created=0, updated=0, unchanged=0)
     external_ids = [f.external_id for f in unique]
-    existed = set(db.scalars(select(Fixture.external_id).where(Fixture.external_id.in_(external_ids))))
     rows = [
         {
             **f.model_dump(include=set(_FIXTURE_COLUMNS)),
@@ -166,25 +226,95 @@ def upsert_fixtures(
         }
         for f in unique
     ]
-    stmt = insert(Fixture).values(rows)
-    new_values = _fixture_update_values(stmt.excluded, [k for k in rows[0] if k != "external_id"])
-    # Solo se reescribe la fila (y se mueve updated_at) si algún valor cambia de verdad
-    changed = or_(*(Fixture.__table__.c[k].is_distinct_from(v) for k, v in new_values.items()))
+    hashes = state_hashes(db, rows)
+    table = Fixture.__table__
+    data_columns = [k for k in rows[0] if k != "external_id"]
+    before = {
+        r[0]: tuple(r[1:])
+        for r in db.execute(
+            select(table.c.external_id, *(table.c[c] for c in data_columns)).where(table.c.external_id.in_(external_ids))
+        )
+    }
+
+    stmt = insert(Fixture).values(
+        [{**row, "last_observed_at": evidence.observed_at, "last_state_hash": h} for row, h in zip(rows, hashes)]
+    )
+    excluded = stmt.excluded
+    new_values = _fixture_update_values(excluded, data_columns)
+    changed = or_(*(table.c[k].is_distinct_from(v) for k, v in new_values.items()))
+    newer = tuple_(table.c.last_observed_at, table.c.last_state_hash) < tuple_(
+        excluded.last_observed_at, excluded.last_state_hash
+    )
     stmt = stmt.on_conflict_do_update(
         index_elements=[Fixture.external_id],
-        set_={**new_values, "updated_at": func.now()},
-        where=changed,
-    ).returning(Fixture.external_id)
-    written = set(db.scalars(stmt))
-    # RETURNING no devuelve las filas sin cambios: los ids se leen aparte. El mapeo sí se
-    # actualiza siempre (last_seen_at = el proveedor volvió a observar el partido)
+        set_={
+            **new_values,
+            "last_observed_at": excluded.last_observed_at,
+            "last_state_hash": excluded.last_state_hash,
+            # Solo se mueve si algún dato cambia: una confirmación no es una actualización de datos
+            "updated_at": case((changed, func.now()), else_=table.c.updated_at),
+        },
+        where=newer,
+    ).returning(table.c.external_id, *(table.c[c] for c in data_columns))
+    written = {r[0]: tuple(r[1:]) for r in db.execute(stmt)}
+
     ids = dict(db.execute(select(Fixture.external_id, Fixture.id).where(Fixture.external_id.in_(external_ids))).all())
+    observations = [
+        {
+            "evidence_id": evidence.evidence_id,
+            "fixture_id": ids[row["external_id"]],
+            "observed_at": evidence.observed_at,
+            "source": evidence.source,
+            "provider": evidence.provider,
+            "state_hash": h,
+            **{c: row[c] for c in STATE_COLUMNS},
+        }
+        for row, h in zip(rows, hashes)
+    ]
+    inserted = set(
+        db.scalars(
+            insert(FixtureObservation)
+            .values(observations)
+            .on_conflict_do_nothing(index_elements=["fixture_id", "evidence_id"])
+            .returning(FixtureObservation.fixture_id)
+        )
+    )
+    replayed = [o for o in observations if o["fixture_id"] not in inserted]
+    if replayed:
+        _check_replay(db, evidence, replayed)
+
+    # El mapeo se actualiza siempre (last_seen_at = el proveedor volvió a observar el partido)
     upsert_origin_mappings(
         db, FixtureProviderMapping, provider, [(fixture_id, e, None) for e, fixture_id in ids.items()]
     )
-    created = len(written - existed)
-    updated = len(written & existed)
+    created = sum(1 for e in written if e not in before)
+    updated = sum(1 for e, values in written.items() if e in before and values != before[e])
     return UpsertCounts(received=len(unique), created=created, updated=updated, unchanged=len(unique) - created - updated)
+
+
+def _check_replay(db: Session, evidence: FixtureEvidence, replayed: list[dict]) -> None:
+    """Las observaciones que ya existían con este evidence_id tienen que ser exactamente la misma evidencia."""
+    o = FixtureObservation
+    stored = {
+        r.fixture_id: r
+        for r in db.execute(
+            select(o.fixture_id, o.observed_at, o.source, o.provider, o.state_hash).where(
+                o.evidence_id == evidence.evidence_id, o.fixture_id.in_([x["fixture_id"] for x in replayed])
+            )
+        )
+    }
+    expected = {x["fixture_id"]: (x["observed_at"], x["source"], x["provider"], x["state_hash"]) for x in replayed}
+    conflicts = sorted(
+        fixture_id
+        for fixture_id, values in expected.items()
+        if fixture_id not in stored
+        or (stored[fixture_id].observed_at, stored[fixture_id].source, stored[fixture_id].provider, bytes(stored[fixture_id].state_hash))
+        != values
+    )
+    if conflicts:
+        raise EvidenceIdentityConflict(
+            f"evidence_id {evidence.evidence_id} reutilizado con otro contenido en {len(conflicts)} partido(s): {conflicts[:5]}"
+        )
 
 
 # --- Lecturas -----------------------------------------------------------------------------
