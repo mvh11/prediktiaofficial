@@ -341,7 +341,7 @@ Ratificadas por el Chief el 2026-10-06. Todas son **[FROZEN]** y ya están en lo
 
 ## DI-A6: implementación (Checkpoint A)
 
-**Estado:** Checkpoint A hecho y pendiente de revisión. Rama `feature/data-integrity-a6` (worktree `prediktia-di-a6`), base `9a5a5f2`, **sin push**. HEAD de implementación: `1920590`; este registro va en el commit de documentación siguiente. No se ha tocado `main`, `feature/data-integrity-next` ni la rama de Modular. **DI-A5D: HOLD** (`0009` sin crear).
+**Estado:** Checkpoint A **CERRADO** por el Chief (2026-10-07). Checkpoint B hecho: ver [DI-A6: Checkpoint B](#di-a6-checkpoint-b-lectura-temporal). Registro original del Checkpoint A: Rama `feature/data-integrity-a6` (worktree `prediktia-di-a6`), base `9a5a5f2`, **sin push**. HEAD de implementación: `1920590`; este registro va en el commit de documentación siguiente. No se ha tocado `main`, `feature/data-integrity-next` ni la rama de Modular. **DI-A5D: HOLD** (`0009` sin crear).
 
 - **Commits (DI):**
   - `9ea08aa`: migración `0008`, modelos, `FixtureEvidence` y escritor.
@@ -421,6 +421,36 @@ Desde C6 hay un scheduler que escribe fixtures cada hora en producción. Antes d
 5. **Comprobar que no hay nada en curso:** ningún run de GitHub Actions de `ops-*` en ejecución y ninguna fila `running` en `live_sync_runs`, `season_backfill_runs` ni `statistics_runs`.
 
 **La quiescencia de escritores es obligatoria.** El `lock_timeout` de 5 s y el rollback de la migración son solo una protección de último recurso: evitan un estado a medias, pero no sustituyen a parar los escritores.
+
+## DI-A6: Checkpoint B (lectura temporal)
+
+**Estado:** Checkpoint A **CERRADO** (Chief, 2026-10-07). Checkpoint B **hecho**, pendiente de decisión del Chief. Rama `feature/data-integrity-a6`, base `7aa25cc`, **sin push**. **Sin cambio de esquema:** cabeza única `0008`, `0009` sin crear (reservada para DI-A5D). Checkpoint C no iniciado.
+
+- **Commits:**
+  - `17db2b1`: tipos de resultado (`app/schemas/fixture_knowledge.py`) y lectura `STRICT_KNOWLEDGE` (`app/repositories/fixture_knowledge_repository.py`).
+  - `770255b`: tests de `STRICT_KNOWLEDGE` (`tests/test_fixture_strict_knowledge.py`, 20).
+  - `e56d3d8`: modo `RETROSPECTIVE_FINAL_RESULTS` separado (`app/repositories/fixture_retrospective_repository.py`) y sus tests (`tests/test_fixture_retrospective_results.py`, 4).
+- **`STRICT_KNOWLEDGE`** (`strict_knowledge(db, fixture_ids, cutoff)` y `strict_knowledge_at(db, fixture_id, cutoff)`):
+  - el corte T es un instante con zona horaria (uno naive es `ValueError`) y es inclusivo: `observed_at <= T`;
+  - lee **solo** `fixture_observations`: ni `fixtures`, ni `recorded_at` (viaja en el resultado solo como auditoría), ni `fixture_statistics_observations`;
+  - por partido, `t* = max(observed_at <= T)`. Sin filas → `UNKNOWN_AT_T`; un solo `state_hash` en `t*` → `KNOWN`; más de uno → `TEMPORAL_AMBIGUITY`, sin ganador (el hash no es cronología);
+  - `KNOWN` devuelve la fila observada en `t*` tal cual (G1, AS_OBSERVED): los pares parciales siguen NULL y nada se rellena desde observaciones anteriores ni desde `fixtures`. Si en `t*` hay varias respuestas con el mismo estado, se devuelven todas; `state` es una de ellas (el contenido es idéntico por hash; el orden por `evidence_id` solo estabiliza la salida);
+  - `TEMPORAL_AMBIGUITY` conserva las filas en conflicto para auditoría, pero `state` es `None`;
+  - **tipos explícitos:** `FixtureKnowledge` (con invariantes que impiden construir un `KNOWN` sin evidencia o un `UNKNOWN_AT_T` con `t*`) y `StrictKnowledgeReport`, ambos con `mode = STRICT_KNOWLEDGE`. Por defecto el conjunto utilizable es `known`; `UNKNOWN_AT_T` y `TEMPORAL_AMBIGUITY` quedan fuera y se cuentan (`counts`);
+  - los partidos los enumera el llamador (`fixtures.id`); enumerar no aporta estado.
+- **`RETROSPECTIVE_FINAL_RESULTS`** (`retrospective_final_results(db, fixture_ids)`): resultado final según el estado **actual** de `fixtures` (con la fusión de pares), solo para partidos en `FINAL_STATUSES`. Separación: otro módulo, otro tipo (`RetrospectiveFinalResult`, `mode = RETROSPECTIVE_FINAL_RESULTS`) y **sin parámetro de corte**. El módulo estricto no importa `Fixture` ni el modo retrospectivo, así que no puede recurrir a ellos. No se le ha dado más semántica que esa separación.
+- **No implementado:** el indicador `partial_pairs` (propuesta [DELEGATED] de B). La incompletitud para un mercado sigue siendo responsabilidad del consumidor.
+- **Consulta:** una sola sentencia para todos los partidos, con los ids como un único parámetro de array (sin `UNNEST`). Medido en una BD desechable con 1 000 000 de observaciones (100 000 partidos × 10) y una "temporada" de 380 partidos: las dos fases usan `ix_fixture_observations_fixture_observed` (bitmap index scan para `t*` e index scan por partido en `t*`), con 1,2 ms de ejecución. Es una comprobación del plan, no la medición G2 del Checkpoint C. No hacen falta índices nuevos.
+- **Tests:**
+  - **Nuevos (24):** clasificación con el corte incluido y excluido; gana el último `t*`; corte en otra zona horaria; mismo instante con el mismo estado (`KNOWN`) o con estados distintos (`TEMPORAL_AMBIGUITY`, en ambos órdenes de escritura); la ambigüedad solo afecta a su instante; marcadores parciales tal cual; sin fusión; **regresión explícita:** `fixtures` tiene hoy el marcador completo y `STRICT_KNOWLEDGE` devuelve la observación parcial anterior; repetición exacta sin falsa ambigüedad; evidencia antigua escrita después, ordenada por `observed_at` y no por id ni `recorded_at`; evidencia de estadísticas ignorada; una sola consulta sin `fixtures` ni `recorded_at` tras el `FROM`; informe por defecto; separación de los dos modos.
+  - **Mutaciones** (aplicadas y revertidas): quitar el filtro del corte rompe 10 tests; usar `<` en vez de `<=` rompe 2; desempatar por el hash mayor rompe 4.
+  - **Regresión de escritores** (evidencia, orden, atomicidad, concurrencia, paridad del backfill, Modular y `DELETE RESTRICT`): `test_fixture_observations`, `test_fixture_observations_concurrency`, `test_fixture_state_hash`, `test_migration_0008`, `test_fixture_sync_evidence`, `test_history_backfill_evidence`, `test_history_backfill`, `test_fixture_upsert`, `test_migration_0007`, `test_statistics_batch_equivalence`, `test_provider_mappings` y `test_live_sync_fixtures`: **365 passed**.
+  - **Suite completa combinada sobre `e56d3d8`:** **1309 passed, 0 failed, 0 skipped, 0 errors, 1 warning** (`StarletteDeprecationWarning`, ajeno). 1309 = 1285 + 24. PostgreSQL 18.6 local desechable (`127.0.0.1:55443`); nunca Neon.
+- **Riesgos y huecos conocidos:**
+  - **Hueco aceptado, no bloqueante (sigue abierto):** no hay un test dedicado que demuestre que el camino de error de BD del backfill (`except _DB_ERRORS: db.rollback()`) no deja observaciones. Solo lo cubre el código.
+  - Los riesgos del Checkpoint A siguen igual: techo de parámetros por respuesta, `tools/perf_lab` sin adaptar a `0008`, versión de PostgreSQL de Neon.
+  - Todavía no hay ningún consumidor (generación de features o backtest) que use la lectura estricta. Cuando lo haya, tiene que usar `STRICT_KNOWLEDGE` y no `RETROSPECTIVE_FINAL_RESULTS`.
+- **Siguiente punto seguro:** decisión del Chief sobre el Checkpoint C (adaptar `perf_lab` a `0008`, mediciones G2 y techo de parámetros). No se ha iniciado.
 
 ## Auditoría hecha
 
