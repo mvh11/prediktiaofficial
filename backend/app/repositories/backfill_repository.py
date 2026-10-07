@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 
-from app.models import Fixture, FixtureProviderMapping, SeasonBackfillRun, SeasonTeam, Team
+from app.models import Fixture, FixtureProviderMapping, Season, SeasonBackfillRun, SeasonTeam, Team
 
 # Columnas de fixtures que el backfill compara para decidir si un partido cambiaría
 FIXTURE_STATE_COLUMNS = [
@@ -89,6 +89,22 @@ def get_run(db: Session, run_id: int) -> SeasonBackfillRun | None:
     return db.get(SeasonBackfillRun, run_id)
 
 
+def lock_run_status(db: Session, run_id: int) -> str | None:
+    """Estado actual del run, bloqueado con SELECT ... FOR UPDATE hasta el fin de la transacción.
+
+    Lo usa el backfill al abrir la transacción de escritura: si otro proceso (p. ej. la
+    recuperación de runs abandonados) lo cambió mientras se descargaba, no se escribe nada.
+    """
+    stmt = select(SeasonBackfillRun.status).where(SeasonBackfillRun.id == run_id).with_for_update()
+    return db.scalar(stmt)
+
+
+def season_state(db: Session, season_id: int) -> dict | None:
+    """is_current y end_date actuales de la temporada (lectura directa, sin la caché de la sesión)."""
+    row = db.execute(select(Season.is_current, Season.end_date).where(Season.id == season_id)).first()
+    return None if row is None else {"is_current": row.is_current, "end_date": row.end_date}
+
+
 # --- Lecturas del estado previo -------------------------------------------------------------
 
 
@@ -128,8 +144,30 @@ def mapped_fixture_external_ids(db: Session, provider: str, external_ids: list[i
     return set(db.scalars(stmt))
 
 
-def count_fixtures(db: Session) -> int:
-    return db.scalar(select(func.count()).select_from(Fixture))
+def season_fixture_external_ids(db: Session, season_id: int) -> set[int]:
+    return set(db.scalars(select(Fixture.external_id).where(Fixture.season_id == season_id)))
+
+
+def provider_mapping_count(db: Session, provider: str, external_ids: list[int]) -> int:
+    """Mapeos del proveedor (de cualquier external_id) de los fixtures con esos external_id."""
+    if not external_ids:
+        return 0
+    stmt = (
+        select(func.count())
+        .select_from(FixtureProviderMapping)
+        .join(Fixture, Fixture.id == FixtureProviderMapping.fixture_id)
+        .where(FixtureProviderMapping.provider == provider, Fixture.external_id.in_(external_ids))
+    )
+    return db.scalar(stmt)
+
+
+def season_fixture_evidence(db: Session, season_id: int, since) -> tuple[int, int]:
+    """(fixtures de la temporada, de ellos creados desde `since`). Evidencia de solo lectura."""
+    total = db.scalar(select(func.count()).select_from(Fixture).where(Fixture.season_id == season_id))
+    created = db.scalar(
+        select(func.count()).select_from(Fixture).where(Fixture.season_id == season_id, Fixture.created_at >= since)
+    )
+    return total, created
 
 
 def duplicate_mapping_count(db: Session) -> int:

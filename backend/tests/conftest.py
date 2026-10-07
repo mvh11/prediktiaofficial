@@ -210,6 +210,8 @@ def _alembic_config():
 
     cfg = Config(str(BACKEND_DIR / "alembic.ini"))
     cfg.set_main_option("script_location", str(BACKEND_DIR / "alembic"))
+    # Sin fileConfig en alembic/env.py: desactivaría los loggers de app.* (y rompería caplog)
+    cfg.attributes["configure_logger"] = False
     return cfg
 
 

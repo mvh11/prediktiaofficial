@@ -1,13 +1,30 @@
 # Estado: desarrollo modular
 
-Rama `feature/modular-data`. Ver [workstreams.md](workstreams.md) y [agent-rules.md](agent-rules.md).
+Rama actual `feature/modular-data-m43`, checkpoint conocido `6952425` (`6952425e0e84bf78d6bc414df85a4b3263d9ff89`). Ver [workstreams.md](workstreams.md) y [agent-rules.md](agent-rules.md), teniendo en cuenta la deuda documental de ownership registrada abajo.
 
 ## Estado actual
 
-- **M4.2:** integrado con Data Integrity en la rama `checkpoint/m42-data-integrity`, merge commit `ebcb076` ("merge: integrate M4.2 with data integrity"). **Validación PostgreSQL completa realizada:** 489 passed, 0 failed, 0 skipped (ver [Tests y verificación](#tests-y-verificación)). Pendiente de promoción a `main`.
-- **Commits de Modular integrados:** `3084996` ("avance 4.2"), `6e3aff1` ("feat: add historical backfill infrastructure"), `ff26513` ("docs: add shared development coordination") y `456c556` ("docs: add modular data status"), todos sobre la base común `298b2f3` ("mudar a neon 004").
-- **`feature/modular-data`:** congelada en `456c556`.
-- **M4.3:** **sigue sin empezar.** Se empezará desde el `main` resultante del checkpoint.
+- **M4.2: completado e integrado.** La integración y validación originales se conservan como antecedente histórico abajo, no como una promoción pendiente ni como el siguiente paso operativo.
+- **M4.3: completado.** Backfills reales de Premier League 2025 (380 fixtures) y Liga MX 2025 (337 fixtures).
+- **M4.4A: completado.** Discovery de 34 pares P0: 2 ya `completed` y 32 dry-runs realizados (runs #5–#36, todos `dry_run_completed`), sin cambios de dominio.
+- **M4.4 real: PAUSADO** hasta validar el hardening de `season_teams` bajo Modular Principal.
+
+El estado operativo y los conteos de M4.3/M4.4A aquí documentados son los comunicados por el usuario; esta actualización documental no ejecuta tests, consultas de BD ni llamadas a proveedores.
+
+## Coordinación: Modular Principal y Modular Auxiliar
+
+- **Modular Principal = ChatGPT + Claude.** Tiene ownership del hardening de `season_teams`, membership/backfill, Q16 y tests directamente relacionados. Para ese trabajo tiene reservados:
+  - `backend/app/services/history_backfill_service.py`;
+  - `backend/app/services/season_membership.py`: **ruta prevista si Principal decide crearla**; el archivo todavía no existe;
+  - Q16 y los history quality checks relacionados en `backend/app/services/history_quality_checks.py`;
+  - los tests directamente relacionados con membership/backfill, incluidos los existentes `backend/tests/test_history_backfill.py`, `backend/tests/test_history_quality_checks.py` y `backend/tests/test_history_stale_runs.py`, y los nuevos que Principal cree para ese alcance.
+- **Modular Auxiliar = ChatGPT + OpenCode.** No toca esos archivos ni tests mientras Principal trabaja en ellos. OpenCode puede realizar investigaciones, documentación y tareas pequeñas expresamente delegadas; no asume cambios de código ni ownership por iniciativa propia.
+
+Las rutas existentes del servicio, quality checks y tests anteriores se han verificado en el repositorio; Q16 y el nuevo módulo de membership forman parte del hardening pendiente, no se dan por implementados aquí.
+
+### Deuda documental de ownership
+
+[workstreams.md](workstreams.md), [agent-rules.md](agent-rules.md) y [data-integrity-status.md](data-integrity-status.md) mantienen el ownership antiguo de backfills asociado a Data Integrity / Sync. No reflejan todavía la división Principal/Auxiliar ni la reserva actual de membership/backfill para Principal. Se registra esta deuda sin modificar esos documentos; su actualización requiere una tarea expresamente autorizada.
 
 ## Módulos completados
 
@@ -19,9 +36,11 @@ Componentes presentes en la rama (código comprobado en el repositorio):
 - **Upsert de fixtures por pares** (`3084996`, trabajo previo que M4.2 reutiliza): marcadores por pares completos y tests de casos límite del adapter. La política final de conservación/limpieza por estado se fijó en el checkpoint y está descrita en [data-integrity-status.md](data-integrity-status.md).
 - **M4.2:** backfill histórico (detalle abajo).
 
-La numeración de los módulos anteriores (M1–M4.1) no figura en el repositorio: **Pendiente de verificación**.
+M1–M4.1 son antecedentes completados del roadmap. El desarrollo actual ya está en M4.4; este documento no reconstruye ni atribuye detalles de implementación a cada una de esas fases anteriores.
 
-## M4.2
+## M4.2: antecedente histórico completado e integrado
+
+El detalle siguiente conserva únicamente como antecedente la implementación y validación del checkpoint histórico `checkpoint/m42-data-integrity @ ebcb076`.
 
 ### Objetivo
 
@@ -123,7 +142,7 @@ Además existe un check `PARITY` (warning) si el estado guardado no coincide con
 
 ### Tests y verificación
 
-**Validación del checkpoint (`checkpoint/m42-data-integrity`, merge `ebcb076`): completa.**
+**Validación histórica del checkpoint (`checkpoint/m42-data-integrity`, merge `ebcb076`): completa.** No es una nueva ejecución ni valida el hardening pendiente de M4.4.
 
 - **Entorno:** PostgreSQL 18.6 local y desechable (cluster creado solo para la validación, escuchando únicamente en `127.0.0.1`, eliminado al terminar).
 - **Contrato de la guarda:** `TEST_DATABASE_URL` más `TEST_DATABASE_ALLOW_DESTRUCTIVE=<host>:<puerto>/<bd>`, con el destino exacto.
@@ -159,10 +178,9 @@ Además existe un check `PARITY` (warning) si el estado guardado no coincide con
 
 - **Q2, Q3 y Q4 son globales** (cuentan toda la tabla), no solo el par. Una anomalía previa ajena al par bloquea cualquier backfill. Es una decisión conservadora; su impacto operativo está **Pendiente de verificación** con datos reales.
 - **Q12 sin identidad:** si el proveedor no informa la liga/temporada, Q12 bloquea la temporada entera.
-- **Uso real del CLI contra Neon:** no se ha ejecutado ningún backfill real. **Pendiente de verificación.**
 - **Pares completos incoherentes con el estado** (por ejemplo, `penalty` completo en un FT): el upsert los guarda tal como llegan. Ningún check del backfill los señala todavía; es una auditoría posterior al checkpoint.
 
-### Resuelto en el checkpoint
+### Resuelto en el checkpoint histórico M4.2
 
 - **Conflictos con Data Integrity** en `api_football.py`, `fixture_repository.py`, `fixture_sync_service.py`, `conftest.py`, `test_api_football_adapter.py` y `test_sync_idempotency.py`: resueltos en `ebcb076`.
 - **Acoplamiento con `fixture_repository.py`:** `predict_stored_values` ya no replica la política; importa `_FIXTURE_COLUMNS` y `predict_score_values`. La paridad está cubierta por la matriz de `test_fixture_upsert.py` y por `PARITY` en `test_history_backfill.py`.
@@ -170,25 +188,63 @@ Además existe un check `PARITY` (warning) si el estado guardado no coincide con
 - **Migraciones:** cadena `0004` → `0005` única; Data Integrity no creó ninguna migración.
 - **Semántica de marcadores al revertir el estado y de `extratime_*`:** política final fijada en el checkpoint (ver [data-integrity-status.md](data-integrity-status.md)).
 
-### Pendiente de decisión
+## M4.3: backfills reales completados
 
-- **Ownership de backfills:** [agent-rules.md](agent-rules.md) y [workstreams.md](workstreams.md) asignan los "backfills" al carril Data Integrity, pero M4.2 (backfill histórico) se desarrolló en Modular con alcance confirmado por el usuario. Sigue sin decidir quién mantiene este código en adelante.
+| Par competición-temporada | Fixtures reales | Estado |
+| --- | --- | --- |
+| Premier League 2025 | 380 | `completed` |
+| Liga MX 2025 | 337 | `completed` |
+
+Estos son los 2 pares ya `completed` del conjunto P0 de M4.4A.
+
+## M4.4A: discovery P0 completado
+
+- **Alcance:** 34 pares P0; 2 ya `completed` y 32 dry-runs realizados.
+- **Runs:** #5–#36, todos con estado `dry_run_completed`.
+- **API-Football:** 32 requests, 0 retries, 0 errores y 0 rate limits.
+- **5Dollar:** 0 llamadas.
+- **Dominio:** cero cambios; los dry-runs registraron sus runs sin escribir datos de dominio.
+
+### Conteos conocidos tras discovery
+
+| Tabla | Conteo |
+| --- | --- |
+| `teams` | 617 |
+| `season_teams` | 895 |
+| `fixtures` | 7643 |
+| `fixture_provider_mappings` | 7643 |
+| `season_backfill_runs` | 36 |
+
+Son los conteos conocidos tras discovery, no una lectura nueva de la BD en esta tarea.
+
+### Hallazgos pendientes de M4.4A
+
+- **Q14:** Bolivia 2025, Colombia 2025, Ecuador 2025 y Perú 2025.
+- Status `Canc` minúsculo detectado en Bolivia 2025; PST/no-final en temporadas cerradas.
+- Fixtures posteriores a `season.end_date` donde corresponda.
+- Estructuras/rounds complejos o ambiguos; MLS con playoffs best-of-three variables; Argentina 2024/2025 y la deuda conocida de Copa de la Liga.
+- `PARITY` incompleto/no explícito.
+- Q2/Q3/Q4 globales y duplicación pre/post de Q3/Q4.
+- Código de salida ante excepción inesperada.
+- Transacción T2 abierta durante la llamada HTTP.
+
+Son hallazgos pendientes de investigación/hardening, no resueltos en esta actualización. Auxiliar **NO los corrige automáticamente** ni cruza las reservas de Principal; cualquier corrección requiere autorización expresa.
 
 ## Próximo trabajo modular
 
-- **M4.3:** **sigue sin empezar.** Alcance **Pendiente de verificación**; se definirá en un carril nuevo creado desde el `main` resultante del checkpoint.
-- **Antes de M4.3:** decidir el ownership del backfill.
+### Principal
 
-## Checkpoint con main
+Hardening de `season_teams` + Q16 + tests directamente relacionados con membership/backfill, bajo su reserva.
 
-- **Estado:** M4.2 y Data Integrity integrados y validados en `checkpoint/m42-data-integrity` (`ebcb076`). **Pendiente de promoción a `main`**, coordinada por el usuario.
-- **Después de la promoción**, una vez publicado el nuevo `main`:
+### Auxiliar
 
-  ```
-  git fetch origin
-  git checkout main
-  git pull --ff-only origin main
-  ```
+Siguiente investigación autorizada: **OA-02 — Auditoría de Q14 en Bolivia/Colombia/Ecuador/Perú 2025**. No se ejecuta dentro de OA-01/OA-01B ni autoriza correcciones automáticas o modificaciones de archivos reservados.
 
-  Se verifica que `HEAD` coincide con `origin/main` y, a partir de ese `main`, se crea una rama Modular nueva para M4.3.
-- **`feature/modular-data` no continúa desarrollándose.** No se hace pull, merge ni rebase de `main` sobre ella.
+### M4.4 real
+
+**PAUSADO hasta validar el hardening de Principal.** No existen nuevas escrituras reales autorizadas todavía; el discovery completado no las habilita.
+
+## Referencias históricas de M4.2
+
+- **Commits de Modular integrados en aquel checkpoint:** `3084996` ("avance 4.2"), `6e3aff1` ("feat: add historical backfill infrastructure"), `ff26513` ("docs: add shared development coordination") y `456c556` ("docs: add modular data status"), sobre la base común `298b2f3` ("mudar a neon 004").
+- **`feature/modular-data`:** rama original congelada en `456c556`; no continúa desarrollándose.

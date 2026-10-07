@@ -1,0 +1,23 @@
+{
+  "fixtures": 1000,
+  "seed": 20261004,
+  "competitions": 1,
+  "seasons": 3,
+  "teams": 20,
+  "fixture_mappings": 1800,
+  "team_mappings": 40,
+  "competition_mappings": 2,
+  "as_of": "2026-10-04T18:00:00+00:00",
+  "generation_seconds": 1.8535372000042116,
+  "generation_status": "MEDIDO; excluido de benchmarks",
+  "actual_counts": {
+    "competitions": 1,
+    "seasons": 3,
+    "teams": 20,
+    "season_teams": 60,
+    "fixtures": 1000,
+    "competition_provider_mappings": 2,
+    "team_provider_mappings": 40,
+    "fixture_provider_mappings": 1800
+  }
+}

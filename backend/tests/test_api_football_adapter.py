@@ -188,6 +188,98 @@ def test_provider_incoherence_kept_as_is(provider, respond_with):
     assert _pairs(f)["fulltime"] == (4, 0)
 
 
+# --- Estado canónico y partidos no jugados ---------------------------------------------------
+
+_MISSING = object()
+_SCORE_FIELDS = (
+    "home_goals", "away_goals", "halftime_home", "halftime_away", "extratime_home", "extratime_away",
+    "penalty_home", "penalty_away", "fulltime_home", "fulltime_away",
+)
+
+
+def _single(provider, respond_with, short=_MISSING, goals=(0, 0), halftime=(0, 0), fulltime=(0, 0), extratime=(None, None), penalty=(None, None), long="Some Status"):
+    """Un único partido del proveedor con el status y los marcadores indicados."""
+    status = {"long": long, "elapsed": None}
+    if short is not _MISSING:
+        status["short"] = short
+    pair = lambda p: {"home": p[0], "away": p[1]}  # noqa: E731
+    item = {
+        "fixture": {"id": 900, "date": "2025-12-20T19:00:00+00:00", "status": status, "venue": {}},
+        "league": {"round": "Final"},
+        "teams": {"home": {"id": 1, "name": "Local"}, "away": {"id": 2, "name": "Visitante"}},
+        "goals": pair(goals),
+        "score": {"halftime": pair(halftime), "fulltime": pair(fulltime), "extratime": pair(extratime), "penalty": pair(penalty)},
+    }
+    respond_with({"errors": [], "paging": {"current": 1, "total": 1}, "response": [item]})
+    return asyncio.run(provider.get_fixtures(344, 2025))[0]
+
+
+def _scores(f) -> tuple:
+    return tuple(getattr(f, c) for c in _SCORE_FIELDS)
+
+
+@pytest.mark.parametrize(
+    ("short", "expected"),
+    [("Canc", "CANC"), ("canc", "CANC"), ("CANC", "CANC"), ("ft", "FT"), ("FT", "FT"), (None, "TBD"), ("", "TBD"), (_MISSING, "TBD")],
+)
+def test_status_short_is_canonical_uppercase(provider, respond_with, short, expected):
+    f = _single(provider, respond_with, short=short, long="Match Cancelled")
+    assert f.status_short == expected
+    assert f.status_long == "Match Cancelled"  # status.long no se toca
+
+
+@pytest.mark.parametrize("short", ["NS", "TBD", "PST", "CANC", "pst", "Canc"])
+@pytest.mark.parametrize(
+    "scores",
+    [
+        dict(goals=(0, 0), halftime=(0, 0), fulltime=(0, 0)),  # marcador 0-0 "falso"
+        dict(goals=(2, 1), halftime=(1, 0), fulltime=(2, 1), extratime=(0, 0), penalty=(4, 3)),  # pares completos
+        dict(goals=(1, None), halftime=(None, 0), fulltime=(3, 3)),  # pares parciales
+    ],
+)
+def test_unplayed_statuses_drop_every_score_pair(provider, respond_with, short, scores):
+    f = _single(provider, respond_with, short=short, **scores)
+    assert f.status_short in api_football.UNPLAYED_STATUSES
+    assert _scores(f) == (None,) * len(_SCORE_FIELDS)
+
+
+def test_cancelled_with_zero_zero_goals_is_not_a_result(provider, respond_with):
+    """Respuesta como la de un partido cancelado de Bolivia 2025: "Canc" con goals 0-0."""
+    from datetime import datetime, timezone
+
+    from app.services import history_quality_checks as qc
+
+    f = _single(provider, respond_with, short="Canc", long="Match Cancelled", goals=(0, 0), halftime=(None, None), fulltime=(None, None))
+    assert (f.status_short, f.status_long) == ("CANC", "Match Cancelled")
+    assert _scores(f) == (None,) * len(_SCORE_FIELDS)
+    q14 = qc.q14_unfinished_in_closed_season([f], season_closed=True, now=datetime(2027, 1, 1, tzinfo=timezone.utc))
+    assert q14.passed and q14.count == 0  # CANC es terminal: sin warning
+
+
+def test_abandoned_keeps_its_scores(provider, respond_with):
+    """ABD no es "no jugado": conserva goals/halftime; fulltime sigue siendo solo de FT/AET/PEN."""
+    f = _single(provider, respond_with, short="ABD", goals=(1, 0), halftime=(1, 0), fulltime=(1, 0))
+    assert (f.home_goals, f.away_goals, f.halftime_home, f.halftime_away) == (1, 0, 1, 0)
+    assert (f.fulltime_home, f.fulltime_away) == (None, None)
+
+
+@pytest.mark.parametrize("short", ["AWD", "awd", "WO"])
+def test_awarded_and_walkover_keep_their_scores(provider, respond_with, short):
+    """AWD/WO: el marcador adjudicado se conserva como hasta ahora (fulltime solo en FT/AET/PEN)."""
+    f = _single(provider, respond_with, short=short, goals=(0, 3), halftime=(0, 1), fulltime=(0, 3))
+    assert f.status_short == short.upper()
+    assert (f.home_goals, f.away_goals, f.halftime_home, f.halftime_away) == (0, 3, 0, 1)
+    assert (f.fulltime_home, f.fulltime_away) == (None, None)
+
+
+def test_lowercase_played_statuses_keep_hardened_semantics(provider, respond_with):
+    ft = _single(provider, respond_with, short="ft", goals=(2, 1), halftime=(1, 0), fulltime=(None, None))
+    assert (ft.status_short, ft.fulltime_home, ft.fulltime_away) == ("FT", 2, 1)  # FT sin fulltime: goals
+    aet = _single(provider, respond_with, short="aet", goals=(3, 2), halftime=(1, 1), fulltime=(None, None), extratime=(1, 0))
+    assert (aet.status_short, aet.fulltime_home, aet.fulltime_away) == ("AET", None, None)  # nunca goals - extratime
+    assert (aet.home_goals, aet.away_goals, aet.extratime_home, aet.extratime_away) == (3, 2, 1, 0)
+
+
 # --- Errores en HTTP 200 --------------------------------------------------------------------
 
 
@@ -546,3 +638,50 @@ def test_engine_on_other_port_blocked_before_destructive_operation(monkeypatch, 
     with pytest.raises(RuntimeError, match="no apunta a la BD de pruebas autorizada"):
         conftest.alembic_run("downgrade", "base")
     assert alembic_calls == []
+
+
+# --- Payload estructuralmente inválido ------------------------------------------------------------
+
+
+def _mixed_payload_with(fixture_index: int, **changes) -> dict:
+    payload = load_json("api_football/fixtures_mixed.json")
+    fixture = payload["response"][fixture_index]["fixture"]
+    for key, value in changes.items():
+        if value is _REMOVE:
+            fixture.pop(key, None)
+        else:
+            fixture[key] = value
+    return payload
+
+
+_REMOVE = object()
+
+
+@pytest.mark.parametrize("date_value", [_REMOVE, None, ""], ids=["sin-clave", "null", "vacia"])
+def test_fixture_without_date_is_typed_provider_error(provider, respond_with, retry_sleeps, date_value):
+    payload = _mixed_payload_with(2, date=date_value)
+    respond_with(payload)
+    bad_id = payload["response"][2]["fixture"]["id"]
+    with pytest.raises(ProviderResponseError, match=f"partido {bad_id} sin fixture.date") as exc:
+        asyncio.run(provider.get_fixtures(265, 2026))
+    assert exc.value.status_code is None
+    assert retry_sleeps == []  # un payload inválido no se reintenta
+
+
+def test_fixture_with_unparseable_date_is_typed_provider_error(provider, respond_with):
+    payload = _mixed_payload_with(0, date="no es una fecha")
+    respond_with(payload)
+    with pytest.raises(ProviderResponseError, match="campos no válidos: kickoff_at"):
+        asyncio.run(provider.get_fixtures(265, 2026))
+
+
+def test_programming_error_while_parsing_still_propagates(provider, respond_with, monkeypatch):
+    # Un fallo de código (no del payload) no se disfraza de error del proveedor
+    respond_with(load_json("api_football/fixtures_mixed.json"))
+
+    def broken(*_args, **_kwargs):
+        raise TypeError("bug simulado")
+
+    monkeypatch.setattr(api_football, "_fulltime_pair", broken)
+    with pytest.raises(TypeError, match="bug simulado"):
+        asyncio.run(provider.get_fixtures(265, 2026))

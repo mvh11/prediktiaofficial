@@ -5,29 +5,52 @@ Con las 26 competiciones por defecto son 27 peticiones.
 """
 
 import logging
+import time
 
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.integrations.exceptions import ProviderAuthError, ProviderError, ProviderRateLimitError
+from app.integrations.exceptions import ProviderError
+from app.integrations.football.base import FootballDataProvider
+from app.integrations.request_stats import describe, stats_of
 from app.repositories import catalog_repository as repo
 from app.schemas.catalog import CatalogSyncResult, CompetitionSyncResult
 from app.services.provider_service import get_football_provider
+from app.services.sync_failures import SyncAction, provider_abort_reason, provider_failure_action
 
 logger = logging.getLogger(__name__)
 
 
-async def sync_catalog(db: Session) -> CatalogSyncResult:
+async def sync_catalog(db: Session, *, provider: FootballDataProvider | None = None) -> CatalogSyncResult:
     """Guarda las competiciones seguidas, sus temporadas y los equipos de la temporada actual.
 
     Si falla una competición se anota el error y se sigue con las demás.
     Excepción: si el proveedor sigue limitando las peticiones tras los reintentos o la cuota
     diaria está agotada (ProviderRateLimitError), o si rechaza las credenciales
     (ProviderAuthError: HTTP 401/403 o errors.token), ya no se piden los equipos de las
-    competiciones restantes (sus datos de /leagues sí se guardan) y quedan con el motivo.
+    competiciones restantes (sus datos de /leagues sí se guardan) y quedan con el motivo
+    (ver sync_failures).
     Los errores de la llamada inicial a /leagues sí se propagan (sin ella no hay nada que hacer).
+
+    Ninguna llamada al proveedor ocurre con una transacción de BD abierta: /leagues se pide antes
+    de tocar la BD y cada /teams después del commit de su competición. Cada resultado guarda la
+    temporada actual anterior (previous_season) para auditar los cambios de temporada.
+    Registra en el log la duración y las peticiones (con reintentos) de cada competición y del total.
+
+    Todas las peticiones de la sync comparten un cliente HTTP: sin proveedor inyectado la sync abre
+    el suyo con `async with` y lo cierra al terminar; un proveedor inyectado es de quien lo creó,
+    que abre y cierra su run (ver app.jobs.live_sync).
     """
-    provider = get_football_provider()
+    if provider is not None:
+        return await _sync_catalog(db, provider)
+    async with get_football_provider() as owned:
+        return await _sync_catalog(db, owned)
+
+
+async def _sync_catalog(db: Session, provider: FootballDataProvider) -> CatalogSyncResult:
+    sync_started = time.perf_counter()
+    stats = stats_of(provider)
+    stats_at_start = stats.snapshot() if stats else None
     tracked_ids = get_settings().tracked_league_ids
 
     competitions = await provider.get_competitions(tracked_ids)
@@ -43,42 +66,61 @@ async def sync_catalog(db: Session) -> CatalogSyncResult:
         result = CompetitionSyncResult(external_id=comp.external_id, name=comp.name)
         results.append(result)
 
-        competition_id = repo.upsert_competition(db, comp, provider.name)
-        repo.clear_current_flag(db, competition_id)
-        season_ids = repo.upsert_seasons(db, competition_id, comp.seasons)
-        db.commit()
-
-        current = next((s for s in comp.seasons if s.is_current), None)
-        if current is None:
-            result.error = "El proveedor no indica temporada actual"
-            continue
-        result.season = current.year
-        if stopped:
-            result.error = stopped
-            continue
-
+        competition_started = time.perf_counter()
+        stats_before = stats.snapshot() if stats else None
+        crashed = False
         try:
-            teams = await provider.get_teams(comp.external_id, current.year)
-        except ProviderError as exc:
-            logger.warning("No se pudieron obtener los equipos de %s: %s", comp.name, exc)
-            result.error = exc.message
-            if isinstance(exc, ProviderRateLimitError):
-                stopped = f"Equipos no sincronizados: se detuvo la sync por el límite del proveedor ({exc.message})"
-                logger.warning("Límite del proveedor: no se piden los equipos de las competiciones restantes")
-            elif isinstance(exc, ProviderAuthError):
-                stopped = (
-                    "Equipos no sincronizados: se detuvo la sync porque el proveedor rechazó las credenciales "
-                    f"({exc.message})"
-                )
-                logger.warning("Credenciales rechazadas: no se piden los equipos de las competiciones restantes")
-            continue
+            competition_id = repo.upsert_competition(db, comp, provider.name)
+            previous = repo.get_season(db, competition_id, None)
+            result.previous_season = previous.year if previous else None
+            repo.clear_current_flag(db, competition_id)
+            season_ids = repo.upsert_seasons(db, competition_id, comp.seasons)
+            db.commit()
 
-        team_ids = repo.upsert_teams(db, teams, provider.name)
-        repo.link_teams_to_season(db, season_ids[current.year], team_ids)
-        db.commit()
-        result.teams = len(teams)
-        logger.info("%s %s: %d equipos", comp.name, current.year, len(teams))
+            current = next((s for s in comp.seasons if s.is_current), None)
+            if current is None:
+                result.error = "El proveedor no indica temporada actual"
+                continue
+            result.season = current.year
+            if stopped:
+                result.error = stopped
+                continue
 
+            try:
+                teams = await provider.get_teams(comp.external_id, current.year)
+            except ProviderError as exc:
+                logger.warning("No se pudieron obtener los equipos de %s: %s", comp.name, exc)
+                result.error = exc.message
+                if provider_failure_action(exc) is SyncAction.ABORT_PROVIDER_RUN:
+                    stopped = f"Equipos no sincronizados: {provider_abort_reason(exc)}"
+                    logger.warning("%s: no se piden los equipos de las competiciones restantes", exc.__class__.__name__)
+                continue
+
+            team_ids = repo.upsert_teams(db, teams, provider.name)
+            repo.link_teams_to_season(db, season_ids[current.year], team_ids)
+            db.commit()
+            result.teams = len(teams)
+        except BaseException:
+            crashed = True  # error no previsto: se propaga, pero el log no debe decir "ok"
+            raise
+        finally:
+            logger.info(
+                "Sync catálogo · %s: %s · %d equipos · %.0f ms · %s",
+                comp.name,
+                "excepción no controlada" if crashed else ("ok" if result.error is None else f"error ({result.error})"),
+                result.teams,
+                (time.perf_counter() - competition_started) * 1000,
+                describe(stats.since(stats_before) if stats else None),
+            )
+
+    logger.info(
+        "Sync catálogo · total: %d competiciones (%d con error) · %d equipos · %.0f ms · %s",
+        len(results),
+        sum(1 for r in results if r.error is not None),
+        sum(r.teams for r in results),
+        (time.perf_counter() - sync_started) * 1000,
+        describe(stats.since(stats_at_start) if stats else None),
+    )
     return CatalogSyncResult(
         competitions_synced=sum(1 for r in results if r.name is not None),
         teams_synced=sum(r.teams for r in results),

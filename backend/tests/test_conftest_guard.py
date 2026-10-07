@@ -124,3 +124,22 @@ def test_destructive_operation_blocked_if_app_points_elsewhere(monkeypatch, alem
     with pytest.raises(RuntimeError, match="bloqueada"):
         test_conftest.alembic_run("downgrade", "base")
     assert alembic_calls == []
+
+
+# --- Alembic dentro de pytest no reconfigura el logging (único test de este archivo con BD) ----
+
+
+@pytest.mark.db
+def test_alembic_run_keeps_app_loggers_and_pytest_logging(migrated_db):
+    import logging
+
+    import app.integrations.http  # noqa: F401  (el logger tiene que existir antes de migrar)
+
+    app_logger = logging.getLogger("app.integrations.http")
+    root = logging.getLogger()
+    root_level, root_handlers = root.level, list(root.handlers)
+
+    test_conftest.alembic_run("upgrade", "head")  # ejecuta alembic/env.py aunque no haya nada que migrar
+
+    assert app_logger.disabled is False
+    assert root.level == root_level and root.handlers == root_handlers  # handlers de caplog intactos

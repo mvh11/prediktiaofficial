@@ -93,7 +93,12 @@ class CompetitionFixtureSyncResult(BaseModel):
     competition_id: int
     name: str
     season: int | None = None
-    fixtures: int = 0
+    fixtures: int = 0  # recibidos (sin duplicados) y guardados: created + updated + unchanged
+    created: int = 0
+    updated: int = 0
+    unchanged: int = 0
+    teams_created: int = 0
+    skipped: str | None = None  # motivo si no se consultó o no se escribió (no es un error)
     error: str | None = None
 
 

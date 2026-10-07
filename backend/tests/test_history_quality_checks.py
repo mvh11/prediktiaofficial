@@ -24,13 +24,15 @@ def _ids(check: CheckResult) -> list[int]:
 # --- Severidades -----------------------------------------------------------------------------
 
 
-def test_all_fifteen_checks_have_explicit_severity():
-    assert set(qc.SEVERITY) == {f"Q{i}" for i in range(1, 16)}
+def test_all_checks_have_explicit_severity():
+    assert set(qc.SEVERITY) == {f"Q{i}" for i in range(1, 17)} | {"PARITY"}
     blocking = {k for k, v in qc.SEVERITY.items() if v == "blocking"}
     warning = {k for k, v in qc.SEVERITY.items() if v == "warning"}
     assert {"Q3", "Q4", "Q5", "Q8", "Q12", "Q13", "Q15"} <= blocking
     assert {"Q7", "Q9", "Q10", "Q11", "Q14"} <= warning
     assert qc.SEVERITY["Q1"] == "blocking" and qc.SEVERITY["Q6"] == "warning"
+    assert qc.SEVERITY["Q16"] == "warning"  # su salvaguarda blocking va en el propio CheckResult
+    assert qc.SEVERITY["PARITY"] == "blocking"
 
 
 # --- Q1 ---------------------------------------------------------------------------------------
@@ -127,10 +129,25 @@ def test_q14_unfinished_past_fixture_in_closed_season():
 
 
 def test_q2_and_q13_semantics():
-    assert qc.q2_fixture_count(100, None).passed  # dry-run: sin deletes
-    assert qc.q2_fixture_count(100, 99).is_blocking_failure
+    assert qc.q2_season_fixtures_kept({1, 2}, None).passed  # dry-run: no aplica
+    assert qc.q2_season_fixtures_kept({1, 2}, {1, 2, 3}).passed  # solo se añaden
+    missing = qc.q2_season_fixtures_kept({1, 2, 3}, {1, 3, 4})
+    assert missing.is_blocking_failure and missing.samples == [2]
     assert qc.q13_mappings([], True, would_create=7).passed
     assert qc.q13_mappings([5], False).is_blocking_failure
+
+
+def test_parity_semantics():
+    assert qc.parity_not_applicable().passed and "no aplica" in qc.parity_not_applicable().detail
+    ok = qc.parity([], 380, 380, 0)
+    assert ok.passed and ok.count == 0 and "380 comparados (nuevos 380, existentes 0)" in ok.detail
+    bad = qc.parity([7, 8], 10, 5, 5)
+    assert bad.is_blocking_failure and bad.count == 2 and bad.samples == [7, 8]
+
+
+def test_q3_q4_are_documented_as_pre_write_global():
+    assert "Pre-write, global" in qc.q3_duplicate_mappings(0).detail
+    assert "Pre-write, global" in qc.q4_orphan_mappings(0).detail
 
 
 def test_samples_are_limited():
@@ -294,15 +311,35 @@ def test_q1_without_range_only_blocks_zero():
 
 
 BASE = ["--competition-id", "5", "--season", "2025"]
+TARGET = "ep-test.us-east-2.aws.neon.tech:5432/neondb"
+CONFIRM = ["--confirm-target", TARGET]
+RANGE = ["--expected-min", "370", "--expected-max", "390"]
 
 
-def test_cli_without_range():
-    assert cli.expected_range(cli.parse_args(BASE)) is None
+def test_cli_dry_run_without_range_or_confirmation_is_allowed():
+    args = cli.parse_args(BASE + ["--dry-run"])
+    assert cli.expected_range(args) is None and args.confirm_target is None
 
 
 @pytest.mark.parametrize(("lo", "hi"), [("370", "390"), ("0", "0"), ("380", "380")])
 def test_cli_valid_range(lo, hi):
-    assert cli.expected_range(cli.parse_args(BASE + ["--expected-min", lo, "--expected-max", hi])) == (int(lo), int(hi))
+    args = cli.parse_args(BASE + ["--expected-min", lo, "--expected-max", hi] + CONFIRM)
+    assert cli.expected_range(args) == (int(lo), int(hi))
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        CONFIRM,  # ejecución real sin rango
+        ["--expected-min", "370"] + CONFIRM,  # solo min
+        ["--expected-max", "390"] + CONFIRM,  # solo max
+        ["--refresh"] + CONFIRM,  # refresh real sin rango
+        RANGE,  # ejecución real sin --confirm-target
+    ],
+)
+def test_cli_real_run_requires_range_and_confirmation(extra):
+    with pytest.raises(SystemExit):
+        cli.parse_args(BASE + extra)
 
 
 @pytest.mark.parametrize(
@@ -331,6 +368,7 @@ def test_cli_fail_stale_run_defaults_and_validation():
         ["--fail-stale-run", "--dry-run"],
         ["--fail-stale-run", "--refresh"],
         ["--fail-stale-run", "--expected-min", "1", "--expected-max", "2"],
+        ["--fail-stale-run", "--confirm-target", TARGET],
         ["--fail-stale-run", "--stale-after-minutes", "0"],
         ["--stale-after-minutes", "30"],  # sin --fail-stale-run
     ],
@@ -358,3 +396,146 @@ def test_service_and_cli_share_default_threshold():
     from app.services.history_backfill_service import DEFAULT_STALE_AFTER_MINUTES
 
     assert DEFAULT_STALE_AFTER_MINUTES == cli.DEFAULT_STALE_AFTER_MINUTES
+
+
+# --- CLI: destino de la BD -----------------------------------------------------------------
+
+
+SECRET_URL = "postgresql+psycopg://prediktia_user:s3cr3t-pass@EP-Test.us-east-2.aws.neon.tech/neondb?sslmode=require"
+
+
+def test_database_target_is_sanitized():
+    target = cli.database_target(SECRET_URL)
+    assert target == TARGET  # host en minúsculas y puerto 5432 por defecto
+    assert "prediktia_user" not in target and "s3cr3t" not in target
+
+
+@pytest.mark.parametrize("url", ["postgresql+psycopg:///neondb", "postgresql+psycopg://u:p@host.example"])
+def test_database_target_requires_host_and_database(url):
+    with pytest.raises(ValueError):
+        cli.database_target(url)
+
+
+def _completed(status: str = "completed") -> BackfillResult:
+    return BackfillResult(
+        run_id=1, competition_id=5, competition_name="Premier League", requested_year=2025, season_id=9,
+        provider="api-football", is_dry_run=status == "dry_run_completed", is_refresh=False, status=status,
+    )
+
+
+@pytest.fixture
+def fake_backend(monkeypatch):
+    """DATABASE_URL con credenciales y un _run falso que registra si se llegó a ejecutar."""
+    calls = []
+
+    async def fake_run(args):
+        calls.append(args)
+        return _completed("dry_run_completed" if args.dry_run else "completed")
+
+    monkeypatch.setattr(cli, "_configured_target", lambda: cli.database_target(SECRET_URL))
+    monkeypatch.setattr(cli, "_run", fake_run)
+    return calls
+
+
+def test_cli_real_run_with_matching_target_runs(fake_backend, capsys):
+    assert cli.main(BASE + RANGE + CONFIRM) == 0
+    assert len(fake_backend) == 1
+    out = capsys.readouterr().out
+    assert f"Destino BD:  {TARGET}" in out
+    assert "prediktia_user" not in out and "s3cr3t" not in out
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "ep-test.us-east-2.aws.neon.tech:5432/otra_bd",
+        "ep-test.us-east-2.aws.neon.tech:6543/neondb",
+        "ep-test-pooler.us-east-2.aws.neon.tech:5432/neondb",
+        "localhost:5432/neondb",
+    ],
+)
+def test_cli_real_run_with_wrong_target_aborts_before_writing(fake_backend, capsys, target):
+    assert cli.main(BASE + RANGE + ["--confirm-target", target]) == 2
+    assert fake_backend == []  # ni sesión de BD ni proveedor
+    captured = capsys.readouterr()
+    assert "no coincide" in captured.err
+    assert "prediktia_user" not in captured.out + captured.err and "s3cr3t" not in captured.out + captured.err
+
+
+def test_cli_dry_run_shows_target_without_confirmation(fake_backend, capsys):
+    assert cli.main(BASE + ["--dry-run"]) == 0
+    assert len(fake_backend) == 1
+    out = capsys.readouterr().out
+    assert f"Destino BD:  {TARGET}" in out and "s3cr3t" not in out
+
+
+def test_cli_unresolvable_target_aborts(monkeypatch, capsys):
+    calls = []
+
+    def bad_target():
+        raise ValueError("DATABASE_URL no tiene un host y una base de datos identificables")
+
+    monkeypatch.setattr(cli, "_configured_target", bad_target)
+    monkeypatch.setattr(cli, "_run", lambda args: calls.append(args))
+    assert cli.main(BASE + RANGE + CONFIRM) == 2
+    assert calls == []
+
+
+# --- Servicio: rango obligatorio en ejecución real (se valida antes de tocar la BD) ----------
+
+
+@pytest.mark.parametrize(("dry_run", "expected_range"), [(False, None), (False, (391, 370)), (True, (391, 370))])
+def test_service_rejects_invalid_range_before_db_or_provider(dry_run, expected_range):
+    from app.services.history_backfill_service import run_backfill
+    from tests.test_history_backfill import FakeHistoryProvider
+
+    provider = FakeHistoryProvider()
+    with pytest.raises(ValueError):
+        # db=None: si el servicio llegara a tocar la BD fallaría con AttributeError, no ValueError
+        asyncio.run(run_backfill(None, 5, 2025, dry_run=dry_run, expected_range=expected_range, provider=provider))
+    assert provider.calls == []
+
+
+# --- Códigos de salida ante errores inesperados ------------------------------------------------
+
+
+@pytest.mark.parametrize("exc", [RuntimeError("bug"), KeyError("x")])
+def test_cli_unexpected_exception_exits_2_without_traceback(monkeypatch, capsys, exc):
+    async def broken(_args):
+        raise exc
+
+    monkeypatch.setattr(cli, "_configured_target", lambda: cli.database_target(SECRET_URL))
+    monkeypatch.setattr(cli, "_run", broken)
+    assert cli.main(BASE + ["--dry-run"]) == 2
+    err = capsys.readouterr().err
+    assert f"Error inesperado ({exc.__class__.__name__})" in err
+    assert "Traceback" not in err and "s3cr3t" not in err and "prediktia_user" not in err
+
+
+def test_cli_run_already_in_progress_exits_2(monkeypatch, capsys):
+    async def busy(_args):
+        raise ValueError("Ya hay un run en curso ('running') de este par")
+
+    monkeypatch.setattr(cli, "_configured_target", lambda: cli.database_target(SECRET_URL))
+    monkeypatch.setattr(cli, "_run", busy)
+    assert cli.main(BASE + ["--dry-run"]) == 2
+    assert "en curso" in capsys.readouterr().err
+
+
+def test_cli_stale_recovery_unexpected_exception_exits_2(monkeypatch, capsys):
+    def broken(_args):
+        raise RuntimeError("bug")
+
+    monkeypatch.setattr(cli, "_recover", broken)
+    assert cli.main(BASE + ["--fail-stale-run"]) == 2
+    assert "Error inesperado (RuntimeError)" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(("status", "code"), [("completed", 0), ("dry_run_completed", 0), ("blocked", 1), ("failed", 2)])
+def test_cli_status_exit_codes(monkeypatch, status, code):
+    async def run(_args):
+        return _completed(status)
+
+    monkeypatch.setattr(cli, "_configured_target", lambda: cli.database_target(SECRET_URL))
+    monkeypatch.setattr(cli, "_run", run)
+    assert cli.main(BASE + ["--dry-run"]) == code

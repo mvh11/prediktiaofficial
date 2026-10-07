@@ -1,0 +1,1217 @@
+{
+ "get": "fixtures",
+ "parameters": {
+  "ids": "1557402-1208397-1159024-1494836-1557417-1635697-1593527-1631509"
+ },
+ "errors": [],
+ "results": 8,
+ "paging": {
+  "current": 1,
+  "total": 1
+ },
+ "response": [
+  {
+   "fixture": {
+    "id": 1557402,
+    "status": {
+     "short": "FT",
+     "long": "Match Finished"
+    }
+   },
+   "league": {
+    "id": 39,
+    "season": 2026
+   },
+   "teams": {
+    "home": {
+     "id": 63,
+     "name": "Leeds"
+    },
+    "away": {
+     "id": 34,
+     "name": "Newcastle"
+    }
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 63,
+      "name": "Leeds"
+     },
+     "statistics": [
+      {
+       "type": "Shots on Goal",
+       "value": 6
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 4
+      },
+      {
+       "type": "Total Shots",
+       "value": 15
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 5
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 10
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 5
+      },
+      {
+       "type": "Fouls",
+       "value": 8
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 5
+      },
+      {
+       "type": "Offsides",
+       "value": 2
+      },
+      {
+       "type": "Ball Possession",
+       "value": "50%"
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 1
+      },
+      {
+       "type": "Red Cards",
+       "value": null
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 4
+      },
+      {
+       "type": "Total passes",
+       "value": 440
+      },
+      {
+       "type": "Passes accurate",
+       "value": 368
+      },
+      {
+       "type": "Passes %",
+       "value": "84%"
+      },
+      {
+       "type": "expected_goals",
+       "value": "2.08"
+      },
+      {
+       "type": "goals_prevented",
+       "value": "-1.13"
+      }
+     ]
+    },
+    {
+     "team": {
+      "id": 34,
+      "name": "Newcastle"
+     },
+     "statistics": [
+      {
+       "type": "Shots on Goal",
+       "value": 5
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 2
+      },
+      {
+       "type": "Total Shots",
+       "value": 7
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 0
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 4
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 3
+      },
+      {
+       "type": "Fouls",
+       "value": 13
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 5
+      },
+      {
+       "type": "Offsides",
+       "value": 3
+      },
+      {
+       "type": "Ball Possession",
+       "value": "50%"
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 2
+      },
+      {
+       "type": "Red Cards",
+       "value": null
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 3
+      },
+      {
+       "type": "Total passes",
+       "value": 433
+      },
+      {
+       "type": "Passes accurate",
+       "value": 357
+      },
+      {
+       "type": "Passes %",
+       "value": "82%"
+      },
+      {
+       "type": "expected_goals",
+       "value": "0.88"
+      },
+      {
+       "type": "goals_prevented",
+       "value": "-1.13"
+      }
+     ]
+    }
+   ],
+   "events": [
+    {
+     "time": {
+      "elapsed": 19,
+      "extra": null
+     },
+     "team": {
+      "id": 34,
+      "name": "Newcastle"
+     },
+     "type": "subst",
+     "detail": "Substitution 1"
+    }
+   ],
+   "lineups": [
+    {
+     "team": {
+      "id": 63,
+      "name": "Leeds"
+     },
+     "formation": "3-5-2",
+     "startXI": [],
+     "substitutes": []
+    }
+   ],
+   "players": [
+    {
+     "team": {
+      "id": 63,
+      "name": "Leeds"
+     },
+     "players": []
+    }
+   ]
+  },
+  {
+   "fixture": {
+    "id": 1208397,
+    "status": {
+     "short": "FT",
+     "long": "Match Finished"
+    }
+   },
+   "league": {
+    "id": 39,
+    "season": 2024
+   },
+   "teams": {
+    "home": {
+     "id": 33,
+     "name": "Manchester United"
+    },
+    "away": {
+     "id": 66,
+     "name": "Aston Villa"
+    }
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 33,
+      "name": "Manchester United"
+     },
+     "statistics": [
+      {
+       "type": "Shots on Goal",
+       "value": 10
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 13
+      },
+      {
+       "type": "Total Shots",
+       "value": 25
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 2
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 14
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 11
+      },
+      {
+       "type": "Fouls",
+       "value": 10
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 4
+      },
+      {
+       "type": "Offsides",
+       "value": 5
+      },
+      {
+       "type": "Ball Possession",
+       "value": "67%"
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 2
+      },
+      {
+       "type": "Red Cards",
+       "value": 0
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 1
+      },
+      {
+       "type": "Total passes",
+       "value": 605
+      },
+      {
+       "type": "Passes accurate",
+       "value": 534
+      },
+      {
+       "type": "Passes %",
+       "value": "88%"
+      },
+      {
+       "type": "expected_goals",
+       "value": "2.95"
+      },
+      {
+       "type": "goals_prevented",
+       "value": "0.84"
+      }
+     ]
+    },
+    {
+     "team": {
+      "id": 66,
+      "name": "Aston Villa"
+     },
+     "statistics": [
+      {
+       "type": "Shots on Goal",
+       "value": 1
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 2
+      },
+      {
+       "type": "Total Shots",
+       "value": 6
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 3
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 4
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 2
+      },
+      {
+       "type": "Fouls",
+       "value": 10
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 3
+      },
+      {
+       "type": "Offsides",
+       "value": 3
+      },
+      {
+       "type": "Ball Possession",
+       "value": "33%"
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 2
+      },
+      {
+       "type": "Red Cards",
+       "value": 1
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 8
+      },
+      {
+       "type": "Total passes",
+       "value": 300
+      },
+      {
+       "type": "Passes accurate",
+       "value": 217
+      },
+      {
+       "type": "Passes %",
+       "value": "72%"
+      },
+      {
+       "type": "expected_goals",
+       "value": "0.39"
+      },
+      {
+       "type": "goals_prevented",
+       "value": "0.84"
+      }
+     ]
+    }
+   ],
+   "events": [],
+   "lineups": [],
+   "players": []
+  },
+  {
+   "fixture": {
+    "id": 1159024,
+    "status": {
+     "short": "FT",
+     "long": "Match Finished"
+    }
+   },
+   "league": {
+    "id": 128,
+    "season": 2024
+   },
+   "teams": {
+    "home": {
+     "id": 455,
+     "name": "Atletico Tucuman"
+    },
+    "away": {
+     "id": 1065,
+     "name": "Central Cordoba de Santiago"
+    }
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 455,
+      "name": "Atletico Tucuman"
+     },
+     "statistics": [
+      {
+       "type": "Shots on Goal",
+       "value": 4
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 7
+      },
+      {
+       "type": "Total Shots",
+       "value": 11
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 0
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 5
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 6
+      },
+      {
+       "type": "Fouls",
+       "value": 13
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 2
+      },
+      {
+       "type": "Offsides",
+       "value": 5
+      },
+      {
+       "type": "Ball Possession",
+       "value": "47%"
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 0
+      },
+      {
+       "type": "Red Cards",
+       "value": null
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 0
+      },
+      {
+       "type": "Total passes",
+       "value": 322
+      },
+      {
+       "type": "Passes accurate",
+       "value": 230
+      },
+      {
+       "type": "Passes %",
+       "value": "71%"
+      },
+      {
+       "type": "expected_goals",
+       "value": "0.91"
+      },
+      {
+       "type": "goals_prevented",
+       "value": "-1.44"
+      }
+     ]
+    },
+    {
+     "team": {
+      "id": 1065,
+      "name": "Central Cordoba de Santiago"
+     },
+     "statistics": [
+      {
+       "type": "Shots on Goal",
+       "value": 0
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 3
+      },
+      {
+       "type": "Total Shots",
+       "value": 4
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 1
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 2
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 2
+      },
+      {
+       "type": "Fouls",
+       "value": 13
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 7
+      },
+      {
+       "type": "Offsides",
+       "value": 4
+      },
+      {
+       "type": "Ball Possession",
+       "value": "53%"
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 2
+      },
+      {
+       "type": "Red Cards",
+       "value": null
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 2
+      },
+      {
+       "type": "Total passes",
+       "value": 354
+      },
+      {
+       "type": "Passes accurate",
+       "value": 259
+      },
+      {
+       "type": "Passes %",
+       "value": "73%"
+      },
+      {
+       "type": "expected_goals",
+       "value": "0.12"
+      },
+      {
+       "type": "goals_prevented",
+       "value": "-1.44"
+      }
+     ]
+    }
+   ],
+   "events": [],
+   "lineups": [],
+   "players": []
+  },
+  {
+   "fixture": {
+    "id": 1494836,
+    "status": {
+     "short": "FT",
+     "long": "Match Finished"
+    }
+   },
+   "league": {
+    "id": 344,
+    "season": 2025
+   },
+   "teams": {
+    "home": {
+     "id": 26596,
+     "name": "CD IN San Juan FC"
+    },
+    "away": {
+     "id": 17743,
+     "name": "ABB"
+    }
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 26596,
+      "name": "CD IN San Juan FC"
+     },
+     "statistics": []
+    },
+    {
+     "team": {
+      "id": 17743,
+      "name": "ABB"
+     },
+     "statistics": []
+    }
+   ],
+   "events": [],
+   "lineups": [],
+   "players": []
+  },
+  {
+   "fixture": {
+    "id": 1557417,
+    "status": {
+     "short": "NS",
+     "long": "Not Started"
+    }
+   },
+   "league": {
+    "id": 39,
+    "season": 2026
+   },
+   "teams": {
+    "home": {
+     "id": 42,
+     "name": "Arsenal"
+    },
+    "away": {
+     "id": 63,
+     "name": "Leeds"
+    }
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 42,
+      "name": "Arsenal"
+     },
+     "statistics": []
+    },
+    {
+     "team": {
+      "id": 63,
+      "name": "Leeds"
+     },
+     "statistics": []
+    }
+   ],
+   "events": [],
+   "lineups": [],
+   "players": []
+  },
+  {
+   "fixture": {
+    "id": 1635697,
+    "status": {
+     "short": "FT",
+     "long": "Match Finished"
+    }
+   },
+   "league": {
+    "id": 2,
+    "season": 2026
+   },
+   "teams": {
+    "home": {
+     "id": 33,
+     "name": "Manchester United"
+    },
+    "away": {
+     "id": 13976,
+     "name": "Sabah FA"
+    }
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 33,
+      "name": "Manchester United"
+     },
+     "statistics": [
+      {
+       "type": "Passes accurate",
+       "value": 573
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 15
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 6
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 6
+      },
+      {
+       "type": "Free Kicks",
+       "value": 13
+      },
+      {
+       "type": "Shots on Goal",
+       "value": 10
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 5
+      },
+      {
+       "type": "Total passes",
+       "value": 624
+      },
+      {
+       "type": "Total Shots",
+       "value": 21
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 1
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 7
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 0
+      },
+      {
+       "type": "Fouls",
+       "value": 12
+      },
+      {
+       "type": "Red Cards",
+       "value": 0
+      },
+      {
+       "type": "Ball Possession",
+       "value": "58%"
+      }
+     ]
+    },
+    {
+     "team": {
+      "id": 13976,
+      "name": "Sabah FA"
+     },
+     "statistics": [
+      {
+       "type": "Passes accurate",
+       "value": 391
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 6
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 5
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 6
+      },
+      {
+       "type": "Free Kicks",
+       "value": 10
+      },
+      {
+       "type": "Shots on Goal",
+       "value": 0
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 5
+      },
+      {
+       "type": "Total passes",
+       "value": 455
+      },
+      {
+       "type": "Total Shots",
+       "value": 11
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 1
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 2
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 5
+      },
+      {
+       "type": "Fouls",
+       "value": 13
+      },
+      {
+       "type": "Red Cards",
+       "value": 0
+      },
+      {
+       "type": "Ball Possession",
+       "value": "42%"
+      }
+     ]
+    }
+   ],
+   "events": [],
+   "lineups": [],
+   "players": []
+  },
+  {
+   "fixture": {
+    "id": 1593527,
+    "status": {
+     "short": "AET",
+     "long": "Match Finished"
+    }
+   },
+   "league": {
+    "id": 3,
+    "season": 2026
+   },
+   "teams": {
+    "home": {
+     "id": 3403,
+     "name": "Pafos"
+    },
+    "away": {
+     "id": 608,
+     "name": "HNK Hajduk Split"
+    }
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 3403,
+      "name": "Pafos"
+     },
+     "statistics": [
+      {
+       "type": "Shots on Goal",
+       "value": null
+      },
+      {
+       "type": "Shots off Goal",
+       "value": null
+      },
+      {
+       "type": "Total Shots",
+       "value": null
+      },
+      {
+       "type": "Blocked Shots",
+       "value": null
+      },
+      {
+       "type": "Shots insidebox",
+       "value": null
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": null
+      },
+      {
+       "type": "Fouls",
+       "value": null
+      },
+      {
+       "type": "Corner Kicks",
+       "value": null
+      },
+      {
+       "type": "Offsides",
+       "value": null
+      },
+      {
+       "type": "Ball Possession",
+       "value": null
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 3
+      },
+      {
+       "type": "Red Cards",
+       "value": 0
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": null
+      },
+      {
+       "type": "Total passes",
+       "value": null
+      },
+      {
+       "type": "Passes accurate",
+       "value": null
+      },
+      {
+       "type": "Passes %",
+       "value": null
+      },
+      {
+       "type": "expected_goals",
+       "value": null
+      },
+      {
+       "type": "goals_prevented",
+       "value": null
+      }
+     ]
+    },
+    {
+     "team": {
+      "id": 608,
+      "name": "HNK Hajduk Split"
+     },
+     "statistics": [
+      {
+       "type": "Shots on Goal",
+       "value": null
+      },
+      {
+       "type": "Shots off Goal",
+       "value": null
+      },
+      {
+       "type": "Total Shots",
+       "value": null
+      },
+      {
+       "type": "Blocked Shots",
+       "value": null
+      },
+      {
+       "type": "Shots insidebox",
+       "value": null
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": null
+      },
+      {
+       "type": "Fouls",
+       "value": null
+      },
+      {
+       "type": "Corner Kicks",
+       "value": null
+      },
+      {
+       "type": "Offsides",
+       "value": null
+      },
+      {
+       "type": "Ball Possession",
+       "value": null
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 2
+      },
+      {
+       "type": "Red Cards",
+       "value": 0
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": null
+      },
+      {
+       "type": "Total passes",
+       "value": null
+      },
+      {
+       "type": "Passes accurate",
+       "value": null
+      },
+      {
+       "type": "Passes %",
+       "value": null
+      },
+      {
+       "type": "expected_goals",
+       "value": null
+      },
+      {
+       "type": "goals_prevented",
+       "value": null
+      }
+     ]
+    }
+   ],
+   "events": [],
+   "lineups": [],
+   "players": []
+  },
+  {
+   "fixture": {
+    "id": 1631509,
+    "status": {
+     "short": "PEN",
+     "long": "Match Finished"
+    }
+   },
+   "league": {
+    "id": 13,
+    "season": 2026
+   },
+   "teams": {
+    "home": {
+     "id": 1158,
+     "name": "LDU de Quito"
+    },
+    "away": {
+     "id": 121,
+     "name": "Palmeiras"
+    }
+   },
+   "statistics": [
+    {
+     "team": {
+      "id": 1158,
+      "name": "LDU de Quito"
+     },
+     "statistics": [
+      {
+       "type": "Passes accurate",
+       "value": 488
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 9
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 7
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 2
+      },
+      {
+       "type": "Free Kicks",
+       "value": 7
+      },
+      {
+       "type": "Shots on Goal",
+       "value": 5
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 2
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 9
+      },
+      {
+       "type": "Total passes",
+       "value": 551
+      },
+      {
+       "type": "Total Shots",
+       "value": 16
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 2
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 10
+      },
+      {
+       "type": "Offsides",
+       "value": 0
+      },
+      {
+       "type": "Fouls",
+       "value": 13
+      },
+      {
+       "type": "Red Cards",
+       "value": 0
+      },
+      {
+       "type": "Ball Possession",
+       "value": "69%"
+      }
+     ]
+    },
+    {
+     "team": {
+      "id": 121,
+      "name": "Palmeiras"
+     },
+     "statistics": [
+      {
+       "type": "Passes accurate",
+       "value": 177
+      },
+      {
+       "type": "Shots insidebox",
+       "value": 5
+      },
+      {
+       "type": "Shots outsidebox",
+       "value": 6
+      },
+      {
+       "type": "Blocked Shots",
+       "value": 3
+      },
+      {
+       "type": "Free Kicks",
+       "value": 12
+      },
+      {
+       "type": "Shots on Goal",
+       "value": 4
+      },
+      {
+       "type": "Goalkeeper Saves",
+       "value": 2
+      },
+      {
+       "type": "Shots off Goal",
+       "value": 4
+      },
+      {
+       "type": "Total passes",
+       "value": 256
+      },
+      {
+       "type": "Total Shots",
+       "value": 11
+      },
+      {
+       "type": "Yellow Cards",
+       "value": 1
+      },
+      {
+       "type": "Corner Kicks",
+       "value": 4
+      },
+      {
+       "type": "Offsides",
+       "value": 1
+      },
+      {
+       "type": "Fouls",
+       "value": 8
+      },
+      {
+       "type": "Red Cards",
+       "value": 0
+      },
+      {
+       "type": "Ball Possession",
+       "value": "31%"
+      }
+     ]
+    }
+   ],
+   "events": [],
+   "lineups": [],
+   "players": []
+  }
+ ]
+}

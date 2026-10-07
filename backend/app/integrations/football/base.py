@@ -6,6 +6,7 @@ Para cambiar de proveedor basta con crear otro adapter que la implemente.
 
 from abc import ABC, abstractmethod
 from datetime import date
+from typing import Self
 
 from app.schemas.catalog import CompetitionData, TeamData
 from app.schemas.fixture import FixtureData
@@ -14,6 +15,15 @@ from app.schemas.provider import ProviderStatus
 
 class FootballDataProvider(ABC):
     name: str
+
+    # Un run (p. ej. una sync) se ejecuta dentro de `async with provider:`. Por defecto no hace
+    # nada; un adapter con recursos (un cliente HTTP) los abre al entrar y los libera al salir,
+    # también si el run termina con una excepción.
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
 
     @abstractmethod
     async def check_status(self) -> ProviderStatus:

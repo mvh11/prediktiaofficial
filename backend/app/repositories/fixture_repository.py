@@ -7,6 +7,7 @@ los IDs del proveedor en las tablas de mapeo (escritura doble).
 El upsert de fixtures no es destructivo con los marcadores: ver _fixture_update_values.
 """
 
+from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import and_, case, func, null, or_, select
@@ -101,6 +102,23 @@ def _fixture_update_values(excluded, columns: list[str]) -> dict:
     return values
 
 
+@dataclass(frozen=True)
+class UpsertCounts:
+    """Resultado de upsert_fixtures: received = created + updated + unchanged (sin duplicados)."""
+
+    received: int
+    created: int
+    updated: int
+    unchanged: int
+
+
+def count_existing_teams(db: Session, external_ids: list[int]) -> int:
+    """Cuántos de esos external_id de equipo ya existen (para contar los que creará ensure_teams)."""
+    if not external_ids:
+        return 0
+    return db.scalar(select(func.count()).select_from(Team).where(Team.external_id.in_(external_ids)))
+
+
 def ensure_teams(db: Session, teams: list[TeamData], provider: str) -> dict[int, int]:
     """Crea los equipos que aún no existen (sin tocar los existentes). Devuelve {external_id: id}.
 
@@ -125,14 +143,20 @@ def ensure_teams(db: Session, teams: list[TeamData], provider: str) -> dict[int,
 
 def upsert_fixtures(
     db: Session, season_id: int, fixtures: list[FixtureData], team_ids: dict[int, int], provider: str
-) -> int:
-    """Guarda los partidos de una temporada en una sola sentencia. Devuelve cuántos se guardaron.
+) -> UpsertCounts:
+    """Guarda los partidos de una temporada en una sola sentencia y devuelve los contadores.
 
-    Las filas que no cambian no se reescriben (ni se toca su updated_at).
+    Las filas que no cambian no se reescriben (ni se toca su updated_at). Contadores exactos sin
+    depender de updated_at ni de columnas de sistema: se leen antes los external_id que ya
+    existen (1 consulta) y el upsert devuelve con RETURNING solo las filas insertadas o
+    realmente actualizadas (el WHERE del ON CONFLICT descarta las que no cambian):
+    created = devueltas y no existentes; updated = devueltas y existentes; unchanged = el resto.
     """
     unique = list({f.external_id: f for f in fixtures}.values())
     if not unique:
-        return 0
+        return UpsertCounts(received=0, created=0, updated=0, unchanged=0)
+    external_ids = [f.external_id for f in unique]
+    existed = set(db.scalars(select(Fixture.external_id).where(Fixture.external_id.in_(external_ids))))
     rows = [
         {
             **f.model_dump(include=set(_FIXTURE_COLUMNS)),
@@ -150,16 +174,17 @@ def upsert_fixtures(
         index_elements=[Fixture.external_id],
         set_={**new_values, "updated_at": func.now()},
         where=changed,
-    )
-    db.execute(stmt)
-    # RETURNING no devolvería las filas sin cambios: los ids se leen aparte. El mapeo sí se
+    ).returning(Fixture.external_id)
+    written = set(db.scalars(stmt))
+    # RETURNING no devuelve las filas sin cambios: los ids se leen aparte. El mapeo sí se
     # actualiza siempre (last_seen_at = el proveedor volvió a observar el partido)
-    external_ids = [f.external_id for f in unique]
     ids = dict(db.execute(select(Fixture.external_id, Fixture.id).where(Fixture.external_id.in_(external_ids))).all())
     upsert_origin_mappings(
         db, FixtureProviderMapping, provider, [(fixture_id, e, None) for e, fixture_id in ids.items()]
     )
-    return len(rows)
+    created = len(written - existed)
+    updated = len(written & existed)
+    return UpsertCounts(received=len(unique), created=created, updated=updated, unchanged=len(unique) - created - updated)
 
 
 # --- Lecturas -----------------------------------------------------------------------------

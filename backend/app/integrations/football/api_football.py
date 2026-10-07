@@ -10,8 +10,12 @@ Documentación oficial: https://www.api-football.com/documentation-v3
 
 import asyncio
 import logging
+import time
 from datetime import date
 from typing import Any
+
+import httpx
+from pydantic import ValidationError
 
 from app.integrations.exceptions import (
     ProviderAuthError,
@@ -24,7 +28,8 @@ from app.integrations.exceptions import (
     ProviderTimeoutError,
 )
 from app.integrations.football.base import FootballDataProvider
-from app.integrations.http import get_json
+from app.integrations.http import get_json, new_client
+from app.integrations.request_stats import RequestStats
 from app.schemas.catalog import CompetitionData, SeasonData, TeamData
 from app.schemas.fixture import FINISHED_STATUSES, FixtureData
 from app.schemas.provider import ProviderStatus
@@ -39,6 +44,10 @@ RATE_LIMIT_BACKOFF = (5.0, 10.0)  # límite de peticiones sin Retry-After utiliz
 # espera y se lanza el error (con un límite de peticiones, el service corta la sync)
 MAX_TOTAL_WAIT = 60.0
 RETRYABLE_STATUS = frozenset({500, 502, 503, 504})
+# Estados (ya canónicos, en mayúsculas) de un partido no jugado: cualquier marcador que el
+# proveedor envíe con ellos (p. ej. CANC con goals 0-0) no es un resultado y se descarta.
+# ABD, AWD y WO no están: pueden llevar marcador de un partido iniciado o adjudicado.
+UNPLAYED_STATUSES = frozenset({"NS", "TBD", "PST", "CANC"})
 
 
 async def _sleep(seconds: float) -> None:
@@ -126,6 +135,24 @@ class ApiFootballProvider(FootballDataProvider):
         self._api_key = api_key
         self._base_url = base_url
         self._timeout = timeout
+        # Intentos HTTP iniciados por esta instancia (cada reintento cuenta como un intento más;
+        # no es el consumo de cuota confirmado por el proveedor)
+        self.request_stats = RequestStats()
+        # Cliente HTTP del run abierto con `async with provider:` (None fuera de un run)
+        self._client: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> "ApiFootballProvider":
+        """Abre el cliente HTTP del run: todas sus peticiones, reintentos incluidos, lo reutilizan."""
+        if self._client is not None:
+            raise RuntimeError(f"{self.name}: ya hay un run abierto con este provider")
+        self._client = new_client(self._timeout)
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        """Cierra el cliente del run, termine bien o con una excepción."""
+        client, self._client = self._client, None
+        if client is not None:
+            await client.aclose()
 
     async def _get(
         self, path: str, params: dict[str, Any] | None = None, *, allow_paging: bool = False
@@ -140,28 +167,44 @@ class ApiFootballProvider(FootballDataProvider):
         if not self._api_key:
             raise ProviderNotConfiguredError(self.name, "Falta API_FOOTBALL_KEY en el archivo .env")
 
+        self.request_stats.calls += 1
         waited = 0.0
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            self.request_stats.attempts += 1
+            if attempt > 1:
+                self.request_stats.retries += 1
+            started = time.perf_counter()
             try:
-                return await self._get_once(path, params, allow_paging=allow_paging)
+                data = await self._get_once(path, params, allow_paging=allow_paging)
             except ProviderError as exc:
+                self.request_stats.failed_attempts += 1
+                elapsed_ms = (time.perf_counter() - started) * 1000
                 delay = _retry_delay(exc, attempt - 1) if attempt < MAX_ATTEMPTS else None
                 if delay is not None and waited + delay > MAX_TOTAL_WAIT:
                     logger.warning(
-                        "%s %s: no se reintenta, la espera total pasaría de %.0fs (%.1fs + %.1fs)",
-                        self.name, path, MAX_TOTAL_WAIT, waited, delay,
+                        "%s %s: intento %d/%d falló en %.0f ms (%s); no se reintenta, la espera total pasaría de %.0fs"
+                        " (%.1fs + %.1fs)",
+                        self.name, path, attempt, MAX_ATTEMPTS, elapsed_ms, exc, MAX_TOTAL_WAIT, waited, delay,
                     )
                     raise
                 if delay is None:
-                    if attempt > 1:
-                        logger.warning("%s %s: falla tras %d intentos: %s", self.name, path, attempt, exc)
+                    logger.warning(
+                        "%s %s: intento %d/%d falló en %.0f ms (%s); no se reintenta",
+                        self.name, path, attempt, MAX_ATTEMPTS, elapsed_ms, exc,
+                    )
                     raise
                 logger.warning(
-                    "%s %s: intento %d/%d falló (%s), reintento en %.1fs",
-                    self.name, path, attempt, MAX_ATTEMPTS, exc, delay,
+                    "%s %s: intento %d/%d falló en %.0f ms (%s), reintento en %.1fs",
+                    self.name, path, attempt, MAX_ATTEMPTS, elapsed_ms, exc, delay,
                 )
                 await _sleep(delay)
                 waited += delay
+                continue
+            logger.info(
+                "%s %s: intento %d/%d ok en %.0f ms",
+                self.name, path, attempt, MAX_ATTEMPTS, (time.perf_counter() - started) * 1000,
+            )
+            return data
         raise AssertionError("inalcanzable: el último intento siempre devuelve o lanza")
 
     async def _get_once(self, path: str, params: dict[str, Any] | None, *, allow_paging: bool) -> Any:
@@ -173,6 +216,7 @@ class ApiFootballProvider(FootballDataProvider):
             headers={"x-apisports-key": self._api_key},
             timeout=self._timeout,
             params=params,
+            client=self._client,  # None fuera de un run: get_json abre uno solo para esta petición
         )
         if not isinstance(data, dict):
             raise ProviderResponseError(self.name, "Formato de respuesta inesperado")
@@ -289,6 +333,10 @@ class ApiFootballProvider(FootballDataProvider):
         """Llama a GET /fixtures?league=X&season=Y (y from/to si se indican).
 
         Devuelve todos los partidos de la temporada en una sola petición.
+        Si un partido llega estructuralmente inválido (sin fecha, o con valores que no encajan
+        en FixtureData) se lanza ProviderResponseError para TODA la respuesta: no se inventa
+        kickoff_at ni se devuelve un partido incompleto, y quien llama trata la competición
+        como fallida. No se reintenta: la misma petición devolvería lo mismo.
         """
         params: dict[str, Any] = {"league": competition_external_id, "season": season}
         if date_from:
@@ -311,20 +359,30 @@ class ApiFootballProvider(FootballDataProvider):
             if fixture.get("id") is None or home.get("id") is None or away.get("id") is None:
                 continue
             fixture_id = fixture["id"]
-            status_short = status.get("short") or "TBD"
-            goals = _score_pair(item.get("goals"), "goals", fixture_id)
-            halftime = _score_pair(score.get("halftime"), "halftime", fixture_id)
-            extratime = _score_pair(score.get("extratime"), "extratime", fixture_id)
-            penalty = _score_pair(score.get("penalty"), "penalty", fixture_id)
-            fulltime = _fulltime_pair(status_short, score, goals, fixture_id)
+            # El proveedor no siempre respeta las mayúsculas del código corto (p. ej. "Canc")
+            status_short = (status.get("short") or "TBD").upper()
+            if status_short in UNPLAYED_STATUSES:
+                goals = halftime = extratime = penalty = fulltime = (None, None)
+            else:
+                goals = _score_pair(item.get("goals"), "goals", fixture_id)
+                halftime = _score_pair(score.get("halftime"), "halftime", fixture_id)
+                extratime = _score_pair(score.get("extratime"), "extratime", fixture_id)
+                penalty = _score_pair(score.get("penalty"), "penalty", fixture_id)
+                fulltime = _fulltime_pair(status_short, score, goals, fixture_id)
+            kickoff_at = fixture.get("date")
+            if not kickoff_at:
+                raise ProviderResponseError(
+                    self.name,
+                    f"Respuesta inválida de /fixtures (liga {competition_external_id}): partido {fixture_id} sin fixture.date",
+                )
 
-            fixtures.append(
-                FixtureData(
+            try:
+                parsed = FixtureData(
                     external_id=fixture_id,
                     competition_external_id=competition_external_id,
                     season=season,
                     round=(item.get("league") or {}).get("round"),
-                    kickoff_at=fixture["date"],
+                    kickoff_at=kickoff_at,
                     status_short=status_short,
                     status_long=status.get("long"),
                     elapsed=status.get("elapsed"),
@@ -344,5 +402,12 @@ class ApiFootballProvider(FootballDataProvider):
                     fulltime_home=fulltime[0],
                     fulltime_away=fulltime[1],
                 )
-            )
+            except ValidationError as exc:
+                fields = sorted({".".join(str(p) for p in err["loc"]) for err in exc.errors()})
+                raise ProviderResponseError(
+                    self.name,
+                    f"Respuesta inválida de /fixtures (liga {competition_external_id}): partido {fixture_id}, "
+                    f"campos no válidos: {', '.join(fields)}",
+                ) from exc
+            fixtures.append(parsed)
         return fixtures

@@ -1,0 +1,3747 @@
+{
+  "status": "MEDIDO",
+  "created_at": "2026-10-05T01:50:27.275650+00:00",
+  "target": "127.0.0.1:55441/prediktia_lab_1000000_profile",
+  "dataset": {
+    "actual_counts": {
+      "competition_provider_mappings": 528,
+      "competitions": 264,
+      "fixture_provider_mappings": 1800000,
+      "fixtures": 1000000,
+      "season_teams": 52640,
+      "seasons": 2632,
+      "team_provider_mappings": 10560,
+      "teams": 5280
+    },
+    "as_of": "2026-10-04T18:00:00+00:00",
+    "competition_mappings": 528,
+    "competitions": 264,
+    "fixture_mappings": 1800000,
+    "fixtures": 1000000,
+    "generation_seconds": 106.7691868999973,
+    "generation_status": "MEDIDO; excluido de benchmarks",
+    "seasons": 2632,
+    "seed": 20261004,
+    "team_mappings": 10560,
+    "teams": 5280
+  },
+  "environment": {
+    "python": "3.13.4 (tags/v3.13.4:8a526ec, Jun  3 2025, 17:46:04) [MSC v.1943 64 bit (AMD64)]",
+    "sqlalchemy": "2.1.3",
+    "psycopg": "3.3.6",
+    "os": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 151 Stepping 5, GenuineIntel",
+    "postgresql": "PostgreSQL 18.6 on x86_64-windows, compiled by msvc-19.44.35229, 64-bit",
+    "postgresql_settings": {
+      "shared_buffers": "128MB",
+      "work_mem": "4MB",
+      "effective_cache_size": "4GB",
+      "synchronous_commit": "on",
+      "fsync": "on",
+      "full_page_writes": "on",
+      "max_connections": "100",
+      "default_statistics_target": "100",
+      "autovacuum": "on",
+      "statement_timeout": "1min"
+    },
+    "table_sizes": [
+      {
+        "relname": "alembic_version",
+        "total_bytes": 57344
+      },
+      {
+        "relname": "competition_provider_mappings",
+        "total_bytes": 237568
+      },
+      {
+        "relname": "competitions",
+        "total_bytes": 106496
+      },
+      {
+        "relname": "fixture_provider_mappings",
+        "total_bytes": 460513280
+      },
+      {
+        "relname": "fixtures",
+        "total_bytes": 283131904
+      },
+      {
+        "relname": "providers",
+        "total_bytes": 65536
+      },
+      {
+        "relname": "season_backfill_runs",
+        "total_bytes": 40960
+      },
+      {
+        "relname": "season_teams",
+        "total_bytes": 3678208
+      },
+      {
+        "relname": "seasons",
+        "total_bytes": 376832
+      },
+      {
+        "relname": "team_provider_mappings",
+        "total_bytes": 2686976
+      },
+      {
+        "relname": "teams",
+        "total_bytes": 811008
+      }
+    ],
+    "indexes": [
+      {
+        "tablename": "alembic_version",
+        "indexname": "alembic_version_pkc",
+        "indexdef": "CREATE UNIQUE INDEX alembic_version_pkc ON public.alembic_version USING btree (version_num)"
+      },
+      {
+        "tablename": "competition_provider_mappings",
+        "indexname": "competition_provider_mappings_pkey",
+        "indexdef": "CREATE UNIQUE INDEX competition_provider_mappings_pkey ON public.competition_provider_mappings USING btree (id)"
+      },
+      {
+        "tablename": "competition_provider_mappings",
+        "indexname": "ix_competition_provider_mappings_competition_id",
+        "indexdef": "CREATE INDEX ix_competition_provider_mappings_competition_id ON public.competition_provider_mappings USING btree (competition_id, provider)"
+      },
+      {
+        "tablename": "competition_provider_mappings",
+        "indexname": "uq_competition_provider_mappings_provider_external",
+        "indexdef": "CREATE UNIQUE INDEX uq_competition_provider_mappings_provider_external ON public.competition_provider_mappings USING btree (provider, external_id)"
+      },
+      {
+        "tablename": "competitions",
+        "indexname": "competitions_pkey",
+        "indexdef": "CREATE UNIQUE INDEX competitions_pkey ON public.competitions USING btree (id)"
+      },
+      {
+        "tablename": "competitions",
+        "indexname": "ix_competitions_external_id",
+        "indexdef": "CREATE UNIQUE INDEX ix_competitions_external_id ON public.competitions USING btree (external_id)"
+      },
+      {
+        "tablename": "fixture_provider_mappings",
+        "indexname": "fixture_provider_mappings_pkey",
+        "indexdef": "CREATE UNIQUE INDEX fixture_provider_mappings_pkey ON public.fixture_provider_mappings USING btree (id)"
+      },
+      {
+        "tablename": "fixture_provider_mappings",
+        "indexname": "ix_fixture_provider_mappings_fixture_id",
+        "indexdef": "CREATE INDEX ix_fixture_provider_mappings_fixture_id ON public.fixture_provider_mappings USING btree (fixture_id, provider)"
+      },
+      {
+        "tablename": "fixture_provider_mappings",
+        "indexname": "uq_fixture_provider_mappings_provider_external",
+        "indexdef": "CREATE UNIQUE INDEX uq_fixture_provider_mappings_provider_external ON public.fixture_provider_mappings USING btree (provider, external_id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "fixtures_pkey",
+        "indexdef": "CREATE UNIQUE INDEX fixtures_pkey ON public.fixtures USING btree (id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_away_team_id",
+        "indexdef": "CREATE INDEX ix_fixtures_away_team_id ON public.fixtures USING btree (away_team_id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_external_id",
+        "indexdef": "CREATE UNIQUE INDEX ix_fixtures_external_id ON public.fixtures USING btree (external_id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_home_team_id",
+        "indexdef": "CREATE INDEX ix_fixtures_home_team_id ON public.fixtures USING btree (home_team_id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_kickoff_at",
+        "indexdef": "CREATE INDEX ix_fixtures_kickoff_at ON public.fixtures USING btree (kickoff_at)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_season_id",
+        "indexdef": "CREATE INDEX ix_fixtures_season_id ON public.fixtures USING btree (season_id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_status_short",
+        "indexdef": "CREATE INDEX ix_fixtures_status_short ON public.fixtures USING btree (status_short)"
+      },
+      {
+        "tablename": "providers",
+        "indexname": "providers_pkey",
+        "indexdef": "CREATE UNIQUE INDEX providers_pkey ON public.providers USING btree (code)"
+      },
+      {
+        "tablename": "season_backfill_runs",
+        "indexname": "ix_season_backfill_runs_competition_year",
+        "indexdef": "CREATE INDEX ix_season_backfill_runs_competition_year ON public.season_backfill_runs USING btree (competition_id, requested_year)"
+      },
+      {
+        "tablename": "season_backfill_runs",
+        "indexname": "ix_season_backfill_runs_season_status",
+        "indexdef": "CREATE INDEX ix_season_backfill_runs_season_status ON public.season_backfill_runs USING btree (season_id, status)"
+      },
+      {
+        "tablename": "season_backfill_runs",
+        "indexname": "season_backfill_runs_pkey",
+        "indexdef": "CREATE UNIQUE INDEX season_backfill_runs_pkey ON public.season_backfill_runs USING btree (id)"
+      },
+      {
+        "tablename": "season_backfill_runs",
+        "indexname": "uq_season_backfill_runs_one_running",
+        "indexdef": "CREATE UNIQUE INDEX uq_season_backfill_runs_one_running ON public.season_backfill_runs USING btree (competition_id, requested_year) WHERE (status = 'running'::text)"
+      },
+      {
+        "tablename": "season_teams",
+        "indexname": "ix_season_teams_team_id",
+        "indexdef": "CREATE INDEX ix_season_teams_team_id ON public.season_teams USING btree (team_id)"
+      },
+      {
+        "tablename": "season_teams",
+        "indexname": "season_teams_pkey",
+        "indexdef": "CREATE UNIQUE INDEX season_teams_pkey ON public.season_teams USING btree (season_id, team_id)"
+      },
+      {
+        "tablename": "seasons",
+        "indexname": "ix_seasons_competition_id",
+        "indexdef": "CREATE INDEX ix_seasons_competition_id ON public.seasons USING btree (competition_id)"
+      },
+      {
+        "tablename": "seasons",
+        "indexname": "seasons_pkey",
+        "indexdef": "CREATE UNIQUE INDEX seasons_pkey ON public.seasons USING btree (id)"
+      },
+      {
+        "tablename": "seasons",
+        "indexname": "uq_seasons_competition_year",
+        "indexdef": "CREATE UNIQUE INDEX uq_seasons_competition_year ON public.seasons USING btree (competition_id, year)"
+      },
+      {
+        "tablename": "team_provider_mappings",
+        "indexname": "ix_team_provider_mappings_team_id",
+        "indexdef": "CREATE INDEX ix_team_provider_mappings_team_id ON public.team_provider_mappings USING btree (team_id, provider)"
+      },
+      {
+        "tablename": "team_provider_mappings",
+        "indexname": "team_provider_mappings_pkey",
+        "indexdef": "CREATE UNIQUE INDEX team_provider_mappings_pkey ON public.team_provider_mappings USING btree (id)"
+      },
+      {
+        "tablename": "team_provider_mappings",
+        "indexname": "uq_team_provider_mappings_provider_external",
+        "indexdef": "CREATE UNIQUE INDEX uq_team_provider_mappings_provider_external ON public.team_provider_mappings USING btree (provider, external_id)"
+      },
+      {
+        "tablename": "teams",
+        "indexname": "ix_teams_external_id",
+        "indexdef": "CREATE UNIQUE INDEX ix_teams_external_id ON public.teams USING btree (external_id)"
+      },
+      {
+        "tablename": "teams",
+        "indexname": "teams_pkey",
+        "indexdef": "CREATE UNIQUE INDEX teams_pkey ON public.teams USING btree (id)"
+      }
+    ],
+    "branch": "feature/data-integrity-next",
+    "head": "2c00bffc89c2fc7e23a4f1099371b9fbb2e4f358",
+    "git_status": "M app/core/config.py\n M app/db/database.py\n M app/integrations/football/api_football.py\n M app/integrations/http.py\n M app/services/catalog_sync_service.py\n M app/services/fixture_sync_service.py\n M tests/test_api_football_adapter.py\n M tests/test_api_football_retries.py\n M tests/test_provider_limits_sync.py\n?? app/integrations/request_stats.py\n?? tests/test_db_config.py\n?? tests/test_perf_lab.py\n?? tools/",
+    "source_sha256": {
+      "app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/api/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/api/errors.py": "d32d8bc0600cf41301ad161e329e9c52cc382f9c5464bdaa5d87b97fd2bf96ce",
+      "app/api/router.py": "728a76838e542903e9079ecc2903c4d5160141ea433cbe6bc3c770eb935500bc",
+      "app/api/routes/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/api/routes/catalog.py": "e5e66c63942b0996858ed6bdd2aded816aa66dd226320a387f2bffe34743d459",
+      "app/api/routes/fixtures.py": "14e5a349616276362144a254c13f531cccdce8a97b064c2973f72b538b3f891c",
+      "app/api/routes/health.py": "62005fa996c5420905f447c0381edc95c285350f2d8d737b09176d22da203454",
+      "app/api/routes/providers.py": "134e7f29be59e662577aaedc44aa0e3a16e2d27a6dc60b5374d9599b6a53437b",
+      "app/core/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/core/config.py": "2fc29f15be45c56a970fe8b66f4bb0b0cfa05a23c3d421def0f9962e4de28e7b",
+      "app/core/logging.py": "8c48cf448648d26575f3688e6a11ab6aa856c5b40777b95d814d8db1c48425a5",
+      "app/db/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/db/database.py": "c923a106b54ac1d41b4aab3099815fb1a3a451ef17dbf5e58275e5dd79d66b18",
+      "app/db/session.py": "8def242ef4b3d3856b9a355b012d6c3037821b64ceb34b3a2d4435a0415d5b3c",
+      "app/integrations/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/integrations/exceptions.py": "4d3f2c3fcde76676c375a7a5afec1b3b05bf4479d0ed01c41ed7033394b239cf",
+      "app/integrations/football/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/integrations/football/api_football.py": "a23a36b66cb615a16501924e3c89d643a1ce72830bbb610bd35ee9c506538c57",
+      "app/integrations/football/api_football_history.py": "849a1e7cf98f28f04f1bfcc318c175e07778871c44b7d9b4bd770f4edece220a",
+      "app/integrations/football/base.py": "f775d639d344412b6ef0517c05f54abd19d9fd4cbca3a756b94186972aa5c3e4",
+      "app/integrations/http.py": "b2b3bf388d59f0c7993ebace78acebf1c60093a78e97d3f6f0f4f784353c649a",
+      "app/integrations/odds/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/integrations/odds/base.py": "fc353bc33ea9fdbf45af14f606a13d8812e7707bb84007e12d07312dcdb18e20",
+      "app/integrations/odds/five_dollar.py": "7119a24495cd2efa1177a7c1b1659f66eb9e0fbd5d861fa6661084a0d0d710a1",
+      "app/integrations/request_stats.py": "d436b4654401bfdbcb3e2a71323bbf4352fb287db254cc870647e7db18f18597",
+      "app/jobs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/jobs/history_backfill.py": "bee45007ac1d58361081414031d2f29a6461361ebadad607fb79d749aa110f9b",
+      "app/main.py": "1ec600aa6f1d76e5b45db51b7a2cc7596377fe515fc23bdfca459103b45ac5b3",
+      "app/models/__init__.py": "2b7d9cbf3e8414a8e0bc3dcaecb5975bcb338721bf6ec5861828ae0e70cdcb86",
+      "app/models/backfill.py": "010d70e875fa0866f65d914fc6c4d82db8c01251261bd8dcae54d55a15f60d59",
+      "app/models/competition.py": "5f4f62ed4a833f0fcae3e24db8a8a8fa89cdd8c5ec0ef05dfe6ab98516fd7463",
+      "app/models/fixture.py": "7385b4bf185306c53a65893fa90480c9055b170b9a3da5ef61265d4456787520",
+      "app/models/provider.py": "afe6a4a311757739effdfbebbf0e81838b1796f4545651ad72a739cb63adb608",
+      "app/models/provider_mapping.py": "c9b26ad497f117ab355545dbe285c8f2a5a370d712fbc34dfb772772b05814f3",
+      "app/models/season.py": "f2efc85d2a49bca6c834ae7d0b38bc1f207abfdb9137fafc5f546b984d431cd2",
+      "app/models/team.py": "8c671cbfa45ae0f26077e38e2ef7bb19831881b7224ee4ba540ff20fe2cc1aa9",
+      "app/repositories/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/repositories/backfill_repository.py": "73d64d97bda71a17ed032d362a1dbd6df2b07d1e36689d39eb2409b19dbf503f",
+      "app/repositories/catalog_repository.py": "2246ae3d120ca68402dbd8f51df40b7b498f81319aabb9dffb9312b9718c57b9",
+      "app/repositories/fixture_repository.py": "8a95c48a55cf8d7818dffb127b90a15da9902aee41963ca48811ff40884b2ece",
+      "app/repositories/provider_mapping_repository.py": "2a15dbf11954ea5bc69f9cc788bca53504956f6d3d16f71081532838cd0aeff1",
+      "app/schemas/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/schemas/backfill.py": "aeee81e04e8cfb1f400ab75b465dae59c86b5096e1fb4ad11b2b46c07a8d8fc5",
+      "app/schemas/catalog.py": "32741b201e69e41cdca43b5f7e6cf3f4e03325dbd5374927785dc61291d4cf74",
+      "app/schemas/fixture.py": "0ff706fd867e38ab15041b3ffc2dc27ae69f2ef7603765f56792b54b9daece03",
+      "app/schemas/provider.py": "8b3604163b5bb7d3e2e7a1340b8d3baee3549e1106f057dc4b5c6e602436e742",
+      "app/services/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/services/catalog_sync_service.py": "a0b818acf0b586f7f6dae5f8913947ba37bae4b0581d76376595f2bd621aa865",
+      "app/services/fixture_sync_service.py": "c4bf87d12aa25a42a7ba43c16d23f1c683588a04a38819ad2bb8a6a1eb3e9779",
+      "app/services/history_backfill_service.py": "a4d229cdd92b3695d66facb34b9ec2fcd8520687e3326370867992a828d1c987",
+      "app/services/history_quality_checks.py": "d079c9fc9e60ac2ae4d391c72b72bba369eecd0026450d66998a191f69df6795",
+      "app/services/provider_service.py": "91a83fce12cac70dad34be721225276b60051d0e9e2791851cf2c23ded9892d4",
+      "alembic/env.py": "96731303ffc474cd4c475f134c226599d876d109bf041a5ef7beb08be215dd50",
+      "alembic/versions/0001_initial.py": "7addca4be44c00f0b3fb2bbb332639f6fd5b20936a0e1795f46b0f85bee6ceff",
+      "alembic/versions/0002_catalog.py": "10ccbb731f48f576d298a6e8348c079b3b7a4abea72d0ee11359ae902b9e8a80",
+      "alembic/versions/0003_fixtures.py": "a29a8ec76f9652822cb426a61363055f436914ff8b2b7a524cf932710a933501",
+      "alembic/versions/0004_provider_mappings_fulltime.py": "6f47df5a5a201c57b99eef711536f843aa272255d930472da9957011b5dbf24c",
+      "alembic/versions/0005_season_backfill_runs.py": "6b7ad5677c6f54b189a1aa6e0046a214b4d7b26dd4f1556e3fbc978e01ba1f83",
+      "tools/perf_lab/__init__.py": "b8316dace32ec53c854e58cd9ce314a0a5fdaabad964137cb5848abdc87187dd",
+      "tools/perf_lab/__main__.py": "b4b0177a7ffca09cd81a78a31e041861d56bb4830dcc896b619f94f3fbc51f18",
+      "tools/perf_lab/benchmark.py": "2e0960b7658ca189b8f78595ec2d27564de4f3f576c0d0123a99a408ee946370",
+      "tools/perf_lab/dataset.py": "74c30147c1ec2399f72cbb00c10159be480155d34adde735a373e16b7db14a39",
+      "tools/perf_lab/profiler.py": "a9098c4d0c72428d27296fec66cc608daeea86389ed96e8925576c085b7fe8c7",
+      "tools/perf_lab/safety.py": "ac5a54f345cd24279bb867f881fca61d269d7ac8302fbb75ae2c399a2f3656a9"
+    }
+  },
+  "methodology": {
+    "clock": "time.perf_counter_ns; CPU del hilo con time.thread_time_ns",
+    "samples": 30,
+    "warmup": 3,
+    "cprofile_samples": 0,
+    "prepare_threshold": "driver",
+    "interleaving": "tras el warm-up, muestras plain e instrumentadas alternas en la misma conexión",
+    "plain": "repository_write + commit reales con listeners del laboratorio inactivos",
+    "instrumented": "eventos del engine + envoltorios temporales de ensure_teams/upsert_fixtures/upsert_origin_mappings; los segmentos teselan exactamente wall_before_commit",
+    "segment_categories": {
+      "sqlalchemy_pre_cursor": "MEDIDO: before_execute -> before_cursor_execute (clave de caché, compilación si miss, construcción de parámetros)",
+      "cursor_execute": "MEDIDO: round-trip de cursor.execute (adaptación psycopg + red local + servidor)",
+      "sqlalchemy_post_cursor": "MEDIDO: after_cursor_execute -> after_execute",
+      "python": "MEDIDO como intervalo entre fronteras; contenido INFERIDO (cProfile)"
+    },
+    "cprofile": "pase separado, no mezclado con los tiempos; inflado por el perfilador",
+    "gc": "MEDIDO con gc.callbacks durante cada muestra (incluye commit)",
+    "excluded": "construcción de payloads (medida aparte), normalización, VACUUM ANALYZE, validación, limpieza de insert",
+    "not_measured": [
+      "tiempo exclusivo del servidor por sentencia",
+      "external providers",
+      "WAN",
+      "concurrent writers",
+      "cold cache"
+    ]
+  },
+  "results": [
+    {
+      "operation": "profile_unchanged_100",
+      "status": "MEDIDO",
+      "unit": "ms",
+      "batch": 100,
+      "mode": "unchanged",
+      "season_groups": [
+        100
+      ],
+      "prepare_threshold": "5",
+      "payload_build_ms": {
+        "status": "MEDIDO (fuera del reloj del path)",
+        "variants": [
+          1.608,
+          1.1582
+        ]
+      },
+      "plain": {
+        "wall_before_commit_ms": {
+          "samples": 30,
+          "min": 52.7274,
+          "p50": 59.94755,
+          "p95": 81.88180999999999,
+          "p99": 88.197894,
+          "max": 89.5381
+        },
+        "commit_ms": {
+          "samples": 30,
+          "min": 0.4395,
+          "p50": 5.7151,
+          "p95": 13.8119,
+          "p99": 14.674825,
+          "max": 14.9409
+        },
+        "total_ms": {
+          "samples": 30,
+          "min": 53.1849,
+          "p50": 68.34815,
+          "p95": 83.23824999999998,
+          "p99": 88.75849500000001,
+          "max": 90.0764
+        },
+        "thread_cpu_ms": {
+          "samples": 30,
+          "min": 31.25,
+          "p50": 62.5,
+          "p95": 78.125,
+          "p99": 78.125,
+          "max": 78.125
+        },
+        "gc_ms": {
+          "samples": 30,
+          "min": 0.7306,
+          "p50": 1.10395,
+          "p95": 2.5735049999999977,
+          "p99": 20.01445800000002,
+          "max": 26.9976
+        },
+        "raw_ms": {
+          "wall_before_commit": [
+            55.5439,
+            56.12,
+            52.7274,
+            61.9199,
+            78.1725,
+            55.1455,
+            59.6798,
+            56.9986,
+            60.2153,
+            59.2851,
+            69.0279,
+            59.5311,
+            53.3966,
+            66.8763,
+            60.9209,
+            64.3884,
+            62.1412,
+            61.2123,
+            53.511,
+            66.8708,
+            84.9167,
+            89.5381,
+            61.2092,
+            56.4843,
+            59.3502,
+            64.8645,
+            57.3847,
+            59.1794,
+            55.0071,
+            62.4365
+          ],
+          "commit": [
+            14.0234,
+            13.5493,
+            0.4575,
+            9.1057,
+            2.2624,
+            9.9689,
+            9.3127,
+            10.6935,
+            0.4395,
+            6.2755,
+            2.4185,
+            5.2866,
+            12.0925,
+            2.3187,
+            8.6341,
+            2.2407,
+            0.5175,
+            3.9155,
+            14.9409,
+            2.6614,
+            0.6152,
+            0.5383,
+            7.0352,
+            13.5534,
+            10.6322,
+            0.6649,
+            11.2149,
+            5.7888,
+            0.7793,
+            5.6414
+          ],
+          "total": [
+            69.5673,
+            69.6693,
+            53.1849,
+            71.0256,
+            80.4349,
+            65.1144,
+            68.9925,
+            67.6921,
+            60.6548,
+            65.5606,
+            71.4464,
+            64.8177,
+            65.4891,
+            69.195,
+            69.555,
+            66.6291,
+            62.6587,
+            65.1278,
+            68.4519,
+            69.5322,
+            85.5319,
+            90.0764,
+            68.2444,
+            70.0377,
+            69.9824,
+            65.5294,
+            68.5996,
+            64.9682,
+            55.7864,
+            68.0779
+          ],
+          "thread_cpu": [
+            31.25,
+            31.25,
+            46.875,
+            62.5,
+            78.125,
+            31.25,
+            62.5,
+            31.25,
+            46.875,
+            62.5,
+            62.5,
+            62.5,
+            46.875,
+            78.125,
+            62.5,
+            62.5,
+            62.5,
+            62.5,
+            46.875,
+            62.5,
+            78.125,
+            62.5,
+            62.5,
+            46.875,
+            62.5,
+            46.875,
+            31.25,
+            62.5,
+            46.875,
+            62.5
+          ],
+          "gc": [
+            1.0537,
+            1.2762,
+            0.7306,
+            0.8035,
+            26.9976,
+            1.4097,
+            1.4905,
+            0.9079,
+            0.95,
+            0.8793,
+            1.2508,
+            2.1527,
+            0.8042,
+            1.1744,
+            0.7721,
+            0.9866,
+            1.466,
+            0.8176,
+            0.9648,
+            1.1898,
+            1.8933,
+            2.9178,
+            1.1102,
+            0.9631,
+            1.1329,
+            1.245,
+            1.4167,
+            1.0977,
+            0.8251,
+            1.03
+          ]
+        }
+      },
+      "instrumented": {
+        "wall_before_commit_ms": {
+          "samples": 30,
+          "min": 47.1532,
+          "p50": 58.4884,
+          "p95": 83.44707999999999,
+          "p99": 86.383835,
+          "max": 86.4762
+        },
+        "commit_ms": {
+          "samples": 30,
+          "min": 0.417,
+          "p50": 6.8889499999999995,
+          "p95": 14.167435,
+          "p99": 15.050903,
+          "max": 15.3552
+        },
+        "total_ms": {
+          "samples": 30,
+          "min": 47.5702,
+          "p50": 67.55619999999999,
+          "p95": 86.06000999999998,
+          "p99": 88.657366,
+          "max": 88.679
+        },
+        "thread_cpu_ms": {
+          "samples": 30,
+          "min": 31.25,
+          "p50": 62.5,
+          "p95": 78.125,
+          "p99": 89.21875000000001,
+          "max": 93.75
+        },
+        "gc_ms": {
+          "samples": 30,
+          "min": 0.7396,
+          "p50": 1.05015,
+          "p95": 2.444139999999999,
+          "p99": 23.63231900000003,
+          "max": 32.2218
+        },
+        "raw_ms": {
+          "wall_before_commit": [
+            61.5935,
+            54.025,
+            55.8653,
+            56.4588,
+            47.1532,
+            56.5335,
+            52.1357,
+            55.66,
+            59.1927,
+            54.427,
+            54.663,
+            56.3383,
+            61.7357,
+            64.7827,
+            56.6589,
+            59.4319,
+            61.8848,
+            86.4762,
+            65.6817,
+            80.1341,
+            86.1577,
+            67.5948,
+            58.3498,
+            52.5096,
+            58.627,
+            62.973,
+            56.8271,
+            59.1631,
+            71.353,
+            57.9445
+          ],
+          "commit": [
+            0.6608,
+            11.3913,
+            9.3129,
+            8.6764,
+            0.417,
+            0.4454,
+            0.4187,
+            14.3059,
+            9.6,
+            15.3552,
+            13.9982,
+            8.6313,
+            7.8793,
+            4.025,
+            8.6317,
+            9.0452,
+            5.3258,
+            2.2028,
+            2.2201,
+            2.8161,
+            2.4467,
+            2.3341,
+            11.7076,
+            12.2646,
+            11.7043,
+            2.2704,
+            7.7059,
+            6.072,
+            2.2813,
+            0.5437
+          ],
+          "total": [
+            62.2543,
+            65.4163,
+            65.1782,
+            65.1352,
+            47.5702,
+            56.9789,
+            52.5544,
+            69.9659,
+            68.7927,
+            69.7822,
+            68.6612,
+            64.9696,
+            69.615,
+            68.8077,
+            65.2906,
+            68.4771,
+            67.2106,
+            88.679,
+            67.9018,
+            82.9502,
+            88.6044,
+            69.9289,
+            70.0574,
+            64.7742,
+            70.3313,
+            65.2434,
+            64.533,
+            65.2351,
+            73.6343,
+            58.4882
+          ],
+          "thread_cpu": [
+            62.5,
+            62.5,
+            46.875,
+            31.25,
+            46.875,
+            62.5,
+            62.5,
+            31.25,
+            46.875,
+            31.25,
+            62.5,
+            46.875,
+            62.5,
+            62.5,
+            46.875,
+            62.5,
+            62.5,
+            93.75,
+            46.875,
+            78.125,
+            78.125,
+            78.125,
+            62.5,
+            62.5,
+            46.875,
+            78.125,
+            62.5,
+            62.5,
+            78.125,
+            62.5
+          ],
+          "gc": [
+            0.9722,
+            0.7748,
+            1.1205,
+            1.0742,
+            0.8108,
+            0.8682,
+            0.7396,
+            1.0318,
+            2.2501,
+            0.8128,
+            0.8618,
+            1.0446,
+            1.1215,
+            1.9174,
+            0.8625,
+            1.0557,
+            0.784,
+            32.2218,
+            2.0071,
+            1.3531,
+            1.5292,
+            1.0424,
+            1.2176,
+            1.3729,
+            0.9772,
+            1.1916,
+            1.075,
+            0.9307,
+            2.6029,
+            0.8595
+          ]
+        },
+        "categories_ms": {
+          "python": {
+            "samples": 30,
+            "min": 11.2996,
+            "p50": 13.998850000000001,
+            "p95": 17.90849,
+            "p99": 18.019295,
+            "max": 18.0293
+          },
+          "sqlalchemy_pre_cursor": {
+            "samples": 30,
+            "min": 26.7684,
+            "p50": 32.77865,
+            "p95": 42.70948999999999,
+            "p99": 45.812893,
+            "max": 46.3692
+          },
+          "cursor_execute": {
+            "samples": 30,
+            "min": 8.9431,
+            "p50": 11.639700000000001,
+            "p95": 19.784254999999987,
+            "p99": 35.252701000000016,
+            "max": 40.8477
+          },
+          "sqlalchemy_post_cursor": {
+            "samples": 30,
+            "min": 0.1348,
+            "p50": 0.15815,
+            "p95": 0.21517499999999998,
+            "p99": 0.24768200000000004,
+            "max": 0.2605
+          }
+        },
+        "contexts_ms": {
+          "ensure_teams": {
+            "samples": 30,
+            "min": 2.2143,
+            "p50": 2.8451500000000003,
+            "p95": 4.659049999999998,
+            "p99": 5.904432000000002,
+            "max": 6.2986
+          },
+          "ensure_teams>upsert_origin_mappings": {
+            "samples": 30,
+            "min": 2.5894,
+            "p50": 3.47025,
+            "p95": 4.76261,
+            "p99": 4.993139,
+            "max": 5.0369
+          },
+          "repository_write": {
+            "samples": 30,
+            "min": 0.0247,
+            "p50": 0.0358,
+            "p95": 0.06653999999999999,
+            "p99": 0.07880500000000001,
+            "max": 0.0833
+          },
+          "upsert_fixtures": {
+            "samples": 30,
+            "min": 32.672,
+            "p50": 39.80575,
+            "p95": 60.358054999999986,
+            "p99": 68.25317600000001,
+            "max": 70.4501
+          },
+          "upsert_fixtures>upsert_origin_mappings": {
+            "samples": 30,
+            "min": 8.7638,
+            "p50": 11.055399999999999,
+            "p95": 13.959575,
+            "p99": 15.501796,
+            "max": 16.0434
+          }
+        },
+        "segments": [
+          {
+            "context": "upsert_fixtures",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "INSERT fixtures ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 19.0561,
+            "p50": 23.663,
+            "p95": 31.784904999999995,
+            "p99": 33.960101,
+            "max": 34.4859,
+            "mean": 24.144943333333334,
+            "share_of_wall_mean": 0.3953150728830961
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "python",
+            "detail": "enter:upsert_fixtures -> execute:INSERT fixtures ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 6.9118,
+            "p50": 8.4455,
+            "p95": 12.319369999999997,
+            "p99": 12.817371,
+            "max": 12.9073,
+            "mean": 8.726866666666666,
+            "share_of_wall_mean": 0.14288134309313882
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "cursor_execute",
+            "detail": "INSERT fixtures ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 5.1758,
+            "p50": 6.846500000000001,
+            "p95": 13.631999999999987,
+            "p99": 31.06254000000002,
+            "max": 37.3509,
+            "mean": 8.464923333333333,
+            "share_of_wall_mean": 0.13859265429903628
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 4.6862,
+            "p50": 5.98165,
+            "p95": 7.5048949999999985,
+            "p99": 8.382074000000001,
+            "max": 8.6777,
+            "mean": 6.051436666666667,
+            "share_of_wall_mean": 0.09907764511620058
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "cursor_execute",
+            "detail": "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 1.902,
+            "p50": 2.6340500000000002,
+            "p95": 3.3230899999999997,
+            "p99": 3.448535,
+            "max": 3.4829,
+            "mean": 2.6024733333333336,
+            "share_of_wall_mean": 0.04260920894449455
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "python",
+            "detail": "enter:upsert_origin_mappings -> execute:INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 1.8521,
+            "p50": 2.35175,
+            "p95": 3.5847499999999997,
+            "p99": 3.691574,
+            "max": 3.7262,
+            "mean": 2.52461,
+            "share_of_wall_mean": 0.04133438510802302
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 1.2188,
+            "p50": 1.544,
+            "p95": 2.3485300000000002,
+            "p99": 2.4487680000000003,
+            "max": 2.4896,
+            "mean": 1.7171866666666666,
+            "share_of_wall_mean": 0.028114780097663546
+          },
+          {
+            "context": "ensure_teams",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "INSERT teams ON CONFLICT DO NOTHING",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.8217,
+            "p50": 0.9069,
+            "p95": 1.9916049999999996,
+            "p99": 2.5199890000000007,
+            "max": 2.7073,
+            "mean": 1.15656,
+            "share_of_wall_mean": 0.018935873834190275
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "python",
+            "detail": "enter:upsert_origin_mappings -> execute:INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.7335,
+            "p50": 0.9916,
+            "p95": 1.297505,
+            "p99": 1.4179100000000002,
+            "max": 1.4588,
+            "mean": 1.00291,
+            "share_of_wall_mean": 0.016420226557245423
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "cursor_execute",
+            "detail": "INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.5633,
+            "p50": 0.7719,
+            "p95": 1.173495,
+            "p99": 1.2385220000000001,
+            "max": 1.2583,
+            "mean": 0.8023633333333334,
+            "share_of_wall_mean": 0.01313675974370578
+          },
+          {
+            "context": "ensure_teams",
+            "category": "python",
+            "detail": "enter:ensure_teams -> execute:INSERT teams ON CONFLICT DO NOTHING",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.5117,
+            "p50": 0.7276499999999999,
+            "p95": 1.2059599999999993,
+            "p99": 1.5769550000000003,
+            "max": 1.6757,
+            "mean": 0.7925,
+            "share_of_wall_mean": 0.012975271506532987
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "cursor_execute",
+            "detail": "SELECT fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.3711,
+            "p50": 0.57725,
+            "p95": 0.8398849999999994,
+            "p99": 1.1661750000000004,
+            "max": 1.2655,
+            "mean": 0.5813900000000001,
+            "share_of_wall_mean": 0.009518855648180712
+          },
+          {
+            "context": "ensure_teams",
+            "category": "cursor_execute",
+            "detail": "INSERT teams ON CONFLICT DO NOTHING",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.3186,
+            "p50": 0.4979,
+            "p95": 0.83252,
+            "p99": 0.9269670000000001,
+            "max": 0.964,
+            "mean": 0.5285133333333333,
+            "share_of_wall_mean": 0.008653128069176997
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "python",
+            "detail": "executed:INSERT fixtures ON CONFLICT DO UPDATE -> execute:SELECT fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.3015,
+            "p50": 0.43435,
+            "p95": 0.590845,
+            "p99": 0.614873,
+            "max": 0.6225,
+            "mean": 0.4311466666666667,
+            "share_of_wall_mean": 0.007058984301749749
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "SELECT fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.268,
+            "p50": 0.3167,
+            "p95": 0.47459999999999997,
+            "p99": 0.494628,
+            "max": 0.4995,
+            "mean": 0.3497833333333334,
+            "share_of_wall_mean": 0.00572685642707903
+          },
+          {
+            "context": "ensure_teams",
+            "category": "cursor_execute",
+            "detail": "SELECT teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.1169,
+            "p50": 0.18035,
+            "p95": 0.29502999999999996,
+            "p99": 0.302356,
+            "max": 0.3034,
+            "mean": 0.19571,
+            "share_of_wall_mean": 0.0032042780902757995
+          },
+          {
+            "context": "ensure_teams",
+            "category": "python",
+            "detail": "executed:INSERT teams ON CONFLICT DO NOTHING -> execute:SELECT teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.1355,
+            "p50": 0.181,
+            "p95": 0.28293999999999986,
+            "p99": 0.32968300000000006,
+            "max": 0.3376,
+            "mean": 0.18859333333333334,
+            "share_of_wall_mean": 0.003087759879270761
+          },
+          {
+            "context": "ensure_teams",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "SELECT teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.1313,
+            "p50": 0.15815,
+            "p95": 0.25682499999999997,
+            "p99": 0.266855,
+            "max": 0.267,
+            "mean": 0.17464333333333334,
+            "share_of_wall_mean": 0.002859362355591095
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "python",
+            "detail": "executed:SELECT fixtures -> enter:upsert_origin_mappings",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.1228,
+            "p50": 0.1384,
+            "p95": 0.21521999999999994,
+            "p99": 0.2386,
+            "max": 0.2444,
+            "mean": 0.15369,
+            "share_of_wall_mean": 0.002516302180238555
+          },
+          {
+            "context": "ensure_teams",
+            "category": "python",
+            "detail": "executed:SELECT teams -> enter:upsert_origin_mappings",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0669,
+            "p50": 0.08929999999999999,
+            "p95": 0.11309,
+            "p99": 0.11958,
+            "max": 0.1219,
+            "mean": 0.08662333333333333,
+            "share_of_wall_mean": 0.0014182476577929452
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "python",
+            "detail": "executed:INSERT fixture_provider_mappings ON CONFLICT DO UPDATE -> exit:upsert_origin_mappings",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0539,
+            "p50": 0.08235,
+            "p95": 0.12922499999999995,
+            "p99": 0.140105,
+            "max": 0.1417,
+            "mean": 0.08146,
+            "share_of_wall_mean": 0.0013337105576305076
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "python",
+            "detail": "exit:upsert_origin_mappings -> exit:upsert_fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0566,
+            "p50": 0.07605,
+            "p95": 0.11436499999999997,
+            "p99": 0.13104700000000002,
+            "max": 0.1356,
+            "mean": 0.07692,
+            "share_of_wall_mean": 0.0012593790337949748
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "SELECT fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0321,
+            "p50": 0.038099999999999995,
+            "p95": 0.071405,
+            "p99": 0.08808800000000003,
+            "max": 0.0947,
+            "mean": 0.04315666666666666,
+            "share_of_wall_mean": 0.0007065860786333652
+          },
+          {
+            "context": "ensure_teams",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "SELECT teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0272,
+            "p50": 0.0346,
+            "p95": 0.046235,
+            "p99": 0.049201,
+            "max": 0.0501,
+            "mean": 0.03551333333333333,
+            "share_of_wall_mean": 0.000581444974261209
+          },
+          {
+            "context": "repository_write",
+            "category": "python",
+            "detail": "start -> enter:ensure_teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0186,
+            "p50": 0.0293,
+            "p95": 0.05726999999999999,
+            "p99": 0.07326100000000002,
+            "max": 0.0788,
+            "mean": 0.03288,
+            "share_of_wall_mean": 0.000538330507425621
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "python",
+            "detail": "executed:INSERT team_provider_mappings ON CONFLICT DO UPDATE -> exit:upsert_origin_mappings",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0226,
+            "p50": 0.02785,
+            "p95": 0.04922,
+            "p99": 0.06352900000000002,
+            "max": 0.0693,
+            "mean": 0.03226,
+            "share_of_wall_mean": 0.0005281795063731914
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "INSERT fixtures ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0197,
+            "p50": 0.02545,
+            "p95": 0.04127999999999999,
+            "p99": 0.048154,
+            "max": 0.0503,
+            "mean": 0.02901666666666667,
+            "share_of_wall_mean": 0.0004750777643086001
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0158,
+            "p50": 0.02345,
+            "p95": 0.035495,
+            "p99": 0.037888000000000005,
+            "max": 0.0387,
+            "mean": 0.024220000000000002,
+            "share_of_wall_mean": 0.0003965439443384593
+          },
+          {
+            "context": "ensure_teams",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "INSERT teams ON CONFLICT DO NOTHING",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0117,
+            "p50": 0.0174,
+            "p95": 0.02667499999999999,
+            "p99": 0.032273,
+            "max": 0.0341,
+            "mean": 0.017856666666666667,
+            "share_of_wall_mean": 0.0002923597453648674
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0118,
+            "p50": 0.01555,
+            "p95": 0.026424999999999997,
+            "p99": 0.029372000000000002,
+            "max": 0.0303,
+            "mean": 0.016886666666666668,
+            "share_of_wall_mean": 0.00027647834049251784
+          },
+          {
+            "context": "repository_write",
+            "category": "python",
+            "detail": "exit:upsert_fixtures -> end",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.003,
+            "p50": 0.005350000000000001,
+            "p95": 0.008955,
+            "p99": 0.009,
+            "max": 0.009,
+            "mean": 0.00535,
+            "share_of_wall_mean": 8.759331553306181e-05
+          },
+          {
+            "context": "ensure_teams",
+            "category": "python",
+            "detail": "exit:upsert_origin_mappings -> exit:ensure_teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.003,
+            "p50": 0.00465,
+            "p95": 0.008065,
+            "p99": 0.008271,
+            "max": 0.0083,
+            "mean": 0.005006666666666667,
+            "share_of_wall_mean": 8.197206226209275e-05
+          },
+          {
+            "context": "repository_write",
+            "category": "python",
+            "detail": "exit:ensure_teams -> enter:upsert_fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0009,
+            "p50": 0.0012,
+            "p95": 0.0017,
+            "p99": 0.002339000000000001,
+            "max": 0.0026,
+            "mean": 0.0012833333333333334,
+            "share_of_wall_mean": 2.101148067303975e-05
+          }
+        ]
+      },
+      "instrumentation_overhead_p50_ms": -0.7919500000000141,
+      "gc_collections_by_generation": {
+        "0": 265,
+        "1": 24,
+        "2": 2
+      },
+      "statements": {
+        "INSERT teams ON CONFLICT DO NOTHING": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            0
+          ],
+          "sql_chars": [
+            2120
+          ],
+          "cache": {
+            "NO_CACHE_KEY": 30
+          }
+        },
+        "SELECT teams": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            20
+          ],
+          "sql_chars": [
+            686
+          ],
+          "cache": {
+            "CACHE_HIT": 30
+          }
+        },
+        "INSERT team_provider_mappings ON CONFLICT DO UPDATE": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            20
+          ],
+          "sql_chars": [
+            3598
+          ],
+          "cache": {
+            "NO_CACHE_KEY": 30
+          }
+        },
+        "INSERT fixtures ON CONFLICT DO UPDATE": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            0
+          ],
+          "sql_chars": [
+            75863
+          ],
+          "cache": {
+            "NO_CACHE_KEY": 30
+          }
+        },
+        "SELECT fixtures": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            100
+          ],
+          "sql_chars": [
+            3179
+          ],
+          "cache": {
+            "CACHE_HIT": 30
+          }
+        },
+        "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            100
+          ],
+          "sql_chars": [
+            14777
+          ],
+          "cache": {
+            "NO_CACHE_KEY": 30
+          }
+        }
+      },
+      "prepared_statements_after_case": [
+        {
+          "family": "SET LOCAL statement_timeout",
+          "generic_plans": 59,
+          "custom_plans": 0
+        },
+        {
+          "family": "INSERT teams ON CONFLICT DO NOTHING",
+          "generic_plans": 53,
+          "custom_plans": 5
+        },
+        {
+          "family": "SELECT teams",
+          "generic_plans": 53,
+          "custom_plans": 5
+        },
+        {
+          "family": "INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+          "generic_plans": 53,
+          "custom_plans": 5
+        },
+        {
+          "family": "INSERT fixtures ON CONFLICT DO UPDATE",
+          "generic_plans": 53,
+          "custom_plans": 5
+        },
+        {
+          "family": "SELECT fixtures",
+          "generic_plans": 53,
+          "custom_plans": 5
+        },
+        {
+          "family": "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+          "generic_plans": 53,
+          "custom_plans": 5
+        }
+      ],
+      "sequence": [
+        {
+          "run": 3,
+          "instrumented": false,
+          "total_ms": 69.5673,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 1.0537
+        },
+        {
+          "run": 4,
+          "instrumented": true,
+          "total_ms": 62.2543,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.9722,
+          "cursor_ms": 15.5762
+        },
+        {
+          "run": 5,
+          "instrumented": false,
+          "total_ms": 69.6693,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 1.2762
+        },
+        {
+          "run": 6,
+          "instrumented": true,
+          "total_ms": 65.4163,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.7748,
+          "cursor_ms": 11.5744
+        },
+        {
+          "run": 7,
+          "instrumented": false,
+          "total_ms": 53.1849,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.7306
+        },
+        {
+          "run": 8,
+          "instrumented": true,
+          "total_ms": 65.1782,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.1205,
+          "cursor_ms": 11.705
+        },
+        {
+          "run": 9,
+          "instrumented": false,
+          "total_ms": 71.0256,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.8035
+        },
+        {
+          "run": 10,
+          "instrumented": true,
+          "total_ms": 65.1352,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 1.0742,
+          "cursor_ms": 11.5531
+        },
+        {
+          "run": 11,
+          "instrumented": false,
+          "total_ms": 80.4349,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 26.9976
+        },
+        {
+          "run": 12,
+          "instrumented": true,
+          "total_ms": 47.5702,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.8108,
+          "cursor_ms": 8.9431
+        },
+        {
+          "run": 13,
+          "instrumented": false,
+          "total_ms": 65.1144,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 1.4097
+        },
+        {
+          "run": 14,
+          "instrumented": true,
+          "total_ms": 56.9789,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.8682,
+          "cursor_ms": 10.377
+        },
+        {
+          "run": 15,
+          "instrumented": false,
+          "total_ms": 68.9925,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.4905
+        },
+        {
+          "run": 16,
+          "instrumented": true,
+          "total_ms": 52.5544,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.7396,
+          "cursor_ms": 8.95
+        },
+        {
+          "run": 17,
+          "instrumented": false,
+          "total_ms": 67.6921,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 0.9079
+        },
+        {
+          "run": 18,
+          "instrumented": true,
+          "total_ms": 69.9659,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 1.0318,
+          "cursor_ms": 10.7278
+        },
+        {
+          "run": 19,
+          "instrumented": false,
+          "total_ms": 60.6548,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.95
+        },
+        {
+          "run": 20,
+          "instrumented": true,
+          "total_ms": 68.7927,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 2.2501,
+          "cursor_ms": 11.1482
+        },
+        {
+          "run": 21,
+          "instrumented": false,
+          "total_ms": 65.5606,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.8793
+        },
+        {
+          "run": 22,
+          "instrumented": true,
+          "total_ms": 69.7822,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 0.8128,
+          "cursor_ms": 10.254
+        },
+        {
+          "run": 23,
+          "instrumented": false,
+          "total_ms": 71.4464,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.2508
+        },
+        {
+          "run": 24,
+          "instrumented": true,
+          "total_ms": 68.6612,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.8618,
+          "cursor_ms": 12.1352
+        },
+        {
+          "run": 25,
+          "instrumented": false,
+          "total_ms": 64.8177,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 2.1527
+        },
+        {
+          "run": 26,
+          "instrumented": true,
+          "total_ms": 64.9696,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.0446,
+          "cursor_ms": 11.9558
+        },
+        {
+          "run": 27,
+          "instrumented": false,
+          "total_ms": 65.4891,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.8042
+        },
+        {
+          "run": 28,
+          "instrumented": true,
+          "total_ms": 69.615,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.1215,
+          "cursor_ms": 10.4386
+        },
+        {
+          "run": 29,
+          "instrumented": false,
+          "total_ms": 69.195,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 1.1744
+        },
+        {
+          "run": 30,
+          "instrumented": true,
+          "total_ms": 68.8077,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.9174,
+          "cursor_ms": 13.424
+        },
+        {
+          "run": 31,
+          "instrumented": false,
+          "total_ms": 69.555,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.7721
+        },
+        {
+          "run": 32,
+          "instrumented": true,
+          "total_ms": 65.2906,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.8625,
+          "cursor_ms": 10.4292
+        },
+        {
+          "run": 33,
+          "instrumented": false,
+          "total_ms": 66.6291,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.9866
+        },
+        {
+          "run": 34,
+          "instrumented": true,
+          "total_ms": 68.4771,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.0557,
+          "cursor_ms": 12.2352
+        },
+        {
+          "run": 35,
+          "instrumented": false,
+          "total_ms": 62.6587,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.466
+        },
+        {
+          "run": 36,
+          "instrumented": true,
+          "total_ms": 67.2106,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.784,
+          "cursor_ms": 10.7135
+        },
+        {
+          "run": 37,
+          "instrumented": false,
+          "total_ms": 65.1278,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.8176
+        },
+        {
+          "run": 38,
+          "instrumented": true,
+          "total_ms": 88.679,
+          "thread_cpu_ms": 93.75,
+          "gc_ms": 32.2218,
+          "cursor_ms": 40.8477
+        },
+        {
+          "run": 39,
+          "instrumented": false,
+          "total_ms": 68.4519,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.9648
+        },
+        {
+          "run": 40,
+          "instrumented": true,
+          "total_ms": 67.9018,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 2.0071,
+          "cursor_ms": 14.4097
+        },
+        {
+          "run": 41,
+          "instrumented": false,
+          "total_ms": 69.5322,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.1898
+        },
+        {
+          "run": 42,
+          "instrumented": true,
+          "total_ms": 82.9502,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 1.3531,
+          "cursor_ms": 17.6205
+        },
+        {
+          "run": 43,
+          "instrumented": false,
+          "total_ms": 85.5319,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 1.8933
+        },
+        {
+          "run": 44,
+          "instrumented": true,
+          "total_ms": 88.6044,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 1.5292,
+          "cursor_ms": 21.5546
+        },
+        {
+          "run": 45,
+          "instrumented": false,
+          "total_ms": 90.0764,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 2.9178
+        },
+        {
+          "run": 46,
+          "instrumented": true,
+          "total_ms": 69.9289,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 1.0424,
+          "cursor_ms": 13.2614
+        },
+        {
+          "run": 47,
+          "instrumented": false,
+          "total_ms": 68.2444,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.1102
+        },
+        {
+          "run": 48,
+          "instrumented": true,
+          "total_ms": 70.0574,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.2176,
+          "cursor_ms": 10.5069
+        },
+        {
+          "run": 49,
+          "instrumented": false,
+          "total_ms": 70.0377,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.9631
+        },
+        {
+          "run": 50,
+          "instrumented": true,
+          "total_ms": 64.7742,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.3729,
+          "cursor_ms": 10.9977
+        },
+        {
+          "run": 51,
+          "instrumented": false,
+          "total_ms": 69.9824,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.1329
+        },
+        {
+          "run": 52,
+          "instrumented": true,
+          "total_ms": 70.3313,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.9772,
+          "cursor_ms": 12.7384
+        },
+        {
+          "run": 53,
+          "instrumented": false,
+          "total_ms": 65.5294,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.245
+        },
+        {
+          "run": 54,
+          "instrumented": true,
+          "total_ms": 65.2434,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 1.1916,
+          "cursor_ms": 12.4944
+        },
+        {
+          "run": 55,
+          "instrumented": false,
+          "total_ms": 68.5996,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 1.4167
+        },
+        {
+          "run": 56,
+          "instrumented": true,
+          "total_ms": 64.533,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.075,
+          "cursor_ms": 9.962
+        },
+        {
+          "run": 57,
+          "instrumented": false,
+          "total_ms": 64.9682,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.0977
+        },
+        {
+          "run": 58,
+          "instrumented": true,
+          "total_ms": 65.2351,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.9307,
+          "cursor_ms": 10.3631
+        },
+        {
+          "run": 59,
+          "instrumented": false,
+          "total_ms": 55.7864,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.8251
+        },
+        {
+          "run": 60,
+          "instrumented": true,
+          "total_ms": 73.6343,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 2.6029,
+          "cursor_ms": 16.076
+        },
+        {
+          "run": 61,
+          "instrumented": false,
+          "total_ms": 68.0779,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.03
+        },
+        {
+          "run": 62,
+          "instrumented": true,
+          "total_ms": 58.4882,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.8595,
+          "cursor_ms": 12.2885
+        }
+      ],
+      "cprofile": null,
+      "server_stats": {
+        "before_samples": {
+          "status": "MEDIDO",
+          "tables": [
+            {
+              "relname": "fixture_provider_mappings",
+              "n_live_tup": 1800000,
+              "n_dead_tup": 0,
+              "n_tup_upd": 251920,
+              "n_tup_hot_upd": 207091
+            },
+            {
+              "relname": "fixtures",
+              "n_live_tup": 1000000,
+              "n_dead_tup": 12,
+              "n_tup_upd": 124280,
+              "n_tup_hot_upd": 101348
+            },
+            {
+              "relname": "team_provider_mappings",
+              "n_live_tup": 10560,
+              "n_dead_tup": 20,
+              "n_tup_upd": 29160,
+              "n_tup_hot_upd": 29110
+            },
+            {
+              "relname": "teams",
+              "n_live_tup": 5280,
+              "n_dead_tup": 0,
+              "n_tup_upd": 0,
+              "n_tup_hot_upd": 0
+            }
+          ]
+        },
+        "after_case": {
+          "status": "MEDIDO",
+          "tables": [
+            {
+              "relname": "fixture_provider_mappings",
+              "n_live_tup": 1800000,
+              "n_dead_tup": 323,
+              "n_tup_upd": 257920,
+              "n_tup_hot_upd": 213091
+            },
+            {
+              "relname": "fixtures",
+              "n_live_tup": 1000000,
+              "n_dead_tup": 12,
+              "n_tup_upd": 124280,
+              "n_tup_hot_upd": 101348
+            },
+            {
+              "relname": "team_provider_mappings",
+              "n_live_tup": 10560,
+              "n_dead_tup": 81,
+              "n_tup_upd": 30360,
+              "n_tup_hot_upd": 30310
+            },
+            {
+              "relname": "teams",
+              "n_live_tup": 5280,
+              "n_dead_tup": 0,
+              "n_tup_upd": 0,
+              "n_tup_hot_upd": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "operation": "profile_update_100",
+      "status": "MEDIDO",
+      "unit": "ms",
+      "batch": 100,
+      "mode": "update",
+      "season_groups": [
+        100
+      ],
+      "prepare_threshold": "5",
+      "payload_build_ms": {
+        "status": "MEDIDO (fuera del reloj del path)",
+        "variants": [
+          1.7069,
+          1.5588
+        ]
+      },
+      "plain": {
+        "wall_before_commit_ms": {
+          "samples": 30,
+          "min": 49.8777,
+          "p50": 58.8749,
+          "p95": 85.71815499999997,
+          "p99": 92.98778,
+          "max": 93.9558
+        },
+        "commit_ms": {
+          "samples": 30,
+          "min": 0.488,
+          "p50": 2.3750999999999998,
+          "p95": 16.527864999999988,
+          "p99": 175.06227500000017,
+          "max": 239.1849
+        },
+        "total_ms": {
+          "samples": 30,
+          "min": 50.5249,
+          "p50": 66.74745,
+          "p95": 93.95455,
+          "p99": 242.03469100000015,
+          "max": 302.2132
+        },
+        "thread_cpu_ms": {
+          "samples": 30,
+          "min": 31.25,
+          "p50": 54.6875,
+          "p95": 86.71874999999996,
+          "p99": 93.75,
+          "max": 93.75
+        },
+        "gc_ms": {
+          "samples": 30,
+          "min": 0.8304,
+          "p50": 1.14185,
+          "p95": 2.231035,
+          "p99": 20.403659000000022,
+          "max": 27.8256
+        },
+        "raw_ms": {
+          "wall_before_commit": [
+            62.2409,
+            57.8853,
+            63.8301,
+            57.4194,
+            60.6526,
+            56.9698,
+            61.9984,
+            63.0283,
+            93.9558,
+            79.7297,
+            60.351,
+            69.0036,
+            58.0704,
+            90.6178,
+            57.1417,
+            60.8,
+            51.2285,
+            59.2528,
+            52.7164,
+            66.2586,
+            52.0139,
+            55.3777,
+            55.1484,
+            51.8952,
+            49.8777,
+            56.8014,
+            66.4859,
+            66.7593,
+            57.1183,
+            58.497
+          ],
+          "commit": [
+            6.5867,
+            10.1894,
+            2.2589,
+            7.2747,
+            5.5124,
+            11.2481,
+            0.615,
+            239.1849,
+            0.7453,
+            0.5697,
+            0.5189,
+            0.5491,
+            0.5144,
+            2.4243,
+            0.5501,
+            0.6551,
+            14.6401,
+            0.5869,
+            0.5092,
+            2.3794,
+            0.5305,
+            11.9522,
+            13.1544,
+            0.488,
+            0.6472,
+            12.0912,
+            2.4855,
+            2.3708,
+            18.0724,
+            6.4456
+          ],
+          "total": [
+            68.8276,
+            68.0747,
+            66.089,
+            64.6941,
+            66.165,
+            68.2179,
+            62.6134,
+            302.2132,
+            94.7011,
+            80.2994,
+            60.8699,
+            69.5527,
+            58.5848,
+            93.0421,
+            57.6918,
+            61.4551,
+            65.8686,
+            59.8397,
+            53.2256,
+            68.638,
+            52.5444,
+            67.3299,
+            68.3028,
+            52.3832,
+            50.5249,
+            68.8926,
+            68.9714,
+            69.1301,
+            75.1907,
+            64.9426
+          ],
+          "thread_cpu": [
+            46.875,
+            62.5,
+            62.5,
+            46.875,
+            46.875,
+            62.5,
+            62.5,
+            62.5,
+            93.75,
+            78.125,
+            62.5,
+            62.5,
+            31.25,
+            93.75,
+            62.5,
+            46.875,
+            46.875,
+            46.875,
+            46.875,
+            78.125,
+            62.5,
+            46.875,
+            46.875,
+            46.875,
+            62.5,
+            31.25,
+            46.875,
+            46.875,
+            46.875,
+            62.5
+          ],
+          "gc": [
+            1.3396,
+            0.8571,
+            1.1604,
+            0.9817,
+            1.5268,
+            1.0997,
+            1.0019,
+            1.312,
+            2.229,
+            2.0851,
+            1.4322,
+            1.19,
+            1.3211,
+            27.8256,
+            1.3335,
+            1.6091,
+            0.8947,
+            0.969,
+            0.8363,
+            1.1608,
+            1.5508,
+            0.9109,
+            0.8428,
+            0.8304,
+            1.04,
+            2.2327,
+            1.1044,
+            1.1233,
+            0.9167,
+            0.9929
+          ]
+        }
+      },
+      "instrumented": {
+        "wall_before_commit_ms": {
+          "samples": 30,
+          "min": 56.1271,
+          "p50": 62.541650000000004,
+          "p95": 86.06685999999999,
+          "p99": 93.795563,
+          "max": 96.1287
+        },
+        "commit_ms": {
+          "samples": 30,
+          "min": 0.4093,
+          "p50": 2.67515,
+          "p95": 11.791694999999999,
+          "p99": 12.987856,
+          "max": 13.4123
+        },
+        "total_ms": {
+          "samples": 30,
+          "min": 61.6105,
+          "p50": 68.13475,
+          "p95": 86.59451999999999,
+          "p99": 95.808255,
+          "max": 98.7084
+        },
+        "thread_cpu_ms": {
+          "samples": 30,
+          "min": 31.25,
+          "p50": 62.5,
+          "p95": 86.71874999999996,
+          "p99": 93.75,
+          "max": 93.75
+        },
+        "gc_ms": {
+          "samples": 30,
+          "min": 0.7859,
+          "p50": 1.149,
+          "p95": 2.121035,
+          "p99": 23.504961000000026,
+          "max": 32.2279
+        },
+        "raw_ms": {
+          "wall_before_commit": [
+            64.1838,
+            67.5665,
+            62.4343,
+            58.5636,
+            57.0715,
+            62.8575,
+            61.0947,
+            96.1287,
+            88.0834,
+            64.4869,
+            67.4031,
+            70.5074,
+            62.0857,
+            63.9152,
+            56.5044,
+            68.9108,
+            58.6887,
+            63.1872,
+            62.649,
+            58.4496,
+            60.1802,
+            71.4989,
+            60.0807,
+            56.1271,
+            57.9006,
+            63.1772,
+            83.6022,
+            59.9149,
+            58.2874,
+            59.0712
+          ],
+          "commit": [
+            2.2447,
+            2.7706,
+            5.9318,
+            11.9487,
+            13.4123,
+            0.6541,
+            0.5158,
+            2.5797,
+            0.6245,
+            0.4688,
+            0.6216,
+            0.4925,
+            0.4777,
+            4.5705,
+            8.3154,
+            0.4771,
+            11.5998,
+            2.3567,
+            2.2142,
+            9.5892,
+            4.9694,
+            2.4678,
+            9.7516,
+            11.3144,
+            7.6479,
+            0.5707,
+            0.4093,
+            8.3158,
+            6.4869,
+            11.1281
+          ],
+          "total": [
+            66.4285,
+            70.3371,
+            68.3661,
+            70.5123,
+            70.4838,
+            63.5116,
+            61.6105,
+            98.7084,
+            88.7079,
+            64.9557,
+            68.0247,
+            70.9999,
+            62.5634,
+            68.4857,
+            64.8198,
+            69.3879,
+            70.2885,
+            65.5439,
+            64.8632,
+            68.0388,
+            65.1496,
+            73.9667,
+            69.8323,
+            67.4415,
+            65.5485,
+            63.7479,
+            84.0115,
+            68.2307,
+            64.7743,
+            70.1993
+          ],
+          "thread_cpu": [
+            46.875,
+            62.5,
+            46.875,
+            62.5,
+            31.25,
+            62.5,
+            62.5,
+            93.75,
+            93.75,
+            62.5,
+            62.5,
+            78.125,
+            62.5,
+            62.5,
+            46.875,
+            62.5,
+            62.5,
+            62.5,
+            62.5,
+            46.875,
+            31.25,
+            78.125,
+            62.5,
+            31.25,
+            46.875,
+            62.5,
+            78.125,
+            46.875,
+            31.25,
+            62.5
+          ],
+          "gc": [
+            0.9306,
+            1.5946,
+            1.3041,
+            1.0003,
+            1.2486,
+            1.1122,
+            1.4453,
+            2.1488,
+            1.6733,
+            1.1176,
+            1.1804,
+            1.6583,
+            1.5012,
+            0.9224,
+            0.7859,
+            1.5739,
+            1.06,
+            2.0871,
+            0.921,
+            0.9961,
+            0.8864,
+            1.2945,
+            1.7468,
+            0.9793,
+            0.8385,
+            0.8536,
+            32.2279,
+            1.8197,
+            0.9677,
+            0.8656
+          ]
+        },
+        "categories_ms": {
+          "python": {
+            "samples": 30,
+            "min": 12.3655,
+            "p50": 14.87975,
+            "p95": 20.277534999999997,
+            "p99": 21.573862000000002,
+            "max": 21.9718
+          },
+          "sqlalchemy_pre_cursor": {
+            "samples": 30,
+            "min": 29.0548,
+            "p50": 33.1049,
+            "p95": 45.60619999999998,
+            "p99": 53.88156300000001,
+            "max": 55.8232
+          },
+          "cursor_execute": {
+            "samples": 30,
+            "min": 9.8189,
+            "p50": 12.6555,
+            "p95": 18.846179999999997,
+            "p99": 34.90239500000002,
+            "max": 41.2228
+          },
+          "sqlalchemy_post_cursor": {
+            "samples": 30,
+            "min": 0.1197,
+            "p50": 0.16225,
+            "p95": 0.23311,
+            "p99": 0.28084100000000006,
+            "max": 0.3003
+          }
+        },
+        "contexts_ms": {
+          "ensure_teams": {
+            "samples": 30,
+            "min": 2.2241,
+            "p50": 3.1702,
+            "p95": 4.424659999999999,
+            "p99": 4.513378,
+            "max": 4.5255
+          },
+          "ensure_teams>upsert_origin_mappings": {
+            "samples": 30,
+            "min": 2.6664,
+            "p50": 3.44225,
+            "p95": 5.126739999999999,
+            "p99": 5.373579,
+            "max": 5.4272
+          },
+          "repository_write": {
+            "samples": 30,
+            "min": 0.0254,
+            "p50": 0.03445,
+            "p95": 0.05406,
+            "p99": 0.05665900000000001,
+            "max": 0.0575
+          },
+          "upsert_fixtures": {
+            "samples": 30,
+            "min": 37.1111,
+            "p50": 42.0983,
+            "p95": 65.97754999999998,
+            "p99": 68.73720999999999,
+            "max": 68.868
+          },
+          "upsert_fixtures>upsert_origin_mappings": {
+            "samples": 30,
+            "min": 8.655,
+            "p50": 12.9388,
+            "p95": 16.240584999999996,
+            "p99": 17.867829,
+            "max": 18.3173
+          }
+        },
+        "segments": [
+          {
+            "context": "upsert_fixtures",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "INSERT fixtures ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 19.9619,
+            "p50": 22.768099999999997,
+            "p95": 33.367339999999984,
+            "p99": 40.308329,
+            "max": 42.1382,
+            "mean": 24.612503333333333,
+            "share_of_wall_mean": 0.37970296805677056
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "python",
+            "detail": "enter:upsert_fixtures -> execute:INSERT fixtures ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 7.0036,
+            "p50": 9.5348,
+            "p95": 12.753075,
+            "p99": 12.852613,
+            "max": 12.8759,
+            "mean": 9.698743333333335,
+            "share_of_wall_mean": 0.14962483012038802
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "cursor_execute",
+            "detail": "INSERT fixtures ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 5.3833,
+            "p50": 7.9651,
+            "p95": 12.298589999999997,
+            "p99": 30.29788900000002,
+            "max": 37.4336,
+            "mean": 9.035903333333332,
+            "share_of_wall_mean": 0.1393990391092847
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 4.8342,
+            "p50": 7.22725,
+            "p95": 8.335295,
+            "p99": 9.018884,
+            "max": 9.2858,
+            "mean": 7.009243333333333,
+            "share_of_wall_mean": 0.10813327118555861
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "cursor_execute",
+            "detail": "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 1.8164,
+            "p50": 2.8583499999999997,
+            "p95": 4.333179999999998,
+            "p99": 5.0288520000000005,
+            "max": 5.18,
+            "mean": 2.90074,
+            "share_of_wall_mean": 0.04475040887325412
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "python",
+            "detail": "enter:upsert_origin_mappings -> execute:INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 1.8186,
+            "p50": 2.54645,
+            "p95": 3.5820649999999996,
+            "p99": 4.499408000000001,
+            "max": 4.8575,
+            "mean": 2.7075233333333335,
+            "share_of_wall_mean": 0.0417696092033559
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 1.2776,
+            "p50": 1.5564,
+            "p95": 2.38939,
+            "p99": 2.413726,
+            "max": 2.4226,
+            "mean": 1.7343966666666666,
+            "share_of_wall_mean": 0.026756951668106196
+          },
+          {
+            "context": "ensure_teams",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "INSERT teams ON CONFLICT DO NOTHING",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.8191,
+            "p50": 1.0585,
+            "p95": 1.673019999999999,
+            "p99": 2.121201,
+            "max": 2.2439,
+            "mean": 1.1498066666666666,
+            "share_of_wall_mean": 0.017738342098404802
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "python",
+            "detail": "enter:upsert_origin_mappings -> execute:INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.7573,
+            "p50": 0.94495,
+            "p95": 1.7413499999999986,
+            "p99": 2.3272530000000007,
+            "max": 2.4822,
+            "mean": 1.0671966666666668,
+            "share_of_wall_mean": 0.016463897895539495
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "cursor_execute",
+            "detail": "INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.5954,
+            "p50": 0.8796999999999999,
+            "p95": 1.153505,
+            "p99": 1.200774,
+            "max": 1.2151,
+            "mean": 0.86229,
+            "share_of_wall_mean": 0.013302753803277197
+          },
+          {
+            "context": "ensure_teams",
+            "category": "python",
+            "detail": "enter:ensure_teams -> execute:INSERT teams ON CONFLICT DO NOTHING",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.531,
+            "p50": 0.75115,
+            "p95": 1.12516,
+            "p99": 1.1541290000000002,
+            "max": 1.1628,
+            "mean": 0.8040866666666666,
+            "share_of_wall_mean": 0.012404837077044246
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "cursor_execute",
+            "detail": "SELECT fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.426,
+            "p50": 0.64175,
+            "p95": 0.9726999999999998,
+            "p99": 1.2489660000000005,
+            "max": 1.346,
+            "mean": 0.65285,
+            "share_of_wall_mean": 0.010071672894814412
+          },
+          {
+            "context": "ensure_teams",
+            "category": "cursor_execute",
+            "detail": "INSERT teams ON CONFLICT DO NOTHING",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.3608,
+            "p50": 0.48519999999999996,
+            "p95": 0.7860149999999998,
+            "p99": 0.837487,
+            "max": 0.8432,
+            "mean": 0.5284,
+            "share_of_wall_mean": 0.008151753017722195
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "python",
+            "detail": "executed:INSERT fixtures ON CONFLICT DO UPDATE -> execute:SELECT fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.2966,
+            "p50": 0.41555,
+            "p95": 0.6553349999999998,
+            "p99": 0.6912440000000001,
+            "max": 0.6931,
+            "mean": 0.43892666666666663,
+            "share_of_wall_mean": 0.006771426532094518
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "SELECT fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.2646,
+            "p50": 0.3716,
+            "p95": 0.58567,
+            "p99": 0.59667,
+            "max": 0.5987,
+            "mean": 0.39931333333333335,
+            "share_of_wall_mean": 0.006160302176413151
+          },
+          {
+            "context": "ensure_teams",
+            "category": "cursor_execute",
+            "detail": "SELECT teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.1288,
+            "p50": 0.18755,
+            "p95": 0.32669499999999985,
+            "p99": 0.39215200000000006,
+            "max": 0.4099,
+            "mean": 0.20190333333333335,
+            "share_of_wall_mean": 0.003114810951529467
+          },
+          {
+            "context": "ensure_teams",
+            "category": "python",
+            "detail": "executed:INSERT teams ON CONFLICT DO NOTHING -> execute:SELECT teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.133,
+            "p50": 0.17855,
+            "p95": 0.24477,
+            "p99": 0.26618,
+            "max": 0.2743,
+            "mean": 0.18248666666666666,
+            "share_of_wall_mean": 0.002815265396847207
+          },
+          {
+            "context": "ensure_teams",
+            "category": "sqlalchemy_pre_cursor",
+            "detail": "SELECT teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.133,
+            "p50": 0.1557,
+            "p95": 0.25738,
+            "p99": 0.28422800000000004,
+            "max": 0.2949,
+            "mean": 0.1802133333333333,
+            "share_of_wall_mean": 0.0027801941404878416
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "python",
+            "detail": "executed:SELECT fixtures -> enter:upsert_origin_mappings",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.1192,
+            "p50": 0.13945000000000002,
+            "p95": 0.23104999999999998,
+            "p99": 0.236424,
+            "max": 0.2377,
+            "mean": 0.1604866666666667,
+            "share_of_wall_mean": 0.002475866141756579
+          },
+          {
+            "context": "ensure_teams",
+            "category": "python",
+            "detail": "executed:SELECT teams -> enter:upsert_origin_mappings",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0617,
+            "p50": 0.07605,
+            "p95": 0.12833999999999998,
+            "p99": 0.17376200000000006,
+            "max": 0.1918,
+            "mean": 0.08877333333333333,
+            "share_of_wall_mean": 0.0013695274184202465
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "python",
+            "detail": "executed:INSERT fixture_provider_mappings ON CONFLICT DO UPDATE -> exit:upsert_origin_mappings",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0559,
+            "p50": 0.0816,
+            "p95": 0.128855,
+            "p99": 0.137846,
+            "max": 0.1415,
+            "mean": 0.08085666666666666,
+            "share_of_wall_mean": 0.0012473951107171792
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "python",
+            "detail": "exit:upsert_origin_mappings -> exit:upsert_fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0546,
+            "p50": 0.07365,
+            "p95": 0.096025,
+            "p99": 0.098617,
+            "max": 0.0994,
+            "mean": 0.07315666666666668,
+            "share_of_wall_mean": 0.0011286053714354594
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "SELECT fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0324,
+            "p50": 0.03985,
+            "p95": 0.06068,
+            "p99": 0.11188100000000006,
+            "max": 0.1325,
+            "mean": 0.044963333333333334,
+            "share_of_wall_mean": 0.0006936600836238625
+          },
+          {
+            "context": "ensure_teams",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "SELECT teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.024,
+            "p50": 0.03185,
+            "p95": 0.050439999999999985,
+            "p99": 0.07532000000000003,
+            "max": 0.0846,
+            "mean": 0.03579333333333334,
+            "share_of_wall_mean": 0.0005521923032065413
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "python",
+            "detail": "executed:INSERT team_provider_mappings ON CONFLICT DO UPDATE -> exit:upsert_origin_mappings",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0225,
+            "p50": 0.0324,
+            "p95": 0.05565499999999998,
+            "p99": 0.06053000000000001,
+            "max": 0.0614,
+            "mean": 0.03505,
+            "share_of_wall_mean": 0.0005407247223148427
+          },
+          {
+            "context": "repository_write",
+            "category": "python",
+            "detail": "start -> enter:ensure_teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.02,
+            "p50": 0.0282,
+            "p95": 0.04691,
+            "p99": 0.047852,
+            "max": 0.0482,
+            "mean": 0.03170333333333333,
+            "share_of_wall_mean": 0.0004890948962374198
+          },
+          {
+            "context": "upsert_fixtures",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "INSERT fixtures ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0192,
+            "p50": 0.02735,
+            "p95": 0.03954,
+            "p99": 0.041746000000000005,
+            "max": 0.0425,
+            "mean": 0.02833,
+            "share_of_wall_mean": 0.00043705367712352345
+          },
+          {
+            "context": "upsert_fixtures>upsert_origin_mappings",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0159,
+            "p50": 0.023100000000000002,
+            "p95": 0.04200999999999995,
+            "p99": 0.08338000000000004,
+            "max": 0.0973,
+            "mean": 0.026136666666666666,
+            "share_of_wall_mean": 0.0004032165998735789
+          },
+          {
+            "context": "ensure_teams>upsert_origin_mappings",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0117,
+            "p50": 0.017750000000000002,
+            "p95": 0.02985999999999999,
+            "p99": 0.032862,
+            "max": 0.0335,
+            "mean": 0.01902,
+            "share_of_wall_mean": 0.00029342608326471636
+          },
+          {
+            "context": "ensure_teams",
+            "category": "sqlalchemy_post_cursor",
+            "detail": "INSERT teams ON CONFLICT DO NOTHING",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.011,
+            "p50": 0.01565,
+            "p95": 0.027464999999999993,
+            "p99": 0.04000200000000001,
+            "max": 0.0447,
+            "mean": 0.01780666666666667,
+            "share_of_wall_mean": 0.00027470770010517263
+          },
+          {
+            "context": "ensure_teams",
+            "category": "python",
+            "detail": "exit:upsert_origin_mappings -> exit:ensure_teams",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0028,
+            "p50": 0.005849999999999999,
+            "p95": 0.010424999999999995,
+            "p99": 0.011313,
+            "max": 0.0114,
+            "mean": 0.006096666666666667,
+            "share_of_wall_mean": 9.405473296375155e-05
+          },
+          {
+            "context": "repository_write",
+            "category": "python",
+            "detail": "exit:upsert_fixtures -> end",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0037,
+            "p50": 0.005050000000000001,
+            "p95": 0.0069,
+            "p99": 0.008320000000000001,
+            "max": 0.0089,
+            "mean": 0.005243333333333333,
+            "share_of_wall_mean": 8.089015579659987e-05
+          },
+          {
+            "context": "repository_write",
+            "category": "python",
+            "detail": "exit:ensure_teams -> enter:upsert_fixtures",
+            "status": "MEDIDO",
+            "samples": 30,
+            "min": 0.0007,
+            "p50": 0.0012,
+            "p95": 0.0023199999999999987,
+            "p99": 0.0030680000000000004,
+            "max": 0.0033,
+            "mean": 0.00134,
+            "share_of_wall_mean": 2.0672500082792848e-05
+          }
+        ]
+      },
+      "instrumentation_overhead_p50_ms": 1.3872999999999962,
+      "gc_collections_by_generation": {
+        "0": 265,
+        "1": 24,
+        "2": 2
+      },
+      "statements": {
+        "INSERT teams ON CONFLICT DO NOTHING": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            0
+          ],
+          "sql_chars": [
+            2120
+          ],
+          "cache": {
+            "NO_CACHE_KEY": 30
+          }
+        },
+        "SELECT teams": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            20
+          ],
+          "sql_chars": [
+            686
+          ],
+          "cache": {
+            "CACHE_HIT": 30
+          }
+        },
+        "INSERT team_provider_mappings ON CONFLICT DO UPDATE": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            20
+          ],
+          "sql_chars": [
+            3598
+          ],
+          "cache": {
+            "NO_CACHE_KEY": 30
+          }
+        },
+        "INSERT fixtures ON CONFLICT DO UPDATE": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            100
+          ],
+          "sql_chars": [
+            75863
+          ],
+          "cache": {
+            "NO_CACHE_KEY": 30
+          }
+        },
+        "SELECT fixtures": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            100
+          ],
+          "sql_chars": [
+            3179
+          ],
+          "cache": {
+            "CACHE_HIT": 30
+          }
+        },
+        "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE": {
+          "per_sample_count": {
+            "samples": 30,
+            "min": 1,
+            "p50": 1.0,
+            "p95": 1.0,
+            "p99": 1.0,
+            "max": 1
+          },
+          "executemany": [
+            false
+          ],
+          "parameter_rows": [
+            1
+          ],
+          "rowcount": [
+            100
+          ],
+          "sql_chars": [
+            14777
+          ],
+          "cache": {
+            "NO_CACHE_KEY": 30
+          }
+        }
+      },
+      "prepared_statements_after_case": [
+        {
+          "family": "SET LOCAL statement_timeout",
+          "generic_plans": 60,
+          "custom_plans": 0
+        },
+        {
+          "family": "INSERT teams ON CONFLICT DO NOTHING",
+          "generic_plans": 54,
+          "custom_plans": 5
+        },
+        {
+          "family": "SELECT teams",
+          "generic_plans": 54,
+          "custom_plans": 5
+        },
+        {
+          "family": "INSERT team_provider_mappings ON CONFLICT DO UPDATE",
+          "generic_plans": 54,
+          "custom_plans": 5
+        },
+        {
+          "family": "INSERT fixtures ON CONFLICT DO UPDATE",
+          "generic_plans": 54,
+          "custom_plans": 5
+        },
+        {
+          "family": "SELECT fixtures",
+          "generic_plans": 54,
+          "custom_plans": 5
+        },
+        {
+          "family": "INSERT fixture_provider_mappings ON CONFLICT DO UPDATE",
+          "generic_plans": 54,
+          "custom_plans": 5
+        }
+      ],
+      "sequence": [
+        {
+          "run": 3,
+          "instrumented": false,
+          "total_ms": 68.8276,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.3396
+        },
+        {
+          "run": 4,
+          "instrumented": true,
+          "total_ms": 66.4285,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.9306,
+          "cursor_ms": 19.4283
+        },
+        {
+          "run": 5,
+          "instrumented": false,
+          "total_ms": 68.0747,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.8571
+        },
+        {
+          "run": 6,
+          "instrumented": true,
+          "total_ms": 70.3371,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.5946,
+          "cursor_ms": 17.7504
+        },
+        {
+          "run": 7,
+          "instrumented": false,
+          "total_ms": 66.089,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.1604
+        },
+        {
+          "run": 8,
+          "instrumented": true,
+          "total_ms": 68.3661,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.3041,
+          "cursor_ms": 15.5822
+        },
+        {
+          "run": 9,
+          "instrumented": false,
+          "total_ms": 64.6941,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.9817
+        },
+        {
+          "run": 10,
+          "instrumented": true,
+          "total_ms": 70.5123,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.0003,
+          "cursor_ms": 9.8189
+        },
+        {
+          "run": 11,
+          "instrumented": false,
+          "total_ms": 66.165,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.5268
+        },
+        {
+          "run": 12,
+          "instrumented": true,
+          "total_ms": 70.4838,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 1.2486,
+          "cursor_ms": 13.5113
+        },
+        {
+          "run": 13,
+          "instrumented": false,
+          "total_ms": 68.2179,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.0997
+        },
+        {
+          "run": 14,
+          "instrumented": true,
+          "total_ms": 63.5116,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.1122,
+          "cursor_ms": 12.0665
+        },
+        {
+          "run": 15,
+          "instrumented": false,
+          "total_ms": 62.6134,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.0019
+        },
+        {
+          "run": 16,
+          "instrumented": true,
+          "total_ms": 61.6105,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.4453,
+          "cursor_ms": 12.5484
+        },
+        {
+          "run": 17,
+          "instrumented": false,
+          "total_ms": 302.2132,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.312
+        },
+        {
+          "run": 18,
+          "instrumented": true,
+          "total_ms": 98.7084,
+          "thread_cpu_ms": 93.75,
+          "gc_ms": 2.1488,
+          "cursor_ms": 18.0345
+        },
+        {
+          "run": 19,
+          "instrumented": false,
+          "total_ms": 94.7011,
+          "thread_cpu_ms": 93.75,
+          "gc_ms": 2.229
+        },
+        {
+          "run": 20,
+          "instrumented": true,
+          "total_ms": 88.7079,
+          "thread_cpu_ms": 93.75,
+          "gc_ms": 1.6733,
+          "cursor_ms": 18.1347
+        },
+        {
+          "run": 21,
+          "instrumented": false,
+          "total_ms": 80.2994,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 2.0851
+        },
+        {
+          "run": 22,
+          "instrumented": true,
+          "total_ms": 64.9557,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.1176,
+          "cursor_ms": 14.3743
+        },
+        {
+          "run": 23,
+          "instrumented": false,
+          "total_ms": 60.8699,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.4322
+        },
+        {
+          "run": 24,
+          "instrumented": true,
+          "total_ms": 68.0247,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.1804,
+          "cursor_ms": 14.6388
+        },
+        {
+          "run": 25,
+          "instrumented": false,
+          "total_ms": 69.5527,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.19
+        },
+        {
+          "run": 26,
+          "instrumented": true,
+          "total_ms": 70.9999,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 1.6583,
+          "cursor_ms": 12.4531
+        },
+        {
+          "run": 27,
+          "instrumented": false,
+          "total_ms": 58.5848,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 1.3211
+        },
+        {
+          "run": 28,
+          "instrumented": true,
+          "total_ms": 62.5634,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.5012,
+          "cursor_ms": 12.7626
+        },
+        {
+          "run": 29,
+          "instrumented": false,
+          "total_ms": 93.0421,
+          "thread_cpu_ms": 93.75,
+          "gc_ms": 27.8256
+        },
+        {
+          "run": 30,
+          "instrumented": true,
+          "total_ms": 68.4857,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.9224,
+          "cursor_ms": 9.9283
+        },
+        {
+          "run": 31,
+          "instrumented": false,
+          "total_ms": 57.6918,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.3335
+        },
+        {
+          "run": 32,
+          "instrumented": true,
+          "total_ms": 64.8198,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.7859,
+          "cursor_ms": 10.5967
+        },
+        {
+          "run": 33,
+          "instrumented": false,
+          "total_ms": 61.4551,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.6091
+        },
+        {
+          "run": 34,
+          "instrumented": true,
+          "total_ms": 69.3879,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.5739,
+          "cursor_ms": 15.0788
+        },
+        {
+          "run": 35,
+          "instrumented": false,
+          "total_ms": 65.8686,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.8947
+        },
+        {
+          "run": 36,
+          "instrumented": true,
+          "total_ms": 70.2885,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.06,
+          "cursor_ms": 13.6502
+        },
+        {
+          "run": 37,
+          "instrumented": false,
+          "total_ms": 59.8397,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.969
+        },
+        {
+          "run": 38,
+          "instrumented": true,
+          "total_ms": 65.5439,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 2.0871,
+          "cursor_ms": 12.1815
+        },
+        {
+          "run": 39,
+          "instrumented": false,
+          "total_ms": 53.2256,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.8363
+        },
+        {
+          "run": 40,
+          "instrumented": true,
+          "total_ms": 64.8632,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.921,
+          "cursor_ms": 13.6257
+        },
+        {
+          "run": 41,
+          "instrumented": false,
+          "total_ms": 68.638,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 1.1608
+        },
+        {
+          "run": 42,
+          "instrumented": true,
+          "total_ms": 68.0388,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.9961,
+          "cursor_ms": 13.5901
+        },
+        {
+          "run": 43,
+          "instrumented": false,
+          "total_ms": 52.5444,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.5508
+        },
+        {
+          "run": 44,
+          "instrumented": true,
+          "total_ms": 65.1496,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 0.8864,
+          "cursor_ms": 10.0335
+        },
+        {
+          "run": 45,
+          "instrumented": false,
+          "total_ms": 67.3299,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.9109
+        },
+        {
+          "run": 46,
+          "instrumented": true,
+          "total_ms": 73.9667,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 1.2945,
+          "cursor_ms": 14.4769
+        },
+        {
+          "run": 47,
+          "instrumented": false,
+          "total_ms": 68.3028,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.8428
+        },
+        {
+          "run": 48,
+          "instrumented": true,
+          "total_ms": 69.8323,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.7468,
+          "cursor_ms": 12.2958
+        },
+        {
+          "run": 49,
+          "instrumented": false,
+          "total_ms": 52.3832,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.8304
+        },
+        {
+          "run": 50,
+          "instrumented": true,
+          "total_ms": 67.4415,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 0.9793,
+          "cursor_ms": 11.978
+        },
+        {
+          "run": 51,
+          "instrumented": false,
+          "total_ms": 50.5249,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 1.04
+        },
+        {
+          "run": 52,
+          "instrumented": true,
+          "total_ms": 65.5485,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.8385,
+          "cursor_ms": 9.9265
+        },
+        {
+          "run": 53,
+          "instrumented": false,
+          "total_ms": 68.8926,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 2.2327
+        },
+        {
+          "run": 54,
+          "instrumented": true,
+          "total_ms": 63.7479,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.8536,
+          "cursor_ms": 10.5195
+        },
+        {
+          "run": 55,
+          "instrumented": false,
+          "total_ms": 68.9714,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.1044
+        },
+        {
+          "run": 56,
+          "instrumented": true,
+          "total_ms": 84.0115,
+          "thread_cpu_ms": 78.125,
+          "gc_ms": 32.2279,
+          "cursor_ms": 41.2228
+        },
+        {
+          "run": 57,
+          "instrumented": false,
+          "total_ms": 69.1301,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.1233
+        },
+        {
+          "run": 58,
+          "instrumented": true,
+          "total_ms": 68.2307,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 1.8197,
+          "cursor_ms": 12.0134
+        },
+        {
+          "run": 59,
+          "instrumented": false,
+          "total_ms": 75.1907,
+          "thread_cpu_ms": 46.875,
+          "gc_ms": 0.9167
+        },
+        {
+          "run": 60,
+          "instrumented": true,
+          "total_ms": 64.7743,
+          "thread_cpu_ms": 31.25,
+          "gc_ms": 0.9677,
+          "cursor_ms": 12.3614
+        },
+        {
+          "run": 61,
+          "instrumented": false,
+          "total_ms": 64.9426,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.9929
+        },
+        {
+          "run": 62,
+          "instrumented": true,
+          "total_ms": 70.1993,
+          "thread_cpu_ms": 62.5,
+          "gc_ms": 0.8656,
+          "cursor_ms": 10.8795
+        }
+      ],
+      "cprofile": null,
+      "server_stats": {
+        "before_samples": {
+          "status": "MEDIDO",
+          "tables": [
+            {
+              "relname": "fixture_provider_mappings",
+              "n_live_tup": 1800000,
+              "n_dead_tup": 1,
+              "n_tup_upd": 257920,
+              "n_tup_hot_upd": 213091
+            },
+            {
+              "relname": "fixtures",
+              "n_live_tup": 1000000,
+              "n_dead_tup": 32,
+              "n_tup_upd": 124280,
+              "n_tup_hot_upd": 101348
+            },
+            {
+              "relname": "team_provider_mappings",
+              "n_live_tup": 10560,
+              "n_dead_tup": 0,
+              "n_tup_upd": 30360,
+              "n_tup_hot_upd": 30310
+            },
+            {
+              "relname": "teams",
+              "n_live_tup": 5280,
+              "n_dead_tup": 0,
+              "n_tup_upd": 0,
+              "n_tup_hot_upd": 0
+            }
+          ]
+        },
+        "after_case": {
+          "status": "MEDIDO",
+          "tables": [
+            {
+              "relname": "fixture_provider_mappings",
+              "n_live_tup": 1800000,
+              "n_dead_tup": 241,
+              "n_tup_upd": 264120,
+              "n_tup_hot_upd": 219291
+            },
+            {
+              "relname": "fixtures",
+              "n_live_tup": 1000000,
+              "n_dead_tup": 282,
+              "n_tup_upd": 130080,
+              "n_tup_hot_upd": 107148
+            },
+            {
+              "relname": "team_provider_mappings",
+              "n_live_tup": 10560,
+              "n_dead_tup": 80,
+              "n_tup_upd": 31600,
+              "n_tup_hot_upd": 31550
+            },
+            {
+              "relname": "teams",
+              "n_live_tup": 5280,
+              "n_dead_tup": 0,
+              "n_tup_upd": 0,
+              "n_tup_hot_upd": 0
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "server_stats_end": {
+    "status": "MEDIDO",
+    "tables": [
+      {
+        "relname": "fixture_provider_mappings",
+        "n_live_tup": 1800000,
+        "n_dead_tup": 241,
+        "n_tup_upd": 264120,
+        "n_tup_hot_upd": 219291
+      },
+      {
+        "relname": "fixtures",
+        "n_live_tup": 1000000,
+        "n_dead_tup": 282,
+        "n_tup_upd": 130080,
+        "n_tup_hot_upd": 107148
+      },
+      {
+        "relname": "team_provider_mappings",
+        "n_live_tup": 10560,
+        "n_dead_tup": 80,
+        "n_tup_upd": 31600,
+        "n_tup_hot_upd": 31550
+      },
+      {
+        "relname": "teams",
+        "n_live_tup": 5280,
+        "n_dead_tup": 0,
+        "n_tup_upd": 0,
+        "n_tup_hot_upd": 0
+      }
+    ]
+  },
+  "source_unchanged_during_run": true
+}

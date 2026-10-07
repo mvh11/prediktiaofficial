@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Carpeta backend/ (este archivo está en backend/app/core/config.py)
@@ -23,6 +23,12 @@ class Settings(BaseSettings):
 
     # Base de datos (obligatoria)
     database_url: str
+    # Límites para que una BD inaccesible o una consulta bloqueada no cuelguen un proceso.
+    # Segundos de espera para abrir una conexión (mínimo 1).
+    db_connect_timeout_seconds: int = Field(default=10, ge=1)
+    # Milisegundos máximos por sentencia SQL; 0 = sin límite. Se aplica con SET LOCAL al empezar
+    # cada transacción, así funciona también a través de un pooler en modo transacción.
+    db_statement_timeout_ms: int = Field(default=60_000, ge=0)
 
     # Proveedores externos (opcionales: la app arranca aunque estén vacías)
     api_football_key: SecretStr = SecretStr("")
@@ -33,6 +39,11 @@ class Settings(BaseSettings):
 
     # Tiempo máximo de espera para llamadas HTTP externas (segundos)
     http_timeout_seconds: float = 10.0
+
+    # POST /sync/catalog y /sync/fixtures llaman al proveedor SIN el lock ni el presupuesto de los
+    # jobs (app.jobs.live_sync / ops_tick). Deshabilitados por defecto: en producción la única vía
+    # de sync es el scheduler. En desarrollo se pueden activar con SYNC_ENDPOINTS_ENABLED=true.
+    sync_endpoints_enabled: bool = False
 
     # Competiciones que Prediktia sigue (IDs de API-Football, los de competitions.external_id).
     # Es la única fuente de verdad: la sync de fixtures ignora las competiciones que no estén aquí.
