@@ -381,6 +381,20 @@ Ratificadas por el Chief el 2026-10-06. Todas son **[FROZEN]** y ya están en lo
 - **Siguiente punto seguro:**
   - el Checkpoint B (lectura `STRICT_KNOWLEDGE` / `UNKNOWN_AT_T` / `TEMPORAL_AMBIGUITY` AS_OBSERVED y el modo `RETROSPECTIVE_FINAL_RESULTS` separado), una vez revisado el A;
   - en paralelo, la revisión de Modular.
+- **Cierre de sesión (2026-10-06, HEAD `2dbbb82`, working tree limpio):**
+  - **Verificado:**
+    - commits `9ea08aa` … `2dbbb82` presentes;
+    - desde `1920590` solo cambió este documento, así que la suite de 1156 sigue correspondiendo al código actual;
+    - `0008` encadenada a `0007`, sin `0009`;
+    - nada publicado: `feature/data-integrity-a6` no existe en origin;
+    - worktree principal de DI en `f6ec512`, limpio.
+  - **Reportado** (de la ejecución anterior, no repetido al cerrar): 1156 passed y las mutaciones.
+  - **Pendiente:**
+    - **Checkpoint B:** NO iniciado.
+    - **Checkpoint C:** `perf_lab`, mediciones y techo de parámetros.
+    - Revisión de Modular.
+    - Versión de PostgreSQL de Neon.
+  - **Hecho nuevo:** `origin/feature/modular-data-m43` ya está en `eb4c33c`, no en el `b72b036` que contiene esta rama (visto con `ls-remote`, sin fetch). Antes de la revisión de Modular o de cualquier integración hay que mapear esos commits hacia delante, sobre todo si tocan `history_backfill_service.py`, `upsert_fixtures` o las migraciones.
 
 ## Auditoría hecha
 
