@@ -207,8 +207,14 @@ def upsert_fixtures(
        ya existe con otro contenido se lanza EvidenceIdentityConflict.
     3. Mapeos del proveedor (last_seen_at), como antes.
 
-    Contadores exactos sin concurrencia: se leen antes los datos de las filas existentes y RETURNING
-    devuelve las filas en las que ganó la evidencia; updated = las existentes cuyos datos cambian.
+    Contadores exactos también con escritores concurrentes (READ COMMITTED), sin cambiar lo que se guarda:
+    a. las filas que no existían se insertan con INSERT ... ON CONFLICT DO NOTHING RETURNING: las
+       devueltas son las que creó ESTA transacción (si otra la está creando se espera; si confirma,
+       no se devuelve y la fila pasa a b; si se deshace, se crea aquí);
+    b. el resto se bloquea con SELECT ... FOR UPDATE en orden de external_id: la imagen previa es la
+       última versión confirmada y nadie puede cambiarla hasta el commit;
+    c. sobre esas filas bloqueadas, el upsert de siempre (WHERE de orden); updated = las devueltas
+       cuyos datos difieren de la imagen previa de b.
     """
     if evidence.source not in PROVIDER_SOURCES or evidence.provider != provider:
         raise ValueError(f"evidencia {evidence.source}/{evidence.provider} no válida para el proveedor {provider!r}")
@@ -229,34 +235,63 @@ def upsert_fixtures(
     hashes = state_hashes(db, rows)
     table = Fixture.__table__
     data_columns = [k for k in rows[0] if k != "external_id"]
-    before = {
-        r[0]: tuple(r[1:])
-        for r in db.execute(
-            select(table.c.external_id, *(table.c[c] for c in data_columns)).where(table.c.external_id.in_(external_ids))
-        )
+    stamped = {
+        row["external_id"]: {**row, "last_observed_at": evidence.observed_at, "last_state_hash": h}
+        for row, h in zip(rows, hashes)
     }
 
-    stmt = insert(Fixture).values(
-        [{**row, "last_observed_at": evidence.observed_at, "last_state_hash": h} for row, h in zip(rows, hashes)]
-    )
-    excluded = stmt.excluded
-    new_values = _fixture_update_values(excluded, data_columns)
-    changed = or_(*(table.c[k].is_distinct_from(v) for k, v in new_values.items()))
-    newer = tuple_(table.c.last_observed_at, table.c.last_state_hash) < tuple_(
-        excluded.last_observed_at, excluded.last_state_hash
-    )
-    stmt = stmt.on_conflict_do_update(
-        index_elements=[Fixture.external_id],
-        set_={
-            **new_values,
-            "last_observed_at": excluded.last_observed_at,
-            "last_state_hash": excluded.last_state_hash,
-            # Solo se mueve si algún dato cambia: una confirmación no es una actualización de datos
-            "updated_at": case((changed, func.now()), else_=table.c.updated_at),
-        },
-        where=newer,
-    ).returning(table.c.external_id, *(table.c[c] for c in data_columns))
-    written = {r[0]: tuple(r[1:]) for r in db.execute(stmt)}
+    # a. Creación exacta. La lectura de existencia sin bloqueo solo decide qué filas intentan crearse
+    present = set(db.scalars(select(table.c.external_id).where(table.c.external_id.in_(external_ids))))
+    absent = [e for e in external_ids if e not in present]
+    created = set()
+    if absent:
+        created = set(
+            db.scalars(
+                insert(Fixture)
+                .values([stamped[e] for e in absent])
+                .on_conflict_do_nothing(index_elements=[Fixture.external_id])
+                .returning(table.c.external_id)
+            )
+        )
+    existing = [e for e in external_ids if e not in created]
+
+    updated = 0
+    if existing:
+        # b. Imagen previa exacta: bloqueo en el mismo orden que el resto de sentencias
+        before = {
+            r[0]: tuple(r[1:])
+            for r in db.execute(
+                select(table.c.external_id, *(table.c[c] for c in data_columns))
+                .where(table.c.external_id.in_(existing))
+                .order_by(table.c.external_id)
+                .with_for_update()
+            )
+        }
+        if len(before) != len(existing):
+            # Un partido con historia no se borra (RESTRICT) y ningún camino de la app borra partidos
+            raise RuntimeError("partido borrado durante la escritura: estado fuera del contrato del escritor")
+
+        # c. El upsert de siempre, sobre filas ya bloqueadas (siempre toma la rama ON CONFLICT)
+        stmt = insert(Fixture).values([stamped[e] for e in existing])
+        excluded = stmt.excluded
+        new_values = _fixture_update_values(excluded, data_columns)
+        changed = or_(*(table.c[k].is_distinct_from(v) for k, v in new_values.items()))
+        newer = tuple_(table.c.last_observed_at, table.c.last_state_hash) < tuple_(
+            excluded.last_observed_at, excluded.last_state_hash
+        )
+        stmt = stmt.on_conflict_do_update(
+            index_elements=[Fixture.external_id],
+            set_={
+                **new_values,
+                "last_observed_at": excluded.last_observed_at,
+                "last_state_hash": excluded.last_state_hash,
+                # Solo se mueve si algún dato cambia: una confirmación no es una actualización de datos
+                "updated_at": case((changed, func.now()), else_=table.c.updated_at),
+            },
+            where=newer,
+        ).returning(table.c.external_id, *(table.c[c] for c in data_columns))
+        written = {r[0]: tuple(r[1:]) for r in db.execute(stmt)}
+        updated = sum(1 for e, values in written.items() if values != before[e])
 
     ids = dict(db.execute(select(Fixture.external_id, Fixture.id).where(Fixture.external_id.in_(external_ids))).all())
     observations = [
@@ -287,9 +322,9 @@ def upsert_fixtures(
     upsert_origin_mappings(
         db, FixtureProviderMapping, provider, [(fixture_id, e, None) for e, fixture_id in ids.items()]
     )
-    created = sum(1 for e in written if e not in before)
-    updated = sum(1 for e, values in written.items() if e in before and values != before[e])
-    return UpsertCounts(received=len(unique), created=created, updated=updated, unchanged=len(unique) - created - updated)
+    return UpsertCounts(
+        received=len(unique), created=len(created), updated=updated, unchanged=len(unique) - len(created) - updated
+    )
 
 
 def _check_replay(db: Session, evidence: FixtureEvidence, replayed: list[dict]) -> None:
