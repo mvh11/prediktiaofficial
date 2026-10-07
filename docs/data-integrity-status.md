@@ -678,16 +678,76 @@ Se mide `strict_knowledge()` real (consulta + construcción de los tipos) con id
 - Adopción de UNNEST en producción: **NO AUTORIZADA en A6**.
 - **DI-A3F** se puede reconsiderar por separado, ahora que existe la línea base de A6.
 
-**Puertas abiertas de A6** (ninguna resuelta):
+**Puertas abiertas de A6** (registro de la decisión; estado posterior en [C.11](#c11-upsertcounts-exactos-con-escritores-concurrentes-opción-a)):
 
-1. **Clasificación de `UpsertCounts` con escritores concurrentes.**
+1. **Clasificación de `UpsertCounts` con escritores concurrentes.** Después: opción A implementada y validada en local, pendiente de revisión del Chief (C.11).
    - Validar que `created` / `updated` / `unchanged` son exactos con escritores que compiten.
    - Si se reproduce un comportamiento incorrecto, devolver la corrección más pequeña que preserve el contrato, para revisión del Chief.
-2. **Hueco del test dedicado de rollback por error de BD** (backfill): aceptado como no bloqueante, pero sigue registrado.
+2. **Hueco del test dedicado de rollback por error de BD** (backfill): aceptado como no bloqueante, pero sigue registrado. Después: **CERRADO** con tests dedicados (C.11).
 3. **Nueva medición en el entorno de destino:** obligatoria antes de aceptar A6 para producción.
 4. **Arquitectura de almacenamiento y particionado de la evidencia:** obligatoria antes de un despliegue amplio, prolongado y de alta frecuencia.
 
 - **Siguiente punto seguro:** esperar la decisión del Chief sobre cuál de las puertas abiertas se aborda primero. DI-A6 **no** está aceptado para producción.
+
+### C.11 `UpsertCounts` exactos con escritores concurrentes (opción A)
+
+**Estado:** implementada y validada en local por autorización del Chief; **pendiente de revisión del Chief**. Aceptación de A6 para producción: **HOLD**. Sin cambio de esquema (cabeza única `0008`, `0009` sin crear), sin UNNEST, sin advisory locks, sin `xmax`, sin `RETURNING OLD/NEW` de PG18 y sin cambiar el aislamiento (READ COMMITTED).
+
+- **Commits:**
+  - `e2c8a5a`: corrección en `fixture_repository.upsert_fixtures`;
+  - `41a23b5`: tests de concurrencia;
+  - `3c5f12a` `[MODULAR-REVIEW]`: tests del rollback por error de BD en el backfill (solo tests).
+- **Defecto (confirmado por DI-A3F y reproducido aquí):**
+  - la clasificación comparaba con una lectura previa SIN bloqueo, tomada antes de que el upsert esperase a otro escritor;
+  - el escritor que esperaba podía contar como `created` un partido creado por el otro, o juzgar los cambios de datos contra una imagen previa vieja;
+  - 6 de 14 escenarios de dos escritores clasificaban mal, siempre el que esperaba;
+  - **el estado guardado (fixtures y evidencia) nunca fue incorrecto.**
+- **Corrección (opción A):**
+  1. las filas ausentes en una comprobación de existencia sin bloqueo se insertan con `INSERT ... ON CONFLICT DO NOTHING RETURNING`: solo las devueltas son `created`;
+  2. el resto se bloquea con `SELECT ... FOR UPDATE ORDER BY external_id`, que da la imagen previa exacta (última versión confirmada);
+  3. sobre esas filas bloqueadas corre **el mismo** `INSERT ... ON CONFLICT DO UPDATE ... WHERE` de orden: `updated` = devueltas cuyos datos difieren de la imagen bloqueada;
+  4. evidencia, repetición y mappings no cambian.
+
+  Un partido borrado en paralelo (imposible por la app; `RESTRICT`) lanza un error.
+- **Exactitud (MEDIDA):** 24 tests nuevos con dos y tres conexiones reales y sincronización explícita (esperas de bloqueo comprobadas en `pg_stat_activity`, pausas justo antes del `FOR UPDATE`) y `lock_timeout` de 10 s.
+  - Cubren: creación del mismo partido (mismos datos, distintos, segunda más antigua); evidencia nueva y antigua en ambos órdenes; mismo `observed_at` con hash distinto en ambos órdenes; actualización frente a confirmación; repetición frente a confirmación independiente; rollback del competidor (inserción y actualización); lotes que se solapan parcialmente, como subconjunto y como superconjunto; rangos de `external_id` invertidos con filas nuevas y existentes; tres escritores; control disjunto; dos entrelazados entre sentencias; el camino completo con `ensure_teams`; y un escritor que falla tras la contención.
+  - **Todos exactos con la opción A** (3 repeticiones). Con el escritor anterior fallan 14: 12 por la clasificación y 2 solo por el punto de espera.
+- **Deadlocks y lock timeouts:** ninguno en ningún escenario.
+  - Cada sentencia toma sus bloqueos en orden de `external_id`.
+  - Un escritor que espera una inserción ajena (paso 1) todavía no tiene filas bloqueadas (paso 2), así que no hay ciclo. Lo comprueban los entrelazados forzados.
+- **Paridad del estado guardado (MEDIDA):** en 13 escenarios con contención, el estado final de `fixtures` (incluido `venue_name`) y la historia de observaciones son **idénticos** con el escritor anterior y con la opción A. Solo cambian los contadores, que ahora son exactos.
+- **Camino real hoy:** con `ensure_teams` del mismo proveedor, el segundo escritor ya esperaba en `team_provider_mappings`, antes de su lectura previa, así que en la práctica el defecto estaba enmascarado. La opción A no depende de ese bloqueo accidental.
+- **Hueco del test de rollback por error de BD: CERRADO.**
+  - Hay tests dedicados del camino `except _DB_ERRORS` del backfill: tras escribir, un error de BD no deja fixtures, observaciones, mappings ni equipos, y un refresh que falla conserva intacto el estado confirmado (datos, cardinalidad de la evidencia y `last_seen_at`).
+  - Una mutación (`commit` en vez de `rollback`) los hace fallar.
+  - Hay además un test de escritor que falla tras la contención: el competidor confirmado queda intacto y los contadores del escritor fallido no son estado confirmado.
+- **Regresiones:**
+  - dirigidas (escritor A6, concurrencia, `PARITY` del backfill, Modular, estadísticas, C6 y lecturas temporales): 643 passed;
+  - **suite completa combinada: 1349 passed, 0 failed, 0 skipped, 0 errors, 1 warning** (`StarletteDeprecationWarning`, ajeno; 1349 = 1323 + 24 + 2).
+- **Rendimiento (MEDIDO; mismo arnés de C, mismo cluster y misma sesión, 100 000 partidos, 30 + 5 muestras):**
+  - opción A frente al escritor anterior (`6fa4d27`, exportado), en p50 total:
+    - lote 10: 0,82–1,05×;
+    - 100: 0,95–1,04×;
+    - 380: 1,00–1,04×;
+    - 1000: 0,97–1,01×;
+    - 2000: 0,98–1,01×;
+  - el único valor alto, `replay` con 2000 (1,17×), no se repite: en la repetición dirigida da 1,007×, y todos los casos repetidos quedan entre 0,987× y 1,007×;
+  - frente a pre-A6, la opción A queda en 2,59–2,77× con 380 (umbral aceptado ≤ 3,0×), y con 380 p50 458–481 ms y p95 503–526 ms (umbrales 600/750);
+  - una sentencia más por respuesta en estado estable (la comprobación de existencia) y el mismo WAL (0,95–1,10×).
+- **Techo de parámetros (MEDIDO):**
+  - con respuestas solo de partidos nuevos pasa de 2729 a **2730** (65 520 parámetros; falla 2731), porque el `INSERT ... DO NOTHING` no lleva constantes extra;
+  - la sentencia sobre filas existentes es la misma de antes (24 por fila + 21), así que el techo conservador **sigue siendo 2729** y la política operativa (≤ 2000) no cambia;
+  - pico de asignaciones Python cerca del techo: ~82 MiB.
+- **HOT (hallazgo para el Chief, no causado por la opción A):**
+  - en una BD recién migrada, el HOT de las confirmaciones empieza muy bajo y sube con cada ciclo de actualización + VACUUM, sea cual sea el escritor. En el experimento pareado (una sola BD, alternando), unchanged con 1000 da 12,8 % → 39,8 % → 74,5 % → 86,6 % → 94,6 % → 99,1 %, y cada ejecución de la opción A es mayor que la del escritor anterior que la precede;
+  - el bootstrap de `0008` reescribe todas las filas de `fixtures`, así que justo después las confirmaciones son mayoritariamente no-HOT;
+  - el umbral aceptado (≥ 90 % con lotes ≤ 1000) **solo se cumple en estado estable**, no tras una migración.
+- **Puertas que siguen abiertas:**
+  - nueva medición en el entorno de destino;
+  - arquitectura de almacenamiento y particionado de la evidencia;
+  - matiz de estado estable para el umbral de HOT;
+  - revisión del Chief de esta corrección;
+  - verificación empírica en PostgreSQL 14–17: aquí solo se ha ejecutado en 18.6; las primitivas usadas son portables según la documentación.
 
 ## Auditoría hecha
 
