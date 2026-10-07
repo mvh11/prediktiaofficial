@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # Tiempo máximo de espera para llamadas HTTP externas (segundos)
     http_timeout_seconds: float = 10.0
 
+    # POST /sync/catalog y /sync/fixtures llaman al proveedor SIN el lock ni el presupuesto de los
+    # jobs (app.jobs.live_sync / ops_tick). Deshabilitados por defecto: en producción la única vía
+    # de sync es el scheduler. En desarrollo se pueden activar con SYNC_ENDPOINTS_ENABLED=true.
+    sync_endpoints_enabled: bool = False
+
     # Competiciones que Prediktia sigue (IDs de API-Football, los de competitions.external_id).
     # Es la única fuente de verdad: la sync de fixtures ignora las competiciones que no estén aquí.
     # Se puede sobrescribir en el .env con una lista JSON: TRACKED_LEAGUE_IDS=[39,140]

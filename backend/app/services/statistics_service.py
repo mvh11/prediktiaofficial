@@ -514,8 +514,7 @@ async def run_season_backfill(
             return BackfillOutcome(None, "locked")
         raise
 
-    stop: str | None = None
-    calls = 0
+    calls = [0]  # llamadas lógicas al proveedor (para cerrar el run si algo falla a mitad)
     try:
         targets, awarded, skipped = select_targets(db, season_id, provider_code, refresh=options.refresh, after_fixture_id=after)
         coverage = CoverageAccumulator(competition_id, season_id, excluded_awarded=awarded, skipped_existing=skipped)
@@ -527,68 +526,100 @@ async def run_season_backfill(
         runs.append_checks(db, run_id, info)
         runs.set_coverage(db, run_id, coverage.as_dict())
         db.commit()
-
-        for start in range(0, len(targets), options.batch_size):
-            batch = targets[start : start + options.batch_size]
-            ok, budget = _budget_allows(db, options, clock())
-            if not ok:
-                stop = STOP_BUDGET
-                runs.append_detail(db, run_id, {"stopped": STOP_BUDGET, "budget": budget, "next_fixture_id": batch[0].fixture_id})
-                db.commit()
-                break
-            db.commit()  # cierra la transacción de lectura: el HTTP va sin transacción abierta
-
-            requested = {i: t for t in batch if (i := _requestable_id(t)) is not None}
-            before_requests, before_retries = _requests_so_far(provider, calls)
-            response: list[FixtureStatisticsData] = []
-            provider_error: ProviderError | None = None
-            if requested:
-                calls += 1
-                try:
-                    response = await provider.get_fixture_statistics(sorted(requested))
-                except ProviderError as exc:
-                    provider_error = exc
-            after_requests, after_retries = _requests_so_far(provider, calls)
-            request_delta, retry_delta = after_requests - before_requests, after_retries - before_retries
-
-            if provider_error is not None:
-                stop = STOP_AUTH if isinstance(provider_error, ProviderAuthError) else (
-                    STOP_RATE_LIMIT if isinstance(provider_error, ProviderRateLimitError) else STOP_PROVIDER)
-                runs.add_counters(db, run_id, provider_requests=request_delta, provider_retries=retry_delta)
-                runs.set_flags(db, run_id, auth_failed=stop == STOP_AUTH, rate_limited=stop == STOP_RATE_LIMIT)
-                runs.append_detail(db, run_id, {
-                    "stopped": stop, "requested": sorted(requested), "error": provider_error.__class__.__name__,
-                    "provider_requests": request_delta,
-                })
-                db.commit()
-                break
-
-            plans, extra_issues = _process_batch(db, batch, requested, response, provider_code, options.mode, run_id, clock(), policy)
-            _record_batch(db, run_id, batch, requested, response, plans, extra_issues, coverage, request_delta, retry_delta)
-            db.commit()
+        stop = await run_batches(db, run_id, targets, provider, options, policy, coverage, clock, calls)
     except Exception as exc:
-        db.rollback()
-        try:
-            requests, retries = _requests_so_far(provider, calls)
-            committed = runs.get_run(db, run_id)
-            runs.add_counters(db, run_id, provider_requests=max(requests - committed.provider_requests, 0))
-            runs.finish_run(db, run_id, status="failed", error_message=f"Error inesperado ({exc.__class__.__name__})")
-            db.commit()
-        except Exception as close_exc:  # noqa: BLE001
-            db.rollback()
-            logger.error("No se pudo cerrar el run de estadísticas #%s como failed (%s)", run_id, close_exc.__class__.__name__)
+        fail_run(db, run_id, provider, calls[0], exc)
         raise
+    return close_run(db, run_id, stop, options.mode)
 
+
+async def run_batches(
+    db: Session,
+    run_id: int,
+    targets: list[Target],
+    provider: Any,
+    options: Any,
+    policy: TemporalPolicy,
+    coverage: Any,
+    clock: Callable[[], datetime],
+    calls: list[int],
+) -> str | None:
+    """Recorre los objetivos por lotes (presupuesto antes de cada lote, HTTP sin transacción,
+    lote atómico). Lo comparten el backfill por temporada y el reconciliador live (M5.6B).
+    `options` aporta mode, batch_size y presupuesto; `calls` acumula las llamadas lógicas.
+    Devuelve el motivo de parada global, o None si recorrió todos los objetivos."""
+    provider_code = provider.name
+    for start in range(0, len(targets), options.batch_size):
+        batch = targets[start : start + options.batch_size]
+        ok, budget = _budget_allows(db, options, clock())
+        if not ok:
+            runs.append_detail(db, run_id, {"stopped": STOP_BUDGET, "budget": budget, "next_fixture_id": batch[0].fixture_id})
+            db.commit()
+            return STOP_BUDGET
+        db.commit()  # cierra la transacción de lectura: el HTTP va sin transacción abierta
+
+        requested = {i: t for t in batch if (i := _requestable_id(t)) is not None}
+        before_requests, before_retries = _requests_so_far(provider, calls[0])
+        response: list[FixtureStatisticsData] = []
+        provider_error: ProviderError | None = None
+        if requested:
+            calls[0] += 1
+            try:
+                response = await provider.get_fixture_statistics(sorted(requested))
+            except ProviderError as exc:
+                provider_error = exc
+        after_requests, after_retries = _requests_so_far(provider, calls[0])
+        request_delta, retry_delta = after_requests - before_requests, after_retries - before_retries
+
+        if provider_error is not None:
+            stop = STOP_AUTH if isinstance(provider_error, ProviderAuthError) else (
+                STOP_RATE_LIMIT if isinstance(provider_error, ProviderRateLimitError) else STOP_PROVIDER)
+            runs.add_counters(db, run_id, provider_requests=request_delta, provider_retries=retry_delta)
+            runs.set_flags(db, run_id, auth_failed=stop == STOP_AUTH, rate_limited=stop == STOP_RATE_LIMIT)
+            runs.append_detail(db, run_id, {
+                "stopped": stop, "requested": sorted(requested), "error": provider_error.__class__.__name__,
+                "provider_requests": request_delta,
+            })
+            db.commit()
+            return stop
+
+        plans, extra_issues = _process_batch(db, batch, requested, response, provider_code, options.mode, run_id, clock(), policy)
+        _record_batch(db, run_id, batch, requested, response, plans, extra_issues, coverage, request_delta, retry_delta)
+        db.commit()
+    return None
+
+
+def fail_run(db: Session, run_id: int, provider: Any, calls: int, exc: Exception) -> None:
+    """Cierra como failed un run cortado por una excepción inesperada (el lote en curso ya se
+    deshizo); el llamador relanza la excepción."""
+    db.rollback()
+    try:
+        requests, retries = _requests_so_far(provider, calls)
+        committed = runs.get_run(db, run_id)
+        runs.add_counters(db, run_id, provider_requests=max(requests - committed.provider_requests, 0))
+        runs.finish_run(db, run_id, status="failed", error_message=f"Error inesperado ({exc.__class__.__name__})")
+        db.commit()
+    except Exception as close_exc:  # noqa: BLE001
+        db.rollback()
+        logger.error("No se pudo cerrar el run de estadísticas #%s como failed (%s)", run_id, close_exc.__class__.__name__)
+
+
+BACKFILL_STOP_MESSAGES = {
+    STOP_BUDGET: "Presupuesto diario de peticiones agotado: reanudar con --resume",
+    STOP_RATE_LIMIT: "Límite o cuota del proveedor: reanudar con --resume más tarde",
+    STOP_AUTH: "El proveedor rechazó las credenciales",
+    STOP_PROVIDER: "Error del proveedor en un lote (lote deshecho): reanudar con --resume",
+}
+
+
+def close_run(db: Session, run_id: int, stop: str | None, mode: str, messages: dict[str, str] = BACKFILL_STOP_MESSAGES) -> BackfillOutcome:
+    """Estado final del run según el motivo de parada y lo registrado (contrato de M5.3)."""
     run = runs.get_run(db, run_id)
-    if stop == STOP_BUDGET:
-        status, message = "aborted", "Presupuesto diario de peticiones agotado: reanudar con --resume"
-    elif stop == STOP_RATE_LIMIT:
-        status, message = "aborted", "Límite o cuota del proveedor: reanudar con --resume más tarde"
-    elif stop == STOP_AUTH:
-        status, message = "failed", "El proveedor rechazó las credenciales"
-    elif stop == STOP_PROVIDER:
-        status, message = "failed", "Error del proveedor en un lote (lote deshecho): reanudar con --resume"
-    elif options.mode == "dry_run":
+    if stop in (STOP_BUDGET, STOP_RATE_LIMIT):
+        status, message = "aborted", messages[stop]
+    elif stop in (STOP_AUTH, STOP_PROVIDER):
+        status, message = "failed", messages[stop]
+    elif mode == "dry_run":
         status, message = "dry_run_completed", None
     else:
         problems = run.blocking_count or run.fixtures_missing_in_response
@@ -652,9 +683,7 @@ def _record_batch(db, run_id, batch, requested, response, plans, extra_issues, c
     observation_counts = {o: sum(1 for p in plans if p.observation == o) for o in ("created", "changed", "unchanged")}
     row_counts = {o: sum(p.rows.count(o) for p in plans) for o in ("created", "updated", "unchanged")}
     for plan in plans:
-        coverage.add_outcome(plan.outcome)
-        if plan.outcome in ("available", "partial"):
-            coverage.add_fixture_values(plan.values_for_coverage)
+        coverage.add_plan(plan)
     summary = qc.summarize(issues)
     increments = dict(
         fixtures_attempted=len(plans),

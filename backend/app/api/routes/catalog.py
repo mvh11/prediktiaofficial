@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.errors import run_provider_call
+from app.api.errors import require_sync_endpoints_enabled, run_provider_call
 from app.db.session import get_db
 from app.repositories import catalog_repository as repo
 from app.schemas.catalog import CatalogSyncResult, CompetitionOut, TeamOut
@@ -36,7 +36,7 @@ def list_competition_teams(
     return [TeamOut.model_validate(t) for t in repo.list_teams_for_season(db, season_row.id)]
 
 
-@router.post("/sync/catalog", response_model=CatalogSyncResult)
+@router.post("/sync/catalog", response_model=CatalogSyncResult, dependencies=[Depends(require_sync_endpoints_enabled)])
 async def sync_catalog(db: Session = Depends(get_db)) -> CatalogSyncResult:
     """Descarga del proveedor las competiciones seguidas, sus temporadas y sus equipos."""
     return await run_provider_call(lambda: catalog_sync_service.sync_catalog(db))
