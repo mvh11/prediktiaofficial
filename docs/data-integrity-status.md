@@ -14,21 +14,22 @@ Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Int
   - La clasificación de `sync_failures` (corte del run por credenciales, proveedor sin configurar, límite/cuota o conexión con la BD perdida) convive con el hook `on_competition`, la elegibilidad del polling y la revalidación de temporada de Modular.
   - `history_backfill_service.py` es de Modular en comportamiento.
 - **Migraciones:** cabeza única `0007` (`0005` → `0006` Modular → `0007` Modular). Reservas: **`0008` = DI-A6**, **`0009` = DI-A5D**. Ninguna creada todavía.
-- **Siguiente carril:** DI-A6 (evidencia temporal de fixtures), una vez cumplidas todas las puertas (suite verde, cabeza `0007`, documentación al día, rama de integración publicada). Implementación en **HOLD** hasta que el Chief acepte el registro del contrato ([DI-A6C](#di-a6c-contrato-de-evidencia-temporal-de-fixtures)). **DI-A5D: HOLD.**
+- **Siguiente carril:** DI-A6 (evidencia temporal de fixtures), una vez cumplidas todas las puertas (suite verde, cabeza `0007`, documentación al día, rama de integración publicada). El contrato está ratificado ([DI-A6C](#di-a6c-contrato-de-evidencia-temporal-de-fixtures)), pero la implementación sigue en **HOLD** hasta que el Chief la autorice. **DI-A5D: HOLD.**
 - **Separación semántica obligatoria:** la evidencia temporal de estadísticas NO es evidencia temporal de fixtures. `observed_at` / `last_observed_at` de `fixture_statistics_observations` (Modular, M5) son un dominio aparte y no se reutilizan para `fixture_observations.observed_at`, `fixtures.last_observed_at` ni `fixtures.last_state_hash` (DI-A6).
 
 ## DI-A6C: contrato de evidencia temporal de fixtures
 
-**Estado:** arquitectura **congelada** por el Chief. Implementación en **HOLD** hasta que el Chief acepte este registro y resuelva las [puertas abiertas](#a6c-puertas-abiertas-decisión-del-chief). Migración **`0008`** reservada, sin crear. Este apartado es autosuficiente: una sesión nueva no necesita los transcripts para reconstruir el contrato.
+**Estado:** arquitectura **congelada y ratificada** por el Chief, con G1, G2 y G3 resueltas (ver [decisiones ratificadas](#a6c-decisiones-ratificadas-g1g3)). Implementación en **HOLD** hasta que el Chief la autorice. Migración **`0008`** reservada, sin crear. Este apartado es autosuficiente: una sesión nueva no necesita los transcripts para reconstruir el contrato.
 
 Cada punto lleva su clase:
 
 - **[FROZEN]**: invariante congelado por el Chief. No se rediseña.
 - **[DELEGATED]**: especificación técnica delegada en la implementación. Se puede ajustar sin el Chief mientras respete los [FROZEN].
-- **[CHIEF]**: decisión de arquitectura pendiente.
+- **[CHIEF]**: decisión de arquitectura pendiente. Hoy no queda ninguna.
 
 **Fuentes** (por orden de autoridad, de mayor a menor):
 
+0. Ratificación final del Chief, "DI-A6C — Final Documentation Clarifications" (2026-10-06): arquitectura congelada y ratificada; G1 = AS_OBSERVED, G2 = MEASUREMENT_FIRST, G3 = OBSERVED_EVIDENCE_NOT_MERGED_STATE; confirma el significado de `last_state_hash`.
 1. Asignación del Chief DI-A6C-FROZEN-CONTRACT-RECOVERY (2026-10-06): lista definitiva de invariantes y propuestas reemplazadas.
 2. §13 "FROZEN DI-A6 SEMANTICS" de la asignación DI-MODULAR-FORWARD-MERGE-1 (2026-10-06).
 3. Revisión del Chief "DI-A6C REVISION — FINAL TEMPORAL SCHEMA FREEZE" (2026-10-05): decisiones vinculantes y lista "DO NOT CHANGE".
@@ -46,6 +47,7 @@ Las fuentes 2–5 solo existen en transcripts locales de Claude Code (`~/.claude
 - `recorded_at` es metadato de persistencia (momento físico de la escritura). **Nunca** interviene en el orden temporal ni en qué entra en un backtest.
 - `observed_at` es el momento del conocimiento: cuándo **recibió Prediktia** la evidencia, según el reloj de la app. No se inventan timestamps del proveedor.
 - Las evidencias de backfill llevan el instante real de recepción, **nunca** la fecha del partido ni la de la temporada.
+- **Contenido de la observación (G3):** `fixture_observations` guarda la **evidencia del proveedor normalizada** por el adapter, nunca el estado fusionado. La fusión de pares de marcador permitida pertenece **solo** al estado actual de `fixtures`. La evidencia histórica nunca se modifica para reflejar esa fusión.
 
 **Identidad de la evidencia:**
 
@@ -71,8 +73,9 @@ Las fuentes 2–5 solo existen en transcripts locales de Claude Code (`~/.claude
 
 - Se **mantienen** `fixtures.last_observed_at` y `fixtures.last_state_hash`.
 - `fixtures.state_observed_at` **no existe**.
-- El orden operativo es `(observed_at, state_hash)`: la evidencia con la clave mayor define el contenido de `fixtures`.
-- El hash es **canonicalización, no cronología**. El orden por hash nunca establece qué evidencia es posterior.
+- El orden operativo canónico es `(observed_at, state_hash)`. La evidencia con la clave mayor es la **observación ganadora**: solo ella actualiza `fixtures`, con la fusión de pares permitida.
+- `fixtures.last_state_hash` identifica el estado de la **observación canónica ganadora**. **No** es necesariamente el hash de la fila operativa de `fixtures` tras la fusión de pares.
+- El hash es **canonicalización, no cronología**. Solo desempata de forma determinista; nunca establece qué evidencia es posterior.
 
 **Escritura:**
 
@@ -87,6 +90,7 @@ Las fuentes 2–5 solo existen en transcripts locales de Claude Code (`~/.claude
   - sin observación con `observed_at <= T` → `UNKNOWN_AT_T`;
   - un solo `state_hash` distinto en `t* = max(observed_at <= T)` → `KNOWN`;
   - más de uno → `TEMPORAL_AMBIGUITY`.
+- **Contenido de `KNOWN` (G1):** `STRICT_KNOWLEDGE` devuelve la evidencia observada **tal cual** en `t*`. Los marcadores que faltan **no** se sintetizan desde observaciones anteriores. Un estado puede ser temporalmente `KNOWN` y a la vez estar incompleto para evaluar un mercado; esa incompletitud es responsabilidad de quien consume el estado y no cambia el estado temporal.
 - Por defecto, `STRICT_KNOWLEDGE` **excluye** los casos `UNKNOWN_AT_T` y `TEMPORAL_AMBIGUITY` y los **cuenta en el informe**. Nunca elige un ganador por hash ni recurre a `fixtures`.
 - `RETROSPECTIVE_FINAL_RESULTS` es un modo de evaluación distinto, con su propia marca. Sus resultados nunca se mezclan con los de `STRICT_KNOWLEDGE`.
 
@@ -103,6 +107,7 @@ Las fuentes 2–5 solo existen en transcripts locales de Claude Code (`~/.claude
 **Rendimiento:**
 
 - El paso a producción exige validación empírica del rendimiento. La arquitectura está aprobada independientemente de esa medición.
+- **Medición primero (G2):** la aceptación para producción exige mediciones representativas de la línea base. Los criterios de aceptación y los umbrales numéricos se derivan de esa evidencia y se proponen explícitamente al Chief. Hoy **no hay ningún umbral aprobado**.
 
 **Proceso:**
 
@@ -114,12 +119,15 @@ Las fuentes 2–5 solo existen en transcripts locales de Claude Code (`~/.claude
 | Propuesta (A6C v1 o revisión) | Estado | La reemplaza |
 |---|---|---|
 | `UNIQUE (fixture_id, observed_at, evidence_id)` | reemplazada | `UNIQUE (fixture_id, evidence_id)` más `INDEX (fixture_id, observed_at)` (Chief). La identidad es la respuesta, no el instante; la lectura temporal tiene su propio índice |
-| Eliminar `fixtures.last_state_hash` (calcularlo al vuelo) | rechazada | el Chief mantiene `last_state_hash` como metadato de orden (ver B: la evidencia puede no coincidir con la fila fusionada, así que no se puede recalcular desde `fixtures`) |
+| Eliminar `fixtures.last_state_hash` (calcularlo al vuelo) | rechazada | el Chief mantiene `last_state_hash` como hash del estado de la observación ganadora. Por G3, ese estado puede no coincidir con la fila fusionada, así que no se puede recalcular desde `fixtures` |
 | `fixtures.state_observed_at` | rechazada | ya no hace falta: toda respuesta crea observación, así que sobra el bit de "estado cambiado" |
 | Observaciones sintéticas `source='reassertion'` | rechazada | las confirmaciones son observaciones reales (Chief: "do not reconstruct missing confirmations later") |
 | Guardar observación solo si el estado cambia | rechazada | toda respuesta válida independiente es evidencia, también si no hay cambios |
 | `UNIQUE (fixture_id, observed_at, state_hash)` y desempate por hash en el modo estricto (A6C v1) | rechazada | `evidence_id` y `TEMPORAL_AMBIGUITY` |
-| Fusionar la evidencia antigua con su predecesora antes de guardarla (A6C v1 y revisión, camino `rejected`) | reemplazada | ver B: la observación guarda lo observado y nunca un estado fabricado |
+| Fusionar la evidencia antigua con su predecesora antes de guardarla (A6C v1 y revisión, camino `rejected`) | reemplazada | G3: la observación guarda la evidencia observada, nunca un estado fabricado |
+| Guardar en la observación la fila fusionada devuelta por `RETURNING` (A6C v1 y revisión) | reemplazada | G3: OBSERVED_EVIDENCE_NOT_MERGED_STATE |
+| Reconstruir en `STRICT_KNOWLEDGE` los marcadores que faltan aplicando la política de pares sobre observaciones anteriores (opción G1-b de `38cc7cb`) | rechazada | G1: AS_OBSERVED |
+| Umbrales numéricos de rendimiento propuestos en `38cc7cb` (2× la línea base, HOT ≥ 90 %, hash < 10 %) | retirados | G2: MEASUREMENT_FIRST. Los umbrales se derivan de mediciones y se proponen después |
 
 ### A6C: esquema de `fixture_observations` (migración `0008`)
 
@@ -176,18 +184,22 @@ Las fuentes 2–5 solo existen en transcripts locales de Claude Code (`~/.claude
   - Un test de que `v1` no cambia (los vectores de oro quedan congelados).
 - **Precondición:** verificar la versión de PostgreSQL de Neon (al menos 14; el entorno de tests usa la 18.6).
 
-#### B. Pares de marcador y respuestas parciales [DELEGATED, con una puerta CHIEF]
+#### B. Pares de marcador y respuestas parciales [DELEGATED dentro de G1 y G3]
+
+Lo **[FROZEN]** de este bloque (G1, G3 y `last_state_hash`) está en los invariantes. Aquí solo se describe la mecánica propuesta.
 
 - **`fixtures` no cambia:** mantiene la política de pares vigente (`_NULL_PAIR_RULES`, `predict_score_values`), es decir, pares atómicos, NULL no destructivo según el estado y sin fallback en AET/PEN. Se aplica **solo** cuando la evidencia entrante gana el orden `(observed_at, state_hash)` frente a la fila bloqueada. La base de la fusión es entonces estado acumulado con evidencia anterior, así que no se mezcla información futura.
-- **La observación guarda la evidencia tal como se observó**, normalizada por el adapter. **Nunca** guarda la fila fusionada.
+- **La observación guarda la evidencia tal como se observó**, normalizada por el adapter. **Nunca** guarda la fila fusionada (G3, [FROZEN]).
   - Un par incompleto queda como NULL ("no informado en esta respuesta").
   - Así ninguna observación contiene un estado que el proveedor no entregó, ni siquiera en el camino de evidencia antigua.
   - Desaparece la aproximación residual de A6C (fusionar contra un predecesor leído de una instantánea concurrente).
 - **`state_hash` de la observación** se calcula sobre lo observado.
-- **`fixtures.last_state_hash`** es el `state_hash` de la evidencia que fijó `last_observed_at`, **no** el hash de la fila fusionada. Por eso no se puede recalcular desde `fixtures` y hay que guardarlo, y por eso el desempate compara evidencia con evidencia.
+- **`fixtures.last_state_hash`** es el `state_hash` de la observación ganadora, la que fijó `last_observed_at` ([FROZEN]). **No** es necesariamente el hash de la fila fusionada. Por eso no se puede recalcular desde `fixtures` y hay que guardarlo, y por eso el desempate compara evidencia con evidencia.
 - **Constraints:** la observación repite los CHECK de `fulltime` de `fixtures`. Un par completo incoherente con el estado se guarda tal cual, como hoy, y es un hallazgo para un quality check (pendiente ya registrado).
 - **Concurrencia:** la fusión operativa usa la fila que el `ON CONFLICT DO UPDATE` bloquea y vuelve a evaluar (READ COMMITTED). La observación no depende de ninguna lectura previa.
-- **Puerta CHIEF (ver G1):** qué devuelve `STRICT_KNOWLEDGE` para un fixture `KNOWN` cuya observación en `t*` trae pares NULL. La propuesta está en G1.
+- **Lectura estricta (G1):**
+  - `STRICT_KNOWLEDGE` devuelve los pares NULL de la observación en `t*` tal cual ([FROZEN]).
+  - **Propuesta [DELEGATED]:** que la consulta exponga un indicador `partial_pairs` (algún par NULL en un estado en el que la política operativa lo conservaría), para que quien evalúe un mercado pueda descartarlo. Ese indicador no cambia el estado temporal `KNOWN`.
 
 #### C. Identidad de la evidencia [DELEGATED]
 
@@ -264,7 +276,7 @@ Modular conserva la propiedad del comportamiento. DI define el contrato y Modula
   - `tests/test_provider_mappings.py` (borra un fixture para probar el `CASCADE`).
   - La limpieza de `tools/perf_lab` (`benchmark.py` y `profiler.py`).
 
-#### F. Aceptación de rendimiento [mediciones DELEGATED; umbrales CHIEF]
+#### F. Aceptación de rendimiento [mediciones DELEGATED dentro de G2]
 
 - **Mediciones obligatorias:** línea base `8510b77` frente a A6, en la BD del laboratorio y nunca en producción.
   - **Escenarios:** 1 000, 100 000 y 1 000 000 de fixtures; lote de una temporada (~380) y los tamaños del laboratorio; respuestas con 100 % sin cambios, 10 % con cambios, 100 % con cambios, 100 % fixtures nuevos y 100 % evidencia antigua.
@@ -280,11 +292,8 @@ Modular conserva la propiedad del comportamiento. DI define el contrato y Modula
   | Evidencia antigua | 1 actualización (**hoy la evidencia antigua sobrescribe**) y 1 en el mapping | 0 actualizaciones, 1 inserción y 1 en el mapping |
   | Fixture nuevo | 1 inserción y 1 en el mapping | 2 inserciones y 1 en el mapping |
 
-- **Umbrales numéricos:** **ninguno aprobado**. Propuesta para el Chief, **sin aprobar**:
-  - tiempo total por lote de una temporada, como mucho 2× la línea base con 100 % sin cambios;
-  - proporción HOT en `fixtures` de al menos el 90 % en confirmaciones;
-  - hash por debajo del 10 % del tiempo de ejecución.
-- **Entorno:** DI-A3D está estacionado ("execution environment blocked"), así que hay que decidir dónde se mide.
+- **Umbrales numéricos (G2, MEASUREMENT_FIRST):** **ninguno aprobado**. Primero se mide la línea base de forma representativa. Después se proponen al Chief criterios y umbrales **derivados de esas mediciones**, con su justificación.
+- **Entorno:** DI-A3D está estacionado ("execution environment blocked"), así que hay que acordar dónde se mide. Es una puerta de coordinación, no de arquitectura.
 
 #### Bootstrap [DELEGATED dentro de lo FROZEN]
 
@@ -299,17 +308,36 @@ Dentro de `0008`, después del DDL:
 - **Requisito operativo:** ejecutar la migración con las syncs y los backfills parados.
 - **`downgrade`:** borra la tabla, las columnas y la función.
 
-### A6C: puertas abiertas (decisión del Chief)
+### A6C: decisiones ratificadas (G1–G3)
 
-- **G1. Contenido de `KNOWN` con pares parciales.** Se propone que la observación guarde lo observado (B). Hay dos opciones:
-  - **(a) Tal como se observó (recomendada):** `STRICT_KNOWLEDGE` devuelve el estado de `t*` sin rellenar nada y marca `partial_pairs`.
-  - **(b) Reconstrucción por política:** aplica `_NULL_PAIR_RULES` sobre las observaciones con `observed_at <= T`, en orden, y da `TEMPORAL_AMBIGUITY` si alguna marca de tiempo que aporta datos es ambigua.
+Ratificadas por el Chief el 2026-10-06. Todas son **[FROZEN]** y ya están en los invariantes.
 
-  Cambia qué significa "conocido a fecha T" para los marcadores, así que es una decisión de arquitectura.
-- **G2. Umbrales numéricos de rendimiento** (F) y el entorno donde se miden.
-- **G3. Confirmación de que la observación guarda la evidencia observada y no la fila fusionada**, y de que `last_state_hash` es el hash de esa evidencia (B). Es coherente con "no fabricar estado", pero difiere de las propuestas de A6C, que guardaban la fila fusionada.
+- **G1 = AS_OBSERVED.** `STRICT_KNOWLEDGE` devuelve la evidencia realmente observada.
+  - Los marcadores que faltan no se sintetizan desde observaciones anteriores.
+  - Un estado puede ser temporalmente `KNOWN` y estar incompleto para evaluar un mercado.
+  - Las políticas de `UNKNOWN_AT_T` y `TEMPORAL_AMBIGUITY` no cambian.
+- **G2 = MEASUREMENT_FIRST.**
+  - La aceptación para producción exige mediciones representativas de la línea base.
+  - Los criterios y los umbrales se derivan de esa evidencia y se proponen explícitamente.
+  - No existe ningún umbral aprobado previamente.
+- **G3 = OBSERVED_EVIDENCE_NOT_MERGED_STATE.**
+  - `fixture_observations` conserva la evidencia normalizada del proveedor.
+  - La fusión operativa de pares pertenece solo a `fixtures`.
+  - La evidencia histórica nunca se modifica para reflejar esa fusión.
+- **`last_state_hash` (confirmado):**
+  - Identifica el estado de la observación canónica ganadora, no necesariamente el de la fila fusionada.
+  - El orden canónico es `(observed_at, state_hash)`.
+  - El hash desempata de forma determinista; no establece cronología.
 
-**Puertas de coordinación (no son de arquitectura):** handoff con Modular (E), rama de integración publicada en origin y versión de PostgreSQL de Neon (A).
+**No quedan decisiones de arquitectura abiertas.** Si la implementación encuentra un conflicto con un invariante [FROZEN], se escala al Chief; nunca se cambia el contrato en silencio.
+
+**Puertas de coordinación (no son de arquitectura):**
+
+- handoff con Modular (E);
+- rama de integración publicada en origin;
+- entorno de medición (F);
+- versión de PostgreSQL de Neon (A);
+- autorización del Chief para empezar la implementación.
 
 ## Auditoría hecha
 
