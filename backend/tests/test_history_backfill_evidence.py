@@ -9,10 +9,11 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import delete, select, update
+from sqlalchemy.exc import OperationalError
 
-from app.models import Fixture, FixtureObservation
+from app.models import Fixture, FixtureObservation, FixtureProviderMapping
 from app.services import history_backfill_service as service
-from tests.test_history_backfill import NOW, FakeHistoryProvider, backfill, count, fx, setup  # noqa: F401
+from tests.test_history_backfill import NOW, FakeHistoryProvider, backfill, count, domain_counts, fx, setup  # noqa: F401
 
 pytestmark = pytest.mark.db
 
@@ -81,3 +82,43 @@ def test_parity_blocks_when_the_evidence_is_incomplete(db_session, setup, monkey
     result = backfill(db_session, setup, FakeHistoryProvider([fx(1), fx(2, home=3, away=4)]))
     assert result.status == "blocked" and "PARITY" in result.error_message
     assert _observations(db_session) == [] and count(db_session, Fixture) == 0
+
+
+def _fail_after_the_writer(monkeypatch):
+    """Error de BD dentro de la transacción del par, DESPUÉS de upsert_fixtures (fixtures, evidencia y
+    mappings ya escritos): el siguiente paso del servicio (season_teams) falla."""
+    def failing(*_args, **_kwargs):
+        raise OperationalError("INSERT INTO season_teams", {}, Exception("conexión simulada caída"))
+
+    monkeypatch.setattr(service.catalog_repository, "link_teams_to_season", failing)
+
+
+def _snapshot(db):
+    db.expire_all()
+    fixtures = sorted((f.external_id, f.home_goals, f.last_observed_at, bytes(f.last_state_hash)) for f in db.scalars(select(Fixture)))
+    observations = sorted((o.fixture_id, o.evidence_id, o.observed_at) for o in db.scalars(select(FixtureObservation)))
+    mappings = sorted((m.external_id, m.last_seen_at) for m in db.scalars(select(FixtureProviderMapping)))
+    return fixtures, observations, mappings, domain_counts(db)
+
+
+def test_db_error_after_writing_rolls_back_fixtures_evidence_and_mappings(db_session, setup, monkeypatch):
+    """Hueco cerrado (DI-A6): el camino `except _DB_ERRORS` del backfill no deja nada a medias."""
+    before = _snapshot(db_session)
+    _fail_after_the_writer(monkeypatch)
+    result = backfill(db_session, setup, FakeHistoryProvider([fx(1), fx(2, home=3, away=4)]))
+    assert result.status == "failed" and "Error de base de datos" in result.error_message
+    assert result.received == 2  # el análisis previo se informa, pero no es estado confirmado
+    assert _snapshot(db_session) == before  # ni fixtures, ni observaciones, ni mappings, ni equipos
+    assert _observations(db_session) == []
+
+
+def test_db_error_on_refresh_keeps_the_previously_committed_state(db_session, setup, monkeypatch):
+    """Con un estado ya confirmado (backfill anterior), un refresh que falla tras escribir deja ese
+    estado intacto: los datos, la evidencia (cardinalidad incluida) y el last_seen_at de los mappings."""
+    assert backfill(db_session, setup, FakeHistoryProvider([fx(1), fx(2, home=3, away=4)])).status == "completed"
+    committed = _snapshot(db_session)
+    _fail_after_the_writer(monkeypatch)
+    result = backfill(db_session, setup, FakeHistoryProvider([fx(1, home_goals=3, fulltime_home=3), fx(2, home=3, away=4)]), refresh=True)
+    assert result.status == "failed"
+    assert _snapshot(db_session) == committed
+    assert len(_observations(db_session)) == 2
