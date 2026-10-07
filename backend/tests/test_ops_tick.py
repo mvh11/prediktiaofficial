@@ -30,7 +30,7 @@ from app.repositories import live_sync_repository as live_runs
 from app.repositories import statistics_run_repository as stats_runs
 from app.services import statistics_reconcile_service as reconcile
 from app.services.freshness_checks import run_checks
-from tests.conftest import make_competition, make_fixture_data
+from tests.conftest import make_competition, make_evidence, make_fixture_data
 from tests.test_live_sync_fixtures import FakeProvider, ft
 from tests.test_statistics_service import FakeStatsProvider, full_item, item
 
@@ -258,7 +258,7 @@ def current_league(db, external_id=265, name="Liga live"):
 def add_ft(db, sid, n=1, start=1001, kickoff=None):
     data = [make_fixture_data(start + i, home=2 * (start + i) + 1, away=2 * (start + i) + 2, status="FT", kickoff_at=kickoff or NOW - timedelta(hours=5)) for i in range(n)]
     team_ids = fixture_repository.ensure_teams(db, [t for f in data for t in (f.home_team, f.away_team)], "api-football")
-    fixture_repository.upsert_fixtures(db, sid, data, team_ids, "api-football")
+    fixture_repository.upsert_fixtures(db, sid, data, team_ids, "api-football", make_evidence())
     db.commit()
     return [(f.external_id, f.home_team.external_id, f.away_team.external_id) for f in data]
 

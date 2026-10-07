@@ -19,7 +19,7 @@ from app.repositories import statistics_run_repository as runs
 from app.services import statistics_reconcile_service as rs
 from app.services import statistics_service as service
 from app.services.statistics_reconcile_service import ReconcileOptions
-from tests.conftest import make_competition, make_fixture_data
+from tests.conftest import make_competition, make_evidence, make_fixture_data
 from tests.test_statistics_service import AWAY_FULL, HOME_FULL, FakeStatsProvider, entry, full_item, item, replace
 
 pytestmark = pytest.mark.db
@@ -51,7 +51,7 @@ def league(db_session):
 def add_fixtures(db, season_id, n, kickoff=K, start=1001, status="FT"):
     data = [make_fixture_data(start + i, home=2 * (start + i) + 1, away=2 * (start + i) + 2, status=status, kickoff_at=kickoff) for i in range(n)]
     team_ids = fixture_repository.ensure_teams(db, [t for f in data for t in (f.home_team, f.away_team)], PROVIDER)
-    fixture_repository.upsert_fixtures(db, season_id, data, team_ids, PROVIDER)
+    fixture_repository.upsert_fixtures(db, season_id, data, team_ids, PROVIDER, make_evidence(provider=PROVIDER))
     db.commit()
     return [(f.external_id, f.home_team.external_id, f.away_team.external_id) for f in data]
 
