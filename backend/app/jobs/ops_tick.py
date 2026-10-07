@@ -135,6 +135,8 @@ def classify_live_sync(exit_code: int, run: dict[str, Any] | None) -> tuple[str,
     if run["status"] == "completed":
         return SUCCESS, None
     if run["status"] == "completed_with_errors":
+        if exit_code == 2:  # el job cortó el run como error (p. ej. proveedor sin configurar: config_failed)
+            return FAILED, "job_exit_error"
         return (RETRYABLE, "provider_rate_limited") if run["rate_limited"] else (DEGRADED, "competitions_failed")
     if run["status"] == "running":
         return FAILED, "run_left_running"

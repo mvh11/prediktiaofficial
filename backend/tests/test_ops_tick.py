@@ -56,6 +56,7 @@ def _stats(status="completed", auth=False, rate=False, stopped=None):
     (2, None, ("FAILED", "job_not_started")),
     (0, _live(), ("SUCCESS", None)),
     (1, _live("completed_with_errors"), ("DEGRADED", "competitions_failed")),
+    (2, _live("completed_with_errors"), ("FAILED", "job_exit_error")),  # run cortado por DI (config_failed)
     (1, _live("completed_with_errors", rate=True), ("RETRYABLE", "provider_rate_limited")),
     (2, _live("completed_with_errors", auth=True), ("FAILED", "provider_auth_failed")),
     (2, _live("failed"), ("FAILED", "run_failed")),
