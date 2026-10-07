@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.api.errors import run_provider_call
+from app.api.errors import require_sync_endpoints_enabled, run_provider_call
 from app.db.session import get_db
 from app.models import Fixture
 from app.repositories import fixture_repository as repo
@@ -65,7 +65,7 @@ def get_fixture(fixture_id: int, db: Session = Depends(get_db)) -> FixtureOut:
     return _to_out(fixture)
 
 
-@router.post("/sync/fixtures", response_model=FixtureSyncResult)
+@router.post("/sync/fixtures", response_model=FixtureSyncResult, dependencies=[Depends(require_sync_endpoints_enabled)])
 async def sync_fixtures(
     competition_id: int | None = Query(default=None, description="Solo esta competición (por defecto, todas)"),
     date_from: date | None = Query(default=None, description="Solo partidos desde este día"),

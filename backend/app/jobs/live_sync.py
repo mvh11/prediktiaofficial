@@ -20,6 +20,8 @@ temporada equivocada. El check se ejecuta igualmente (solo lee) y la salida es 2
 
 Códigos de salida: 0 completed y frescura PASS · 1 completed_with_errors o frescura WARNING ·
 2 failed, frescura ERROR, credenciales rechazadas, lock ocupado, destino incorrecto o excepción.
+Con --trigger scheduler un lock ocupado no es un fallo: imprime SKIPPED, sale con 0 y no hace
+ninguna petición (la siguiente pasada lo reintenta; ver app.jobs.ops_tick).
 """
 
 import argparse
@@ -263,13 +265,20 @@ def fail_stale_run(db, lock_scope: str, minutes: int) -> tuple[str, int | None]:
 # --- Salida --------------------------------------------------------------------------------
 
 
-def _sync_exit(status: str, provider) -> int:
+def _sync_exit(status: str, provider, trigger: str = "cli") -> int:
+    # Con el scheduler, un lock ocupado no es un fallo: la pasada se salta (SKIPPED, sin peticiones)
+    # y la siguiente lo reintenta, igual que statistics_reconcile --trigger scheduler
+    if status == "locked" and trigger == "scheduler":
+        return EXIT_OK
     if status == "locked" or status == "failed" or getattr(provider, "auth_failed", False):
         return EXIT_ERROR
     return EXIT_OK if status == "completed" else EXIT_WARNING
 
 
-def _print_run(label: str, run_id: int, status: str) -> None:
+def _print_run(label: str, run_id: int, status: str, trigger: str = "cli") -> None:
+    if not run_id and status == "locked" and trigger == "scheduler":
+        print(f"{label}: SKIPPED (ya hay una ejecución en curso; lo reintenta la siguiente pasada)")
+        return
     print(f"{label}: run #{run_id} {status}" if run_id else f"{label}: no se ejecutó ({status}: ya hay una ejecución en curso)")
 
 
@@ -311,8 +320,8 @@ async def _run_jobs(db, args) -> int:
             print(f"catalog: failed ({exc.__class__.__name__})", file=sys.stderr)
             run_id, status = 0, "failed"
         if run_id or status != "failed":
-            _print_run("catalog", run_id, status)
-        codes.append(_sync_exit(status, provider))
+            _print_run("catalog", run_id, status, args.trigger)
+        codes.append(_sync_exit(status, provider, args.trigger))
         if args.job == "all" and status in ("failed", "locked"):
             print("fixtures: no se ejecuta porque el catálogo no terminó (fail-safe)", file=sys.stderr)
             _, check_status, report = run_check(db, args.trigger)
@@ -326,13 +335,13 @@ async def _run_jobs(db, args) -> int:
             print(f"fixtures: failed ({exc.__class__.__name__})", file=sys.stderr)
             run_id, status = 0, "failed"
         if run_id or status != "failed":
-            _print_run("fixtures", run_id, status)
-        codes.append(_sync_exit(status, provider))
+            _print_run("fixtures", run_id, status, args.trigger)
+        codes.append(_sync_exit(status, provider, args.trigger))
     if args.job in ("check", "all"):
         run_id, status, report = run_check(db, args.trigger)
-        _print_run("check", run_id, status)
+        _print_run("check", run_id, status, args.trigger)
         if report is None:
-            codes.append(EXIT_ERROR)
+            codes.append(EXIT_OK if status == "locked" and args.trigger == "scheduler" else EXIT_ERROR)
         else:
             for c in report["checks"]:
                 print(f"  [{c['status']}] {c['id']}: {c['detail']}")

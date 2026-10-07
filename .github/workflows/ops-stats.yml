@@ -1,0 +1,41 @@
+# Scheduler operativo de Prediktia (C6), tarea "stats": cada hora en :20 UTC (statistics_reconcile).
+# Fuente ÚNICA de ejecución. GitHub evalúa el cron en UTC; no depende de ninguna zona horaria local.
+# Gate de encendido: no hace nada salvo que la variable del repositorio
+# PREDIKTIA_SCHEDULER_ENABLED valga 'true' (y GitHub solo programa workflows de la rama por defecto).
+# Secretos: solo se REFERENCIAN aquí; se cargan en GitHub en un paso aparte y autorizado.
+name: ops-stats
+
+on:
+  schedule:
+    - cron: "20 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ops-stats
+  cancel-in-progress: false
+
+jobs:
+  tick:
+    if: ${{ vars.PREDIKTIA_SCHEDULER_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TZ: UTC
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+      PREDIKTIA_EXPECTED_DB_TARGET: ${{ secrets.PREDIKTIA_EXPECTED_DB_TARGET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - run: pip install -r requirements.txt
+      - run: python -m app.jobs.ops_tick stats

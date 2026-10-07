@@ -5,6 +5,8 @@ from collections.abc import Awaitable, Callable
 
 from fastapi import HTTPException
 
+from app.core.config import get_settings
+
 from app.integrations.exceptions import (
     ProviderAuthError,
     ProviderError,
@@ -14,6 +16,16 @@ from app.integrations.exceptions import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def require_sync_endpoints_enabled() -> None:
+    """Dependencia de POST /sync/*: sin SYNC_ENDPOINTS_ENABLED=true responde 403 antes de tocar la
+    BD o el proveedor. La sync operativa va por los jobs con lock y presupuesto (ops_tick)."""
+    if not get_settings().sync_endpoints_enabled:
+        raise HTTPException(
+            status_code=403,
+            detail="Sync por HTTP deshabilitada (SYNC_ENDPOINTS_ENABLED=false): usa app.jobs.live_sync / app.jobs.ops_tick",
+        )
 
 
 async def run_provider_call[T](check: Callable[[], Awaitable[T]]) -> T:
