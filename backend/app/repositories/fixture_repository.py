@@ -17,11 +17,11 @@ WHERE del ON CONFLICT se vuelve a evaluar sobre la última versión confirmada d
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, Text, and_, case, cast, func, literal, null, or_, select, tuple_, union_all
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import DateTime, Integer, Text, and_, case, func, null, or_, select, tuple_
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Fixture, FixtureObservation, FixtureProviderMapping, Season, Team, TeamProviderMapping
+from app.repositories.bulk_rows import insert_rows, unnest_rows
 from app.repositories.provider_mapping_repository import upsert_origin_mappings
 from app.schemas.catalog import TeamData
 from app.schemas.fixture import FINISHED_STATUSES, FixtureData
@@ -144,17 +144,18 @@ def _state_type(column: str):
 
 
 def state_hashes(db: Session, states: list[dict]) -> list[bytes]:
-    """fixture_state_hash_v1 de cada estado, en el mismo orden. El hash solo se define en SQL."""
-    selects = [
-        select(
-            literal(i, Integer).label("i"),
-            func.fixture_state_hash_v1(*(cast(literal(state[c], _state_type(c)), _state_type(c)) for c in STATE_COLUMNS)).label("h"),
-        )
-        for i, state in enumerate(states)
-    ]
-    if not selects:
+    """fixture_state_hash_v1 de cada estado, en el mismo orden. El hash solo se define en SQL.
+
+    Los estados viajan como arrays tipados alineados (uno por columna, más el índice).
+    """
+    if not states:
         return []
-    stmt = selects[0] if len(selects) == 1 else union_all(*selects)
+    source = unnest_rows(
+        [("i", Integer()), *((c, _state_type(c)) for c in STATE_COLUMNS)],
+        [list(range(len(states))), *([state[c] for state in states] for c in STATE_COLUMNS)],
+        name="states",
+    )
+    stmt = select(source.c.i, func.fixture_state_hash_v1(*(source.c[c] for c in STATE_COLUMNS)).label("h"))
     by_index = dict(db.execute(stmt).all())
     return [bytes(by_index[i]) for i in range(len(states))]
 
@@ -175,8 +176,8 @@ def ensure_teams(db: Session, teams: list[TeamData], provider: str) -> dict[int,
     unique = {t.external_id: t for t in teams}
     if not unique:
         return {}
-    stmt = insert(Team).values(
-        [{"external_id": t.external_id, "name": t.name, "logo_url": t.logo_url} for t in unique.values()]
+    stmt = insert_rows(
+        Team, [{"external_id": t.external_id, "name": t.name, "logo_url": t.logo_url} for t in unique.values()]
     )
     db.execute(stmt.on_conflict_do_nothing(index_elements=[Team.external_id]))
     rows = db.execute(select(Team.external_id, Team.id).where(Team.external_id.in_(unique)))
@@ -247,8 +248,7 @@ def upsert_fixtures(
     if absent:
         created = set(
             db.scalars(
-                insert(Fixture)
-                .values([stamped[e] for e in absent])
+                insert_rows(Fixture, [stamped[e] for e in absent], order_by=["external_id"])
                 .on_conflict_do_nothing(index_elements=[Fixture.external_id])
                 .returning(table.c.external_id)
             )
@@ -272,7 +272,7 @@ def upsert_fixtures(
             raise RuntimeError("partido borrado durante la escritura: estado fuera del contrato del escritor")
 
         # c. El upsert de siempre, sobre filas ya bloqueadas (siempre toma la rama ON CONFLICT)
-        stmt = insert(Fixture).values([stamped[e] for e in existing])
+        stmt = insert_rows(Fixture, [stamped[e] for e in existing], order_by=["external_id"])
         excluded = stmt.excluded
         new_values = _fixture_update_values(excluded, data_columns)
         changed = or_(*(table.c[k].is_distinct_from(v) for k, v in new_values.items()))
@@ -308,8 +308,7 @@ def upsert_fixtures(
     ]
     inserted = set(
         db.scalars(
-            insert(FixtureObservation)
-            .values(observations)
+            insert_rows(FixtureObservation, observations)
             .on_conflict_do_nothing(index_elements=["fixture_id", "evidence_id"])
             .returning(FixtureObservation.fixture_id)
         )
