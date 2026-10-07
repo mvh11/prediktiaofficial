@@ -333,7 +333,7 @@ Ratificadas por el Chief el 2026-10-06. Todas son **[FROZEN]** y ya están en lo
 
 **Puertas de coordinación (no son de arquitectura):**
 
-- handoff con Modular (E);
+- ~~handoff con Modular (E)~~ (revisión de comportamiento **APROBADA**; ver [revisión de Modular](#revisión-de-modular-aprobada));
 - rama de integración publicada en origin;
 - entorno de medición (F);
 - versión de PostgreSQL de Neon (A);
@@ -372,7 +372,7 @@ Ratificadas por el Chief el 2026-10-06. Todas son **[FROZEN]** y ya están en lo
   - **Nuevos (101):** `test_migration_0008` 23, `test_fixture_state_hash` 29 (con vectores de oro congelados), `test_fixture_observations` 33, `test_fixture_observations_concurrency` 8 (dos conexiones reales, con espera de bloqueo comprobada), `test_fixture_sync_evidence` 3 y `test_history_backfill_evidence` 5.
   - **Suite completa combinada:** 1156 passed, 0 failed, 0 skipped, 0 errors, en PostgreSQL 18.6 local desechable (`127.0.0.1:55443`). Nunca Neon.
   - **Mutaciones:** quitar el `WHERE` de orden rompe 8 tests; ignorar el orden en `PARITY` rompe 1.
-- **Revisión de Modular:** **PENDIENTE.** El dueño de Modular tiene que revisar `7c41705` y `1920590`. Ningún test de estadísticas se ha debilitado; solo se pasa evidencia y se borra la evidencia antes de borrar fixtures.
+- **Revisión de Modular:** **APROBADA** (2026-10-07), junto con `7e4af3e`; ver [revisión de Modular](#revisión-de-modular-aprobada). Ningún test de estadísticas se ha debilitado; solo se pasa evidencia y se borra la evidencia antes de borrar fixtures.
 - **Riesgos conocidos:**
   - **Límite de parámetros:** el INSERT de `fixtures` pasa de 22 a 24 parámetros por fila (la consulta de hashes usa 16 y la de observaciones 21), así que el techo de PostgreSQL (65 535 por sentencia) baja de ~2 970 a ~2 730 partidos por respuesta. Ya existía, no hay troceado, y se medirá en el Checkpoint C sin cambiar la semántica.
   - **`tools/perf_lab` no está adaptado a `0008`:** la siembra por COPY y las llamadas a `upsert_fixtures` lo rompen. Queda para el Checkpoint C.
@@ -392,7 +392,7 @@ Ratificadas por el Chief el 2026-10-06. Todas son **[FROZEN]** y ya están en lo
   - **Pendiente:**
     - **Checkpoint B:** NO iniciado.
     - **Checkpoint C:** `perf_lab`, mediciones y techo de parámetros.
-    - Revisión de Modular.
+    - ~~Revisión de Modular.~~ Aprobada después (2026-10-07); ver [revisión de Modular](#revisión-de-modular-aprobada).
     - Versión de PostgreSQL de Neon.
   - **Hecho nuevo:** `origin/feature/modular-data-m43` ya está en `eb4c33c`, no en el `b72b036` que contiene esta rama (visto con `ls-remote`, sin fetch). Antes de la revisión de Modular o de cualquier integración hay que mapear esos commits hacia delante, sobre todo si tocan `history_backfill_service.py`, `upsert_fixtures` o las migraciones. **Resuelto:** ver [reconciliación con `main`](#reconciliación-hacia-delante-con-main-a92e8a3).
 
@@ -407,8 +407,24 @@ Ratificadas por el Chief el 2026-10-06. Todas son **[FROZEN]** y ya están en lo
 - **Tests** (PostgreSQL 18.6 local desechable, `127.0.0.1:55443`; nunca Neon):
   - dirigidos (`test_ops_tick.py` + `test_statistics_reconcile.py`): 128 passed, 0 skipped;
   - **suite completa combinada sobre `7e4af3e`:** **1285 passed, 0 failed, 0 skipped, 0 errors, 1 warning** (`StarletteDeprecationWarning` de `fastapi.testclient`, ajeno). 1285 = 1156 de A6 + 129 tests que trae `main`.
-- **Revisión de Modular:** **PENDIENTE.** Paquete: `7c41705`, `1920590` y `7e4af3e`.
-- **Checkpoint B:** **HOLD.** **DI-A5D:** **HOLD.**
+- **Revisión de Modular:** **APROBADA** (ver abajo).
+- **Checkpoint B:** HOLD al reconciliar; después autorizado y hecho (ver [Checkpoint B](#di-a6-checkpoint-b-lectura-temporal)). **DI-A5D:** **HOLD.**
+
+#### Revisión de Modular: APROBADA
+
+Revisión de comportamiento del dueño de Modular sobre el paquete `7c41705`, `1920590` y `7e4af3e` (diffs completos a nivel de línea), registrada por el Chief el 2026-10-07. **Sin conflicto semántico.**
+
+| Punto | Resultado |
+|---|---|
+| `7c41705` (adopción de evidencia y `PARITY` en `history_backfill_service.py`) | **APROBADO** |
+| `1920590` (tests de Modular: firma y `DELETE RESTRICT`) | **APROBADO** |
+| `7e4af3e` (helpers de tests C6/M5.6B) | **APROBADO** |
+| Semántica del backfill histórico preservada | **SÍ** |
+| Propagación de la evidencia | **APROBADA** |
+| `PARITY` consciente del orden `(last_observed_at, last_state_hash)` | **APROBADA** |
+| Compatibilidad con `DELETE RESTRICT` | **APROBADA** |
+| Garantías de los tests de Modular preservadas | **SÍ** |
+| Hueco del test dedicado de rollback por error de BD | **ACEPTABLE**: sigue registrado como no bloqueante |
 
 ### Runbook de bootstrap de `0008`
 
