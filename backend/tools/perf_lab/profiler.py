@@ -21,11 +21,11 @@ import time
 from collections import Counter, defaultdict
 from contextlib import contextmanager, nullcontext
 
-from sqlalchemy import Engine, delete, event, text
+from sqlalchemy import Engine, event, text
 from sqlalchemy.engine import default as sa_default
 from sqlalchemy.orm import Session
 
-from tools.perf_lab.benchmark import distribution, payload_groups, repository_write, verify_write
+from tools.perf_lab.benchmark import delete_lab_fixtures, distribution, payload_groups, repository_write, verify_write
 from tools.perf_lab.dataset import DatasetConfig, analyze
 
 PROFILE_MODES = ("update", "unchanged", "insert")
@@ -283,8 +283,6 @@ def _rollup(per_sample: list[dict], keys) -> dict:
 
 def profile_case(engine: Engine, config: DatasetConfig, batch: int, mode: str, samples: int,
                  warmup: int, cprofile_samples: int, prepare_threshold: str) -> dict:
-    from app.models import Fixture
-
     base = payload_groups(config, batch, "unchanged")
     with Session(engine) as db:  # normaliza el punto de partida, fuera del reloj
         repository_write(db, base)
@@ -309,7 +307,7 @@ def profile_case(engine: Engine, config: DatasetConfig, batch: int, mode: str, s
     def cleanup():
         if mode == "insert":  # misma limpieza que DI-A3B, fuera del reloj
             with engine.begin() as conn:
-                conn.execute(delete(Fixture).where(Fixture.external_id.in_(external_ids)))
+                delete_lab_fixtures(conn, external_ids)
 
     with engine.connect() as conn, Timeline(engine) as timeline, GCMeter() as gc_meter:
         threshold = _set_prepare_threshold(conn, prepare_threshold)

@@ -138,6 +138,12 @@ def seed_database(engine: Engine, target: LabTarget, config: DatasetConfig) -> d
         occupied = conn.execute(text("SELECT EXISTS (SELECT 1 FROM competitions) OR EXISTS (SELECT 1 FROM fixtures)")).scalar_one()
     if occupied or metadata.get("dataset"):
         raise RuntimeError("seed exige laboratorio sin datos; crea otra BD para otra escala")
+    with engine.connect() as conn:
+        a6_schema = conn.execute(text("SELECT to_regclass('fixture_observations') IS NOT NULL")).scalar_one()
+    if a6_schema:
+        # El COPY directo no puede fabricar evidencia: en DI-A6 se siembra en 0007 y el bootstrap real
+        # de 0008 (`upgrade`) crea la observación inicial de cada partido, como en producción
+        raise RuntimeError("esquema DI-A6 (0008): usa `init --revision 0007`, `seed` y después `upgrade`")
     started = time.perf_counter()
     competitions = [
         {"id": i, "external_id": COMPETITION_EXTERNAL_BASE + i, "name": f"Liga laboratorio {i}",

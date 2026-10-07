@@ -9,6 +9,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from tools.perf_lab.a6 import A6_BATCHES, WRITE_MODES
 from tools.perf_lab.benchmark import BACKEND, BATCHES, environment, measure_reads, measure_upserts
 from tools.perf_lab.dataset import DatasetConfig, seed_database
 from tools.perf_lab.profiler import PROFILE_MODES
@@ -18,7 +19,21 @@ from tools.perf_lab.safety import authorize, load_app, read_metadata, require_em
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description="DI-A3B: PostgreSQL local/desechable; ninguna llamada a proveedores")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("init", help="Aplica las migraciones EXISTENTES exclusivamente sobre una BD vacía")
+    init = sub.add_parser("init", help="Aplica las migraciones EXISTENTES exclusivamente sobre una BD vacía")
+    init.add_argument("--revision", default="head",
+                      help="head (por defecto) o 0007: sembrar en 0007 y pasar a 0008 con `upgrade` ejecuta el bootstrap real")
+    upgrade = sub.add_parser("upgrade", help="DI-A6: lleva un laboratorio sembrado a head (bootstrap real de 0008) y lo cronometra")
+    upgrade.add_argument("--output", type=Path, required=True)
+    a6 = sub.add_parser("a6", help="DI-A6 Checkpoint C: escrituras, techo de parámetros, hash, historia y lecturas")
+    a6.add_argument("suite", choices=("writes", "ceiling", "hash", "history", "reads"))
+    a6.add_argument("--output", type=Path, required=True)
+    a6.add_argument("--batches", type=int, nargs="+", default=list(A6_BATCHES))
+    a6.add_argument("--modes", nargs="+", default=list(WRITE_MODES), choices=WRITE_MODES)
+    a6.add_argument("--samples", type=int, default=30)
+    a6.add_argument("--warmup", type=int, default=5)
+    a6.add_argument("--per-fixture", type=int, default=10, help="history: observaciones por partido tras la preparación")
+    a6.add_argument("--ambiguity-every", type=int, default=10, help="history: un empate conflictivo cada N partidos (0 = ninguno)")
+    a6.add_argument("--requested", type=int, nargs="+", default=[1, 10, 380, 1000, 10000], help="reads: partidos pedidos")
     seed = sub.add_parser("seed", help="Genera datos, sin incluir preparación en los benchmarks")
     seed.add_argument("--fixtures", required=True, type=int)
     seed.add_argument("--seed", type=int, default=20261004)
@@ -52,6 +67,11 @@ def parse_args(argv=None):
             args.prepare_threshold.isdigit() and int(args.prepare_threshold) <= 100
         ):
             parser.error("--prepare-threshold debe ser driver, off o un entero entre 0 y 100")
+    if args.command == "a6":
+        if args.samples < 10 or args.warmup < 1:
+            parser.error("Se requieren --samples >= 10 y --warmup >= 1")
+        if args.suite == "history" and args.per_fixture < 2:
+            parser.error("--per-fixture debe ser >= 2")
     if args.command in {"bench", "plans"}:
         if args.samples < 10 or args.warmup < 1:
             parser.error("Se requieren --samples >= 10 y --warmup >= 1")
@@ -124,6 +144,84 @@ def run_profile(engine, target, metadata, args) -> dict:
     return report
 
 
+def run_upgrade(engine, target, metadata) -> dict:
+    """Bootstrap real de 0008 sobre un dataset sembrado en 0007: mismo camino que producción."""
+    import time
+
+    from alembic import command
+    from alembic.config import Config
+
+    from tools.perf_lab.dataset import analyze
+
+    config = _dataset_config(engine, metadata)
+    with engine.connect() as conn:
+        before = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+    alembic_config = Config(str(BACKEND / "alembic.ini"))
+    alembic_config.set_main_option("script_location", str(BACKEND / "alembic"))
+    started = time.perf_counter()
+    command.upgrade(alembic_config, "head")
+    seconds = time.perf_counter() - started
+    with engine.connect() as conn:
+        after = conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+        counts = dict(conn.execute(text(
+            "SELECT (SELECT count(*) FROM fixtures) AS fixtures, (SELECT count(*) FROM fixture_observations) AS observations, "
+            "(SELECT count(DISTINCT evidence_id) FROM fixture_observations) AS evidence_ids, "
+            "(SELECT count(*) FROM fixture_observations WHERE source = 'bootstrap') AS bootstrap_observations, "
+            "pg_total_relation_size('fixture_observations') AS observations_total_bytes, "
+            "pg_total_relation_size('fixtures') AS fixtures_total_bytes"
+        )).mappings().one())
+    assert counts["fixtures"] == config.fixtures == counts["bootstrap_observations"] and counts["evidence_ids"] == 1
+    analyze(engine)
+    write_metadata(engine, target, {**metadata, "upgraded": {"from": before, "to": after, "seconds": seconds}})
+    return {"status": "MEDIDO", "created_at": datetime.now(timezone.utc).isoformat(), "target": target.authorization,
+            "dataset": metadata["dataset"], "from_revision": before, "to_revision": after,
+            "bootstrap_wall_seconds": seconds,
+            "scope": "alembic upgrade completo (DDL + bootstrap + índices) en un proceso local; sin escritores concurrentes",
+            "counts": counts, "environment": environment(engine)}
+
+
+def run_a6(engine, target, metadata, args) -> dict:
+    from tools.perf_lab import a6
+
+    config = _dataset_config(engine, metadata)
+    before = environment(engine)
+    if args.suite == "writes":
+        results = a6.measure_writes(engine, config, args.batches, args.modes, args.samples, args.warmup)
+    elif args.suite == "ceiling":
+        results = a6.measure_ceiling(engine, config)
+    elif args.suite == "hash":
+        results = a6.measure_hash(engine)
+    elif args.suite == "history":
+        results = a6.augment_history(engine, args.per_fixture, args.ambiguity_every)
+        write_metadata(engine, target, {**metadata, "history": {k: str(v) for k, v in results.items()}})
+    else:
+        results = a6.measure_reads(engine, tuple(args.requested), args.samples, args.warmup)
+    report = {
+        "status": "MEDIDO" if args.suite != "history" else "PREPARACIÓN",
+        "created_at": datetime.now(timezone.utc).isoformat(), "target": target.authorization,
+        "suite": args.suite, "dataset": metadata["dataset"], "lab_metadata": metadata, "environment": before,
+        "methodology": {
+            "clock": "time.perf_counter_ns", "samples": args.samples, "warmup": args.warmup,
+            "percentiles": "linear interpolation (n-1)*p",
+            "write_scope": "ensure_teams + upsert_fixtures reales por grupo de temporada (una respuesta lógica y una "
+                           "evidencia por grupo con A6); un COMMIT por lote",
+            "total_ms": "wall_before_commit + commit; la lectura de pg_stat_xact_user_tables entre ambos queda fuera",
+            "wal_bytes": "MEDIDO: diferencia de pg_current_wal_insert_lsn antes/después de la transacción, desde otra "
+                         "conexión; un solo cliente, pero incluye cualquier actividad de fondo (autovacuum) del cluster",
+            "hot": "MEDIDO: pg_stat_xact_user_tables dentro de la transacción medida",
+            "family_times": "MEDIDO por familia de sentencia: pre-cursor SQLAlchemy y round-trip del cursor",
+            "excluded": "construcción de payloads, normalización, VACUUM ANALYZE, validaciones, limpieza de inserts",
+            "not_measured": ["providers", "WAN/Neon", "escritores concurrentes", "cold cache"],
+        },
+        "results": results,
+    }
+    after = environment(engine)
+    report["source_unchanged_during_run"] = before["source_sha256"] == after["source_sha256"]
+    if not report["source_unchanged_during_run"]:
+        report["status"] = "NO COMPARABLE: código cambió durante la ejecución"
+    return report
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     if getattr(args, "output", None) and args.output.exists():
@@ -138,13 +236,17 @@ def main(argv=None) -> int:
 
             config = Config(str(BACKEND / "alembic.ini"))
             config.set_main_option("script_location", str(BACKEND / "alembic"))
-            command.upgrade(config, "head")
-            write_metadata(engine, target, {"created_at": datetime.now(timezone.utc).isoformat()})
-            print(f"Laboratorio inicializado: {target.authorization}")
+            command.upgrade(config, args.revision)
+            write_metadata(engine, target, {"created_at": datetime.now(timezone.utc).isoformat(), "init_revision": args.revision})
+            print(f"Laboratorio inicializado: {target.authorization} ({args.revision})")
             return 0
         metadata = read_metadata(engine, target)
         if args.command == "seed":
             report = seed_database(engine, target, DatasetConfig(args.fixtures, args.seed))
+        elif args.command == "upgrade":
+            report = run_upgrade(engine, target, metadata)
+        elif args.command == "a6":
+            report = run_a6(engine, target, metadata, args)
         elif args.command == "profile":
             report = run_profile(engine, target, metadata, args)
         else:
