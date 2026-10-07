@@ -440,7 +440,7 @@ Desde C6 hay un scheduler que escribe fixtures cada hora en producción. Antes d
 
 ## DI-A6: Checkpoint B (lectura temporal)
 
-**Estado:** Checkpoint A **CERRADO** (Chief, 2026-10-07). Checkpoint B **hecho**, pendiente de decisión del Chief. Rama `feature/data-integrity-a6`, base `7aa25cc`, **sin push**. **Sin cambio de esquema:** cabeza única `0008`, `0009` sin crear (reservada para DI-A5D). Checkpoint C no iniciado.
+**Estado:** Checkpoint A **CERRADO** (Chief, 2026-10-07). Checkpoint B **hecho** y después **CERRADO** por el Chief. Rama `feature/data-integrity-a6`, base `7aa25cc`, **sin push**. **Sin cambio de esquema:** cabeza única `0008`, `0009` sin crear (reservada para DI-A5D). Checkpoint C: ver [su sección](#di-a6-checkpoint-c-g2-medición-primero).
 
 - **Commits:**
   - `17db2b1`: tipos de resultado (`app/schemas/fixture_knowledge.py`) y lectura `STRICT_KNOWLEDGE` (`app/repositories/fixture_knowledge_repository.py`).
@@ -466,7 +466,170 @@ Desde C6 hay un scheduler que escribe fixtures cada hora en producción. Antes d
   - **Hueco aceptado, no bloqueante (sigue abierto):** no hay un test dedicado que demuestre que el camino de error de BD del backfill (`except _DB_ERRORS: db.rollback()`) no deja observaciones. Solo lo cubre el código.
   - Los riesgos del Checkpoint A siguen igual: techo de parámetros por respuesta, `tools/perf_lab` sin adaptar a `0008`, versión de PostgreSQL de Neon.
   - Todavía no hay ningún consumidor (generación de features o backtest) que use la lectura estricta. Cuando lo haya, tiene que usar `STRICT_KNOWLEDGE` y no `RETROSPECTIVE_FINAL_RESULTS`.
-- **Siguiente punto seguro:** decisión del Chief sobre el Checkpoint C (adaptar `perf_lab` a `0008`, mediciones G2 y techo de parámetros). No se ha iniciado.
+- **Siguiente punto seguro:** decisión del Chief sobre el Checkpoint C. Autorizado y hecho después: ver [Checkpoint C](#di-a6-checkpoint-c-g2-medición-primero).
+
+## DI-A6: Checkpoint C (G2, medición primero)
+
+**Estado:** Checkpoint B **CERRADO** (Chief). Checkpoint C **hecho en lo medible y pendiente de decisión del Chief**: hay dos hallazgos que piden decisión (plan de la lectura estricta y crecimiento por confirmaciones). Rama `feature/data-integrity-a6`, **sin push**. **Sin cambios de producción, sin cambio de esquema** (cabeza única `0008`, `0009` sin crear) y **sin UNNEST**. Estas mediciones son **A6** y no se mezclan con la evidencia histórica de A3B/A3C/A3D (README de `perf_lab`). **Ningún umbral está aceptado:** los de abajo son propuestas.
+
+- **Commits:** `1d36e9e` (laboratorio: compatibilidad con `0008` y suites `a6`; solo herramientas) y `228376b` (tests del laboratorio sin conexiones). Este registro va en el commit de documentación siguiente.
+- **Qué se rompía en el laboratorio con `0008` y cómo se resolvió (sin tocar producción):**
+  - `seed` hace COPY a `fixtures` sin `last_observed_at`/`last_state_hash` (NOT NULL): ahora rechaza un esquema `0008`; los laboratorios A6 se siembran en `0007` (`init --revision 0007`) y pasan a `0008` con el **bootstrap real** (`upgrade`), como en producción;
+  - `repository_write` llamaba a `upsert_fixtures` sin evidencia: ahora pasa `FixtureEvidence.received(...)` por grupo cuando la firma lo pide;
+  - la limpieza de `insert` borraba fixtures con historia: ahora borra antes la evidencia (`ON DELETE RESTRICT`).
+- **Entorno:** PostgreSQL 18.6 local desechable (cluster nuevo en `127.0.0.1`, locale C, valores por defecto: `shared_buffers` 128MB, `work_mem` 4MB, `fsync`/`synchronous_commit`/`full_page_writes` on, autovacuum on), Windows 11, Intel i3-12100F, Python 3.13.4, SQLAlchemy 2.1.3, psycopg 3.3.6 (`prepare_threshold` 5) y venv aislado. Nunca Neon, sin llamadas a proveedores y sin migraciones de producción.
+- **Línea base:** `9a5a5f2` (código de `backend/app` idéntico a `8510b77`; esquema `0007`; escritor sin evidencia), sacada con `git archive` y medida con **el mismo arnés** superpuesto. Es la comparación válida más cercana: mismo dataset, mismas cargas y mismo cluster. `older`, `tie` y `replay` no existen sin evidencia (NO APLICA).
+- **Metodología:**
+  - dataset determinista de A3B (temporadas de 380 partidos); 100 000 partidos (matriz completa) y 1 000 000 (subconjunto);
+  - 30 muestras y 5 de calentamiento por caso, p50/p95 por interpolación, `VACUUM ANALYZE` antes de cada caso, un cliente, caché caliente;
+  - un lote es un grupo de respuestas (una por temporada, ≤ 380), con una evidencia por respuesta y un COMMIT por lote;
+  - por muestra y fuera del reloj: WAL (`pg_current_wal_insert_lsn`), contadores de la transacción (`pg_stat_xact_user_tables` leído antes y después **dentro** de la transacción, porque desde PG15 incluye contadores pendientes de transacciones anteriores) y validaciones de los invariantes A6 (el ganador es una observación; `older` no toca `fixtures`; `replay` no crea filas);
+  - tiempos por familia de sentencia: SQLAlchemy antes del cursor y round-trip del cursor.
+- **Procedencia:** cada JSON guarda el SHA-256 de `app/`, `alembic/` y `tools/perf_lab/`. Todos los informes A6 coinciden con lo confirmado en `1d36e9e` sobre `b46ca91`, y ninguno cambió durante su ejecución. JSON en `backend/tools/perf_lab/results/a6c-*.json` (locales, no versionados por la política de `1972577`).
+
+### C.1 Escritor: A6 frente a la línea base
+
+`total` = trabajo + COMMIT, p50 (p95) en ms; WAL p50 en bytes por lote. Escala 100 000:
+
+| Lote | Modo | Base total | A6 total | A6/base | Base WAL | A6 WAL | WAL A6/base |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 10 | insert | 13,3 (16,3) | 20,5 (23,3) | 1,54× | 16 800 | 22 152 | 1,32× |
+| 10 | update | 12,8 (14,5) | 20,9 (25,5) | 1,64× | 10 896 | 16 020 | 1,47× |
+| 10 | unchanged | 12,9 (18,1) | 21,6 (27,4) | 1,67× | 9 356 | 15 244 | 1,63× |
+| 100 | update | 51,6 (66,3) | 130,6 (171,4) | 2,53× | 49 076 | 102 688 | 2,09× |
+| 100 | unchanged | 50,1 (61,8) | 126,2 (169,3) | 2,52× | 24 456 | 83 424 | 3,41× |
+| 380 | insert | 184,5 (203,9) | 479,2 (533,2) | 2,60× | 462 624 | 678 272 | 1,47× |
+| 380 | update | 174,7 (202,1) | 450,6 (475,7) | 2,58× | 221 536 | 424 300 | 1,92× |
+| 380 | unchanged | 169,9 (200,5) | 488,6 (520,5) | 2,88× | 84 148 | 308 276 | 3,66× |
+| 380 | mixed | 167,2 (196,4) | 452,1 (505,9) | 2,70× | 228 656 | 436 396 | 1,91× |
+| 380 | older | — | 460,1 (503,6) | — | — | 276 988 | — |
+| 380 | tie | — | 461,3 (518,5) | — | — | 270 516 | — |
+| 380 | replay | — | 452,3 (511,0) | — | — | 85 188 | — |
+| 1000 | update | 458,1 (521,5) | 1216,3 (1287,5) | 2,65× | 597 052 | 1 114 884 | 1,87× |
+| 1000 | unchanged | 455,1 (512,5) | 1246,1 (1326,5) | 2,74× | 223 520 | 855 376 | 3,83× |
+| 2000 | update | 932,3 (980,9) | 2500,9 (2582,0) | 2,68× | 1 218 648 | 2 692 304 | 2,21× |
+| 2000 | unchanged | 913,5 (945,3) | 2491,0 (2574,5) | 2,73× | 446 940 | 2 346 224 | 5,25× |
+
+Con 1 000 000 de partidos la proporción es la misma: lote 380 update 177,0 → 463,4 ms (2,62×), unchanged 177,7 → 459,0 ms (2,58×), insert 180,6 → 479,0 ms (2,65×); lote 1000 update 473,9 → 1212,0 ms (2,56×). Entre 100 000 y 1 000 000, el tiempo del escritor **no depende del tamaño de la tabla**.
+
+- **Sobrecoste A6 (MEDIDO):** ~1,6× en lotes de 10 y **~2,5–2,9× desde 100**. Por respuesta de 380: **+280 ms** (de ~175 a ~455–490 ms). Todos los modos A6 cuestan casi lo mismo con 380 (450–490 ms), incluidos `older`, `tie` y `replay`, que no actualizan `fixtures`: el coste no está en el servidor.
+- **Dónde está (MEDIDO por familia; update de 1000, p50 antes del cursor + cursor):** son nuevas la sentencia de hashes (128,6 + 48,0 ms) y el INSERT de observaciones (173,9 + 73,3 ms); el upsert de `fixtures` pasa de 187,5 + 64,0 a 206,4 + 68,3 ms. La mayor parte es **construcción y compilación en SQLAlchemy** de sentencias multi-VALUES de cientos de filas (sin caché, porque cada lote genera SQL distinto), no ejecución en PostgreSQL.
+- **COMMIT:** 0,4–4,9 ms en todos los casos; no es un factor.
+
+### C.2 Coste del hash
+
+- **Servidor (MEDIDO con `EXPLAIN ANALYZE` con y sin el hash sobre las mismas filas; el coste por fila es DERIVADO):** `fixture_state_hash_v1` cuesta **5,7–6,6 µs por fila** (380 filas: 2,43 frente a 0,11 ms; 100 000: 686,5 frente a 22,1 ms). Es lineal con el tamaño.
+- **En el escritor (MEDIDO):** la sentencia de hashes es el **14–19 %** del tiempo antes del COMMIT (p50; 8 % con lotes de 10). Con 380 filas son ~60 ms, de los que ~2,3 ms son el hash en sí; el resto es compilar y planificar un `UNION ALL` de N `SELECT` literales. El hash es barato; **la forma de invocarlo no**. No se ha cambiado: el hash es canónico y la invocación no se toca sin decisión.
+
+### C.3 WAL, HOT y crecimiento
+
+- **WAL por partido (MEDIDO, lote 380, 100 000), base → A6:**
+  - confirmación sin cambios: 221 → **811 B**;
+  - actualización: 583 → 1117 B;
+  - inserción: 1217 → 1785 B;
+  - solo A6: evidencia antigua 729 B, empate 712 B y repetición exacta 224 B (igual que la base: solo mappings).
+
+  La confirmación es lo que más crece (3,7×; 5,3× con 2000), porque **cada respuesta escribe una observación y adelanta `last_observed_at`**, como fija el contrato (tabla de F).
+- **HOT en `fixtures` (MEDIDO, no inferido):**
+  - confirmaciones: 100 % con 10, 100 y 380; 99,95 % con 1000; **64 % con 2000** (100 000). Con 1 000 000: 93 % (380) y 95 % (1000). Baja cuando las mismas páginas se reescriben muchas veces seguidas sin VACUUM (`fillfactor` 100);
+  - actualizaciones de datos: A6 igual que la base (380: 70 % frente a 66 %; 1000: 72 % frente a 73 %; 2000: 57 % frente a 69 %; con 1 000 000, 42 % frente a 39 % y 49 % frente a 50 %). A6 no empeora el HOT de las actualizaciones;
+  - la línea base no actualiza `fixtures` en una confirmación; A6 sí (solo metadatos), casi siempre en HOT.
+- **Crecimiento (MEDIDO como diferencia de tamaños por respuesta escrita):**
+  - `fixture_observations`: ~190 B de heap y ~95–155 B de índices por observación (**~290–345 B en total**); en el bootstrap, 297 B por observación con 100 000 y 279 B con 1 000 000;
+  - `fixtures` no crece en heap (HOT y espacio libre); sus índices solo crecen con inserciones y actualizaciones no-HOT;
+  - `replay` no crece nada.
+
+### C.4 Techo de parámetros (puerta obligatoria)
+
+Una sola respuesta creciente (una llamada a `ensure_teams` + `upsert_fixtures`, siempre con rollback):
+
+| | Mayor que funciona | Primer fallo | Parámetros en el mayor | Tiempo cerca del techo | Pico de asignaciones Python |
+|---|---:|---:|---:|---:|---:|
+| A6 | **2729** | **2730** (65 541 parámetros) | 65 517 | 3,8–5,9 s (2700); 4,4–6,9 s (2715–2729) | 114 MiB (2700) |
+| Base | 2977 | 2978 (65 537 parámetros) | 65 515 | 1,4–1,5 s (2700–2977) | 66 MiB (2750) |
+
+- **Modo de fallo (MEDIDO):** `psycopg.OperationalError: sending query and params failed: number of parameters must be between 0 and 65535`, en el cliente y **antes de enviar** el INSERT de `fixtures`, que es la sentencia más ancha (24 parámetros por fila; hashes 16, observaciones 21). La transacción se deshace entera: no queda nada a medias. En la sync se aísla como el fallo de esa competición.
+- **Lotes del laboratorio:** con temporadas de 380, el máximo de parámetros por sentencia en cualquier lote fue **9141** (14 % del techo).
+- **Memoria:** solo asignaciones Python (`tracemalloc`, en un pase aparte). RSS y memoria del servidor: NO MEDIDO.
+- **Troceado:** **no es necesario** con las respuestas conocidas (temporadas de liga de ~380; algo más en ligas de 24 equipos o con fases). No hay evidencia de respuestas por encima de ~1000. **No se ha implementado.** Si algún día hiciera falta, trocear **solo las sentencias** dentro de la misma transacción y con el mismo `evidence_id`, manteniendo el orden por `external_id`, no cambiaría la atomicidad de la respuesta, la identidad de la evidencia, el rollback, `UpsertCounts` ni `PARITY`. Trocear la respuesta en varias transacciones o evidencias **sí** los cambiaría y exigiría revisión.
+
+### C.5 Bootstrap de `0008` (para el runbook)
+
+- **MEDIDO** (`alembic upgrade` completo, sin escritores): **5,65 s con 100 000** partidos y **62,3 s con 1 000 000** (~0,06 ms por partido, lineal).
+- El bloqueo `ACCESS EXCLUSIVE` sobre `fixtures` dura todo ese tiempo, así que la ventana de quiescencia del [runbook](#runbook-de-bootstrap-de-0008) tiene que cubrirlo con margen.
+- Tamaño creado de `fixture_observations`: 29,7 MB (100 000) y 279 MB (1 000 000).
+
+### C.6 Lectura `STRICT_KNOWLEDGE`
+
+Se mide `strict_knowledge()` real (consulta + construcción de los tipos) con ids aleatorios y tres cortes: antes de toda la historia (todo `UNKNOWN_AT_T`), la mediana de `observed_at` y después de todo (`KNOWN`, con un 10 % de `TEMPORAL_AMBIGUITY` en la historia ampliada). Historias: 100 000 partidos con ~0,7 M observaciones (1 por partido más las de las escrituras), los mismos con ~1,6 M (10 por partido tras la preparación) y 1 000 000 de partidos con ~1,15 M.
+
+| Partidos pedidos | Corte | p50 (ms) | Notas |
+|---:|---|---:|---|
+| 1–10 | cualquiera | 0,7–1,1 | índice siempre |
+| 380 | todo `UNKNOWN_AT_T` | 1,9–2,1 | índice siempre |
+| 380 | `KNOWN` | 7–13 | p95 de hasta 149 ms (ver el riesgo) |
+| 1000 | `KNOWN` | 19–30 | |
+| 10 000 | todo `UNKNOWN_AT_T` | 22–31 | |
+| 10 000 | `KNOWN` | 180–282 | ~55–60 % es construir los tipos en Python |
+
+- **Riesgo de plan (MEDIDO; hallazgo principal de la lectura):**
+  - con ≥ 380–1000 partidos y un corte poco selectivo, el **plan personalizado** elige un **Seq Scan de toda `fixture_observations`** con hash join: 54–185 ms con 0,7–1,6 M observaciones, y crece con la historia;
+  - ese plan se usa en las primeras ejecuciones de cada conexión, antes de que psycopg prepare la sentencia, y en cualquier proceso de un solo uso. Las muestras crudas lo muestran: las 5 primeras de 380 tardan 115–143 ms y las siguientes 11–15 ms (plan genérico, búsqueda por índice);
+  - causa: el planificador sobrestima los grupos del agregado (12 798 estimados frente a 380 reales);
+  - **el índice existe y se usa: no falta índice ni esquema.**
+- **Experimento de plan** (otra BD desechable con 100 000 partidos y 1,01 M observaciones; las variantes devuelven las mismas filas, comprobado fila a fila):
+  - el plan genérico usa el índice en todos los casos (1000: ~4 ms; 10 000: ~36–39 ms);
+  - una variante `LATERAL` no cambia nada (el planificador la aplana);
+  - repetir el filtro en el lado externo arregla 1000 (78 → 7 ms con plan personalizado), pero no 10 000, y empeora el plan genérico con 10 000 (36 → 83–101 ms);
+  - **no hay una corrección evidente y no se ha cambiado la lectura**, que es código de producción del Checkpoint B.
+
+### C.7 Regresión semántica
+
+- Las validaciones de cada caso se cumplieron en todas las muestras:
+  - el estado ganador es siempre una observación real;
+  - la evidencia antigua nunca sobrescribe;
+  - la repetición exacta no crea filas ni actualiza;
+  - el empate solo cambia `fixtures` una vez por instante; después, todas las respuestas pierden o empatan.
+- **Suite completa combinada** tras los cambios de herramientas: **1323 passed, 0 failed, 0 skipped, 0 errors, 1 warning** (`StarletteDeprecationWarning`, ajeno). 1323 = 1309 + 14 tests nuevos del laboratorio.
+- **Tests dirigidos del laboratorio:** 83 passed y 1 skipped (un test de BD, sin `TEST_DATABASE_URL` en esa ejecución).
+
+### C.8 Propuestas para el Chief (no aceptadas)
+
+- **Línea base representativa:** una respuesta de una temporada (380), 100 000–1 000 000 de partidos, laboratorio local caliente y un cliente. Base ~175 ms; A6 450–490 ms p50 y 476–533 ms p95.
+- **Carga normal esperada:** `ops-live` cada hora, con una respuesta de ~380 por liga seguida: ~0,46 s por liga (frente a ~0,18 s), casi siempre sin cambio de datos (confirmación).
+  - **Crecimiento por confirmaciones (DERIVADO):** 380 observaciones × ~290 B ≈ 110 KB y ~308 KB de WAL por liga y hora; **~2,6 MB al día y ~0,96 GB al año de observaciones por liga activa** (~3,3 M filas al año).
+  - Es el coste de guardar cada confirmación como evidencia, que el contrato exige. El contrato **no** define retención ni compactación.
+- **Cargas patológicas:**
+  - confirmaciones masivas (WAL 3,7–5,3× la base);
+  - lotes de 2000 seguidos sobre las mismas páginas (HOT de confirmaciones al 64 %);
+  - lecturas `KNOWN` de ≥ 1000 partidos en una conexión nueva (Seq Scan);
+  - 10 000 partidos en una lectura (~0,2–0,3 s).
+- **Cargas límite:** una respuesta de más de 2000 partidos (2,5–7 s y más de 60 MiB de Python); el techo duro es 2729.
+- **Umbrales propuestos:** medidos en local, con caché caliente y un cliente. Neon tendrá otra latencia, así que hay que volver a medir allí antes de aceptar nada.
+
+| Métrica | Propuesta | Evidencia | Por qué importa | Margen |
+|---|---|---|---|---|
+| Escritura de una respuesta de 380 (total) | p50 ≤ 600 ms, p95 ≤ 750 ms | p50 450–490, p95 476–533 (100 000 y 1 000 000) | presupuesto por liga de la pasada horaria | ~25 % sobre p50, ~40 % sobre p95 |
+| Sobrecoste frente a la base (380) | ≤ 3,0× p50 | 2,58–2,88× | detecta regresiones del escritor | ~5–15 % |
+| WAL por partido confirmado / actualizado | ≤ 1,0 KB / ≤ 1,4 KB p50 | 811 B / 1117 B | WAL y almacenamiento de Neon | ~25 % |
+| HOT de confirmaciones (lotes ≤ 1000) | ≥ 90 % | 93–100 % | evita que crezcan los índices de `fixtures` | ~3–10 puntos |
+| Almacenamiento por observación | ≤ 350 B (heap + índices) | 279–345 B | proyección de crecimiento | ~0–20 % |
+| Partidos por respuesta | ≤ 2000 operativo; techo duro 2729 | ceiling | evita que falle la competición entera | 27 % bajo el techo |
+| Bootstrap | ≤ 0,1 ms por partido, en quiescencia | 0,056–0,062 | ventana del runbook | ~40 % |
+| Hash en el servidor | ≤ 10 µs por fila | 5,7–6,6 µs | detecta cambios de plataforma | ~35 % |
+| Lectura estricta con ≤ 380 partidos | ≤ 15 ms p50 y **sin Seq Scan** en el plan personalizado | 7–13 ms; plan por índice ≤ 1,5 ms | features por temporada | ~15 %; **la condición de plan no se cumple con ≥ 1000** |
+
+### C.9 Riesgos abiertos
+
+- **Plan de la lectura estricta** (C.6): Seq Scan en planes personalizados con ≥ 1000 partidos y un corte poco selectivo. Opciones para decidir (ninguna implementada):
+  - limitar cada lectura a ≤ 380 partidos dentro de **una** transacción `REPEATABLE READ` (varias consultas en `READ COMMITTED` podrían ver evidencia antigua insertada entre medias);
+  - forzar el plan genérico en esa sentencia;
+  - rediseñar la forma de la consulta, con más medición.
+- **Crecimiento por confirmaciones** (C.8): ~1 GB al año por liga activa, sin política de retención en el contrato.
+- **Coste en Python del escritor** (~2,6×): domina la compilación de sentencias multi-VALUES. Cualquier optimización (incluida UNNEST, DI-A3F) sigue **PLANNED** y necesita una decisión aparte.
+- **No medido:** Neon/WAN, escritores concurrentes, caché fría, RSS y memoria del servidor.
+- **Siguen abiertos:** el hueco aceptado y no bloqueante del test dedicado de rollback por error de BD en el backfill, y la versión de PostgreSQL de Neon.
+- **Siguiente punto seguro:** decisión del Chief sobre los dos hallazgos (plan de lectura y retención) y sobre los umbrales propuestos; después, si se autoriza, repetir las mediciones clave en el entorno de destino. DI-A6 **no** está aceptado para producción.
 
 ## Auditoría hecha
 
