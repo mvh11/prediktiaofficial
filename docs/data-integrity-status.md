@@ -691,7 +691,7 @@ Se mide `strict_knowledge()` real (consulta + construcción de los tipos) con id
 
 ### C.11 `UpsertCounts` exactos con escritores concurrentes (opción A)
 
-**Estado:** implementada y validada en local por autorización del Chief; **pendiente de revisión del Chief**. Aceptación de A6 para producción: **HOLD**. Sin cambio de esquema (cabeza única `0008`, `0009` sin crear), sin UNNEST, sin advisory locks, sin `xmax`, sin `RETURNING OLD/NEW` de PG18 y sin cambiar el aislamiento (READ COMMITTED).
+**Estado:** implementada y validada en local; **ACEPTADA por el Chief** (bloqueo de corrección de `UpsertCounts` CERRADO; momento de los bloqueos de fila aceptado; ver el [cierre de sesión](#cierre-de-sesión-di-a6-2026-10-07)). Aceptación de A6 para producción: **HOLD**. Sin cambio de esquema (cabeza única `0008`, `0009` sin crear), sin UNNEST, sin advisory locks, sin `xmax`, sin `RETURNING OLD/NEW` de PG18 y sin cambiar el aislamiento (READ COMMITTED).
 
 - **Commits:**
   - `e2c8a5a`: corrección en `fixture_repository.upsert_fixtures`;
@@ -751,7 +751,7 @@ Se mide `strict_knowledge()` real (consulta + construcción de los tipos) con id
 
 ### C.12 Transporte UNNEST en el escritor de la opción A (candidato de producción)
 
-**Estado:** implementado y validado en local por autorización del Chief; **candidato de producción pendiente de decisión del Chief**. Aceptación de A6 para producción: **HOLD**. Sin cambio de esquema (cabeza única `0008`, `0009` sin crear), sin migraciones, sin advisory locks, sin `xmax`, sin `RETURNING OLD/NEW` de PG18 y sin cambiar el aislamiento.
+**Estado:** implementado y validado en local; candidato de producción **aceptado en local por el Chief** (puerta local y de concurrencia de UNNEST CERRADA; ver el [cierre de sesión](#cierre-de-sesión-di-a6-2026-10-07)). Aceptación de A6 para producción: **HOLD**. Sin cambio de esquema (cabeza única `0008`, `0009` sin crear), sin migraciones, sin advisory locks, sin `xmax`, sin `RETURNING OLD/NEW` de PG18 y sin cambiar el aislamiento.
 
 - **Commits:**
   - `7a8643f`: el transporte (`app/repositories/bulk_rows.py`) y su uso en `fixture_repository` y `provider_mapping_repository`;
@@ -805,14 +805,47 @@ Se mide `strict_knowledge()` real (consulta + construcción de los tipos) con id
   - con UNNEST, el máximo de parámetros enlazados en una sentencia es igual al número de partidos: solo quedan las listas `IN`;
   - una sola respuesta funciona con 2730, 4000, 5000, 10 000 y 20 000 partidos (20 000: 3,7 s y 96 MiB), siempre con rollback;
   - el siguiente límite técnico serían las listas `IN` (~65 535 ids por sentencia): DERIVADO, no medido;
-  - **la política no cambia:** tope operativo **≤ 2000** y techo duro global **2729**. Subirlos exige una decisión aparte del Chief.
-- **Revisión de Modular:** `3c5f12a` (tests del rollback del backfill) sigue **PENDIENTE** de la revisión de comportamiento del dueño de Modular. UNNEST no cambia el comportamiento del backfill (paridad de su suite y de `PARITY`).
+  - **la política no cambia:** tope operativo **≤ 2000** y techo de la política de seguridad **2729** (no es el límite físico de UNNEST). Subirlos exige una decisión aparte del Chief.
+- **Revisión de Modular:** `3c5f12a` (tests del rollback del backfill) y `7a8643f` (solo la superficie compartida `upsert_origin_mappings` / sync de catálogo) siguen **PENDIENTES** de la revisión de comportamiento del dueño de Modular. UNNEST no cambia el comportamiento del backfill (paridad de su suite y de `PARITY`).
 - **Puertas que siguen abiertas:**
   - decisión del Chief sobre este candidato;
   - nueva medición en el entorno de destino;
   - arquitectura de almacenamiento y particionado de la evidencia;
   - verificación empírica en PostgreSQL 14–17 (aquí solo 18.6; `unnest()` de varios arrays y `INSERT ... SELECT ... ON CONFLICT` están documentados desde mucho antes de la 14);
   - revisión de Modular de `3c5f12a`.
+
+### Cierre de sesión DI-A6 (2026-10-07)
+
+Estado vigente de DI-A6. Sustituye a los "pendiente de decisión" de C.11 y C.12. **VERIFICADO** = comprobado en este repositorio, con Git o con tests; **REPORTADO** = comunicado por otro carril autorizado y no comprobado aquí; **PENDIENTE** = revisión externa o trabajo futuro.
+
+- **Decisiones del Chief** (comunicadas en esta sesión):
+  - opción A **ACEPTADA**: `UpsertCounts` exactos con escritores concurrentes; el bloqueo de corrección de `UpsertCounts` queda **CERRADO**;
+  - el cambio de momento de los bloqueos de fila (`SELECT ... FOR UPDATE ORDER BY external_id`) queda **aceptado**;
+  - hueco del test de rollback por error de BD: **CERRADO**;
+  - UNNEST: candidato de producción **aceptado en local**; la puerta local y de concurrencia de UNNEST queda **CERRADA**;
+  - implementación local de A6: **ESTABLE**;
+  - **aceptación de A6 para producción: HOLD**.
+- **Política vigente:**
+  - tope operativo **≤ 2000** partidos por respuesta;
+  - **2729 es el techo de la política de seguridad**, no el límite físico de UNNEST. Es el último tamaño que funcionó con el transporte VALUES (C.4). Con UNNEST funcionan respuestas de 20 000 (C.12), pero la política no cambia sin otra decisión del Chief.
+- **VERIFICADO** (repositorio, Git y tests de esta sesión):
+  - rama `feature/data-integrity-a6`, HEAD de implementación `f1396ad` (código igual que `afa686c`; `f1396ad` es solo documentación), worktree limpio;
+  - **Alembic:** cabeza única **`0008`**; **`0009` ausente**, reservada para DI-A5D;
+  - **DI-A5D: no iniciado**;
+  - **suite completa combinada** sobre el código de `afa686c`: **1355 passed, 0 failed, 0 skipped, 0 errors**, 1 warning ajeno (PostgreSQL 18.6 local desechable, nunca Neon);
+  - dirigidas: 696 passed; concurrencia de la opción A con UNNEST: 24/24; paridad diferencial VALUES frente a UNNEST: contadores e instantánea idénticos;
+  - rendimiento local (C.12): UNNEST 5,9–7,0× más rápido que la opción A con VALUES desde lotes de 380 (p50 ~72 ms con 380), WAL sin cambio y HOT ≥ 90 % en estado estable;
+  - **publicación:** la referencia de seguimiento local `origin/feature/data-integrity-a6` apunta a `f1396ad` y la rama tiene ese upstream configurado. Esa referencia solo cambia con un push o un fetch correctos. La comprobación contra el remoto en vivo (`git ls-remote`) no se pudo ejecutar en esta sesión: el push y esa comprobación los bloqueó el control de permisos del agente, y el push lo hizo después el usuario a mano.
+- **REPORTADO:** los resultados de DI-A3F (`7a521fe`, cierre `e04cd9e`, en `feature/data-integrity-a3f`), usados como origen del mecanismo UNNEST. Aquí se volvió a medir y a validar el escritor portado; las cifras de DI-A3F no se han repetido como tales.
+- **PENDIENTE:**
+  - **revisión de comportamiento de Modular** (dueño de Modular), ninguna aprobada:
+    - `3c5f12a`: adaptación de tests del rollback por error de BD en el backfill;
+    - `7a8643f`: **solo** la superficie compartida `upsert_origin_mappings`, que también usa la sync de catálogo (mismo comportamiento, otro transporte);
+  - **nueva medición en el entorno de destino**;
+  - **arquitectura de almacenamiento y particionado de la evidencia**;
+  - verificación empírica en PostgreSQL 14–17 (aquí solo 18.6);
+  - **aceptación de A6 para producción: HOLD.**
+- **Siguiente paso autorizado:** esperar la revisión del dueño de Modular o la siguiente sesión del Chief. Sin push nuevo, sin merge a `main`, sin migraciones, sin Neon y sin DI-A5D.
 
 ## Auditoría hecha
 
