@@ -137,13 +137,30 @@ def test_workflow_schedule_task_and_concurrency(task):
     assert not any(f"ops_tick {o}" in raw for o in others)  # selección de tarea inequívoca
 
 
+SECRET_LIKE = re.compile(r"postgres(ql)?(\+\w+)?://|npg_|neon\.tech|x-apisports-key|[0-9a-f]{32}", re.I)
+# Única excepción: el SHA de 40 hex de una action fijada (`uses: owner/repo@<sha>`); el resto de la línea se sigue escaneando.
+PINNED_ACTION_SHA = re.compile(r"^(\s*(?:-\s+)?uses:\s+[\w.-]+/[\w.-]+@)[0-9a-f]{40}(?=\s|$)", re.M)
+
+
+def _secret_like(raw):
+    return SECRET_LIKE.search(PINNED_ACTION_SHA.sub(r"\1<sha>", raw))
+
+
 @pytest.mark.parametrize("task", ["catalog", "live", "stats"])
 def test_workflow_secrets_are_referenced_never_materialized(task):
     raw, wf = _workflow(task)
     env = wf["jobs"]["tick"]["env"]
     for name in ("DATABASE_URL", "API_FOOTBALL_KEY", "PREDIKTIA_EXPECTED_DB_TARGET"):
         assert env[name] == "${{ secrets.%s }}" % name
-    assert not re.search(r"postgres(ql)?(\+\w+)?://|npg_|neon\.tech|x-apisports-key|[0-9a-f]{32}", raw, re.I)
+    assert not _secret_like(raw)
+
+
+def test_secret_scan_ignores_only_pinned_action_shas():
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    assert not _secret_like(f"    steps:\n      - uses: actions/checkout@{sha} # v4.4.0\n")
+    assert _secret_like(f"    env:\n      TOKEN: {sha}\n")  # mismo hex fuera de `uses:` se detecta
+    assert _secret_like(f"      - run: echo {sha}\n")
+    assert _secret_like(f"      - uses: actions/checkout@{sha} # {sha[:32]}\n")  # el resto de la línea se escanea
 
 
 # --- Separación y subprocesos ------------------------------------------------------------------
