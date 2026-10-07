@@ -470,7 +470,7 @@ Desde C6 hay un scheduler que escribe fixtures cada hora en producción. Antes d
 
 ## DI-A6: Checkpoint C (G2, medición primero)
 
-**Estado:** Checkpoint B **CERRADO** (Chief). Checkpoint C **hecho en lo medible y pendiente de decisión del Chief**: hay dos hallazgos que piden decisión (plan de la lectura estricta y crecimiento por confirmaciones). Rama `feature/data-integrity-a6`, **sin push**. **Sin cambios de producción, sin cambio de esquema** (cabeza única `0008`, `0009` sin crear) y **sin UNNEST**. Estas mediciones son **A6** y no se mezclan con la evidencia histórica de A3B/A3C/A3D (README de `perf_lab`). **Ningún umbral está aceptado:** los de abajo son propuestas.
+**Estado:** Checkpoint B **CERRADO** (Chief). Checkpoint C **CERRADO** por el Chief; aceptación de A6 para producción: **HOLD** (ver [la decisión](#c10-decisión-del-chief-checkpoint-c-cerrado)). Registro original de la medición: rama `feature/data-integrity-a6`, **sin push**. **Sin cambios de producción, sin cambio de esquema** (cabeza única `0008`, `0009` sin crear) y **sin UNNEST**. Estas mediciones son **A6** y no se mezclan con la evidencia histórica de A3B/A3C/A3D (README de `perf_lab`). Las propuestas de C.8 fueron la base de los umbrales de desarrollo local aceptados en C.10.
 
 - **Commits:** `1d36e9e` (laboratorio: compatibilidad con `0008` y suites `a6`; solo herramientas) y `228376b` (tests del laboratorio sin conexiones). Este registro va en el commit de documentación siguiente.
 - **Qué se rompía en el laboratorio con `0008` y cómo se resolvió (sin tocar producción):**
@@ -593,7 +593,7 @@ Se mide `strict_knowledge()` real (consulta + construcción de los tipos) con id
 - **Suite completa combinada** tras los cambios de herramientas: **1323 passed, 0 failed, 0 skipped, 0 errors, 1 warning** (`StarletteDeprecationWarning`, ajeno). 1323 = 1309 + 14 tests nuevos del laboratorio.
 - **Tests dirigidos del laboratorio:** 83 passed y 1 skipped (un test de BD, sin `TEST_DATABASE_URL` en esa ejecución).
 
-### C.8 Propuestas para el Chief (no aceptadas)
+### C.8 Propuestas para el Chief (registro previo a la decisión; ver C.10)
 
 - **Línea base representativa:** una respuesta de una temporada (380), 100 000–1 000 000 de partidos, laboratorio local caliente y un cliente. Base ~175 ms; A6 450–490 ms p50 y 476–533 ms p95.
 - **Carga normal esperada:** `ops-live` cada hora, con una respuesta de ~380 por liga seguida: ~0,46 s por liga (frente a ~0,18 s), casi siempre sin cambio de datos (confirmación).
@@ -629,7 +629,65 @@ Se mide `strict_knowledge()` real (consulta + construcción de los tipos) con id
 - **Coste en Python del escritor** (~2,6×): domina la compilación de sentencias multi-VALUES. Cualquier optimización (incluida UNNEST, DI-A3F) sigue **PLANNED** y necesita una decisión aparte.
 - **No medido:** Neon/WAN, escritores concurrentes, caché fría, RSS y memoria del servidor.
 - **Siguen abiertos:** el hueco aceptado y no bloqueante del test dedicado de rollback por error de BD en el backfill, y la versión de PostgreSQL de Neon.
-- **Siguiente punto seguro:** decisión del Chief sobre los dos hallazgos (plan de lectura y retención) y sobre los umbrales propuestos; después, si se autoriza, repetir las mediciones clave en el entorno de destino. DI-A6 **no** está aceptado para producción.
+- **Siguiente punto seguro (antes de la decisión):** decisión del Chief sobre los dos hallazgos y los umbrales. Decidido: ver C.10.
+
+### C.10 Decisión del Chief (Checkpoint C CERRADO)
+
+**Checkpoint C: CERRADO. Aceptación de A6 para producción: HOLD.** La línea base local de A6 está completa. Esta decisión sustituye a las propuestas de C.8 y a las opciones de C.9 donde difieran.
+
+**Umbrales aceptados para desarrollo local** (mismo entorno que C.1–C.6; no valen como aceptación para producción):
+
+| Métrica | Umbral aceptado |
+|---|---|
+| Escritura de una respuesta de 380 | p50 ≤ 600 ms; p95 ≤ 750 ms |
+| Sobrecoste frente a pre-A6 | ≤ 3,0× |
+| WAL por partido confirmado | ≤ 1,0 KB |
+| WAL por partido actualizado | ≤ 1,4 KB |
+| HOT de confirmaciones | ≥ 90 % con lotes ≤ 1000 |
+| Almacenamiento por observación | ≤ 350 B |
+| Respuesta operativa soportada | ≤ 2000 partidos |
+| Techo duro de parámetros | 2729 partidos por respuesta |
+| 2730 o más partidos por respuesta | no soportado con el escritor actual (VALUES) |
+| Bootstrap | ≤ 0,1 ms por partido |
+| Hash | ≤ 10 µs por fila |
+
+**Política temporal de la lectura estricta:**
+
+- **Tope temporal por ejecución:** ≤ 380 partidos en una sola llamada a `STRICT_KNOWLEDGE`.
+- **Objetivo local en estado estable (sentencia preparada):** p50 ≤ 15 ms.
+- **Sin troceado automático** todavía.
+- **Sin rediseño de la consulta:** no está autorizado.
+- **No hay criterio absoluto** de "ningún Seq Scan en ningún plan personalizado".
+- Un Seq Scan persistente o patológico **sigue siendo un riesgo de rendimiento** (C.6).
+
+**Puerta del entorno de destino:**
+
+- Antes de aceptar A6 para producción hay que **volver a medir en el entorno de destino**.
+- Solo en Neon no productivo aislado o equivalente, y **solo cuando se autorice**.
+- **No** se autoriza usar datos de producción ni ejecutar la migración en producción.
+
+**Crecimiento de la evidencia (hallazgo de C.8):**
+
+- **Sin compactación, sin borrado y sin fusión de observaciones.** Las observaciones inmutables se conservan intactas.
+- **Tema de arquitectura futuro:** particionado, archivado, ciclo de vida del almacenamiento y escalado de índices y almacenamiento.
+- Cualquier política que destruya evidencia requiere una **revisión aparte del Chief**.
+
+**UNNEST:**
+
+- `UNNEST_USED`: **NO**.
+- Adopción de UNNEST en producción: **NO AUTORIZADA en A6**.
+- **DI-A3F** se puede reconsiderar por separado, ahora que existe la línea base de A6.
+
+**Puertas abiertas de A6** (ninguna resuelta):
+
+1. **Clasificación de `UpsertCounts` con escritores concurrentes.**
+   - Validar que `created` / `updated` / `unchanged` son exactos con escritores que compiten.
+   - Si se reproduce un comportamiento incorrecto, devolver la corrección más pequeña que preserve el contrato, para revisión del Chief.
+2. **Hueco del test dedicado de rollback por error de BD** (backfill): aceptado como no bloqueante, pero sigue registrado.
+3. **Nueva medición en el entorno de destino:** obligatoria antes de aceptar A6 para producción.
+4. **Arquitectura de almacenamiento y particionado de la evidencia:** obligatoria antes de un despliegue amplio, prolongado y de alta frecuencia.
+
+- **Siguiente punto seguro:** esperar la decisión del Chief sobre cuál de las puertas abiertas se aborda primero. DI-A6 **no** está aceptado para producción.
 
 ## Auditoría hecha
 
