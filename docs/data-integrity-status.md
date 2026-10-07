@@ -305,7 +305,7 @@ Dentro de `0008`, después del DDL:
 4. `UPDATE fixtures SET last_observed_at = bootstrap_at, last_state_hash = <mismo hash>`.
 5. `SET NOT NULL`.
 
-- **Requisito operativo:** ejecutar la migración con las syncs y los backfills parados.
+- **Requisito operativo:** ejecutar la migración con las syncs y los backfills parados. Lista concreta tras el scheduler C6: [runbook de `0008`](#runbook-de-bootstrap-de-0008).
 - **`downgrade`:** borra la tabla, las columnas y la función.
 
 ### A6C: decisiones ratificadas (G1–G3)
@@ -394,7 +394,33 @@ Ratificadas por el Chief el 2026-10-06. Todas son **[FROZEN]** y ya están en lo
     - **Checkpoint C:** `perf_lab`, mediciones y techo de parámetros.
     - Revisión de Modular.
     - Versión de PostgreSQL de Neon.
-  - **Hecho nuevo:** `origin/feature/modular-data-m43` ya está en `eb4c33c`, no en el `b72b036` que contiene esta rama (visto con `ls-remote`, sin fetch). Antes de la revisión de Modular o de cualquier integración hay que mapear esos commits hacia delante, sobre todo si tocan `history_backfill_service.py`, `upsert_fixtures` o las migraciones.
+  - **Hecho nuevo:** `origin/feature/modular-data-m43` ya está en `eb4c33c`, no en el `b72b036` que contiene esta rama (visto con `ls-remote`, sin fetch). Antes de la revisión de Modular o de cualquier integración hay que mapear esos commits hacia delante, sobre todo si tocan `history_backfill_service.py`, `upsert_fixtures` o las migraciones. **Resuelto:** ver [reconciliación con `main`](#reconciliación-hacia-delante-con-main-a92e8a3).
+
+### Reconciliación hacia delante con `main` (`a92e8a3`)
+
+**Estado:** hecha en `feature/data-integrity-a6`, **sin push**. Nueva base hacia delante: **`origin/main@a92e8a3`** (PR #1 `integration/di-modular-c6`, que absorbe Modular `c3e2a23`, C6 scheduler y M5.6B reconciliador live de estadísticas; PR #2, entorno `production` en los workflows `ops-*`). Sin rebase: los commits de A6 conservan su identidad.
+
+- **Auditoría previa** de `c3e2a23..a92e8a3`: linaje válido; `main` no toca `fixture_repository.py`, `fixture_sync_service.py`, `history_backfill_service.py`, modelos, esquemas ni migraciones. El único choque es semántico: dos helpers nuevos de tests de Modular llamaban a `upsert_fixtures` sin evidencia.
+- **Merge real:** `3692b59` (`--no-ff`, sin conflictos).
+- **Compatibilidad, marcado `[MODULAR-REVIEW]`:** `7e4af3e`. Solo `backend/tests/test_ops_tick.py` (`add_ft`) y `backend/tests/test_statistics_reconcile.py` (`add_fixtures`): pasan `make_evidence()` / `make_evidence(provider=PROVIDER)`, igual que `1920590`. Sin cambios de producción, estadísticas, scheduler ni escritores.
+- **Migraciones:** cabeza única **`0008`** (`0008 → 0007`). **`0009`** sigue reservada para DI-A5D, sin crear.
+- **Tests** (PostgreSQL 18.6 local desechable, `127.0.0.1:55443`; nunca Neon):
+  - dirigidos (`test_ops_tick.py` + `test_statistics_reconcile.py`): 128 passed, 0 skipped;
+  - **suite completa combinada sobre `7e4af3e`:** **1285 passed, 0 failed, 0 skipped, 0 errors, 1 warning** (`StarletteDeprecationWarning` de `fastapi.testclient`, ajeno). 1285 = 1156 de A6 + 129 tests que trae `main`.
+- **Revisión de Modular:** **PENDIENTE.** Paquete: `7c41705`, `1920590` y `7e4af3e`.
+- **Checkpoint B:** **HOLD.** **DI-A5D:** **HOLD.**
+
+### Runbook de bootstrap de `0008`
+
+Desde C6 hay un scheduler que escribe fixtures cada hora en producción. Antes de ejecutar el bootstrap de `0008` en un entorno operativo (nunca se ha ejecutado en Neon ni en producción):
+
+1. **`PREDIKTIA_SCHEDULER_ENABLED`** (variable del repositorio en GitHub) **no puede valer `true`**. Es la única puerta de `ops-live`, `ops-catalog` y `ops-stats`, también para `workflow_dispatch`.
+2. **`SYNC_ENDPOINTS_ENABLED`** debe ser **`false` o no estar definida** en la API desplegada (`POST /sync/catalog` y `/sync/fixtures`).
+3. **Sin ejecuciones activas** de `ops-live`, `ops-catalog` ni `ops-stats`. La puerta no detiene un run ya en curso. `ops-stats` cuenta aunque no escriba fixtures: sus FK a `fixtures` chocan con el `LOCK TABLE`.
+4. **Sin ejecuciones manuales** de `live_sync`, `history_backfill`, `statistics_reconcile` ni `statistics_backfill`.
+5. **Comprobar que no hay nada en curso:** ningún run de GitHub Actions de `ops-*` en ejecución y ninguna fila `running` en `live_sync_runs`, `season_backfill_runs` ni `statistics_runs`.
+
+**La quiescencia de escritores es obligatoria.** El `lock_timeout` de 5 s y el rollback de la migración son solo una protección de último recurso: evitan un estado a medias, pero no sustituyen a parar los escritores.
 
 ## Auditoría hecha
 
