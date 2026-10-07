@@ -24,7 +24,7 @@ from app.models import (
 from app.repositories import catalog_repository
 from app.schemas.catalog import SeasonData
 from app.services import history_backfill_service as service
-from tests.conftest import make_competition, make_fixture_data
+from tests.conftest import make_competition, make_evidence, make_fixture_data
 
 pytestmark = pytest.mark.db
 
@@ -207,7 +207,7 @@ def test_external_id_in_other_season_blocks_before_upsert(db_session, setup):
     from app.repositories import fixture_repository
 
     team_ids = fixture_repository.ensure_teams(db_session, [service_fixture.home_team, service_fixture.away_team], "api-football")
-    fixture_repository.upsert_fixtures(db_session, setup["current_season_id"], [service_fixture], team_ids, "api-football")
+    fixture_repository.upsert_fixtures(db_session, setup["current_season_id"], [service_fixture], team_ids, "api-football", make_evidence())
     db_session.flush()
     before = domain_counts(db_session)
 

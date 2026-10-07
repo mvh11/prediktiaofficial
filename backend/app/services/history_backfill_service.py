@@ -11,7 +11,9 @@ Flujo de run_backfill:
    temporada actual (esa la gestiona el sync vivo), está cerrada (end_date conocida y anterior a
    hoy) y no tiene ya un backfill `completed` salvo --refresh. La transacción se cierra ANTES
    de llamar al proveedor.
-3. Descarga de la temporada del proveedor, sin transacción de BD abierta.
+3. Descarga de la temporada del proveedor, sin transacción de BD abierta. Al recibirla se crea su
+   evidencia (DI-A6): un FixtureEvidence(source='backfill') con el instante real de recepción,
+   nunca el `now` del run, la fecha de la temporada ni el kickoff.
 4. Transacción de escritura: bloquea el propio run (FOR UPDATE; si otro proceso lo cambió, no se
    escribe nada) y revalida las precondiciones del paso 2.
 5. Análisis contra el estado actual, solo con lecturas: contadores nuevo/existente/cambiaría/
@@ -23,7 +25,9 @@ Flujo de run_backfill:
 8. Ejecución real: equipos (ensure_teams), fixtures (upsert no destructivo), mapeos y
    season_teams. Teams, mapeos y fixtures reciben a TODOS los participantes; season_teams solo a
    los miembros. Después Q2 (la temporada no pierde fixtures), Q13 y PARITY (cada recibido quedó
-   como se previó). Si alguno bloquea: rollback y status=blocked. Si todo pasa: el run se cierra
+   como se previó, con la regla de orden de DI-A6: un partido cuya evidencia no supera la que fijó
+   su estado queda como estaba; y hay exactamente una observación de esta evidencia por partido
+   recibido). Si alguno bloquea: rollback y status=blocked. Si todo pasa: el run se cierra
    como completed EN LA MISMA transacción y se hace commit; un error de BD: rollback y failed.
 9. Los demás cierres (blocked, failed, dry_run_completed) van en otra transacción.
 
@@ -47,6 +51,7 @@ from app.repositories import catalog_repository, fixture_repository
 from app.repositories.fixture_repository import _FIXTURE_COLUMNS, predict_score_values
 from app.schemas.backfill import BackfillResult, CheckResult, StaleRunRecovery
 from app.schemas.fixture import FixtureData
+from app.schemas.fixture_evidence import FixtureEvidence
 from app.services import history_quality_checks as qc
 from app.services.season_membership import season_members
 
@@ -233,6 +238,8 @@ async def _execute(
     except ProviderError as exc:
         result.status, result.error_message = "failed", f"Proveedor: {exc.message}"
         return False
+    # La respuesta acaba de llegar: su identidad y su observed_at (DI-A6), antes de abrir la transacción
+    evidence = FixtureEvidence.received("backfill", provider.name)
     identity = getattr(provider, "last_fixture_identity", None)
     fixtures = list({f.external_id: f for f in fetched}.values())
     external_ids = [f.external_id for f in fixtures]
@@ -313,12 +320,15 @@ async def _execute(
     try:
         teams = [f.home_team for f in fixtures] + [f.away_team for f in fixtures]
         team_ids = fixture_repository.ensure_teams(db, teams, provider.name)
-        fixture_repository.upsert_fixtures(db, result.season_id, fixtures, team_ids, provider.name)
+        keys_before = fixture_repository.ordering_keys(db, external_ids)
+        fixture_repository.upsert_fixtures(db, result.season_id, fixtures, team_ids, provider.name, evidence)
         member_ids = {team_ids[e] for e in membership.members}
         catalog_repository.link_teams_to_season(db, result.season_id, sorted(member_ids))
 
         mapped = runs.mapped_fixture_external_ids(db, provider.name, external_ids)
-        mismatched = _parity_mismatches(db, provider.name, fixtures, existing, result.season_id, team_ids)
+        mismatched = _parity_mismatches(
+            db, provider.name, fixtures, existing, result.season_id, team_ids, evidence, keys_before
+        )
         checks += [
             qc.q2_season_fixtures_kept(season_before, runs.season_fixture_external_ids(db, result.season_id)),
             qc.q13_mappings([e for e in external_ids if e not in mapped], False),
@@ -349,24 +359,36 @@ def _parity_mismatches(
     existing: dict[int, dict],
     season_id: int,
     team_ids: dict[int, int],
+    evidence: FixtureEvidence,
+    keys_before: dict[int, tuple],
 ) -> list[int]:
     """external_id de los partidos recibidos cuyo estado guardado no es el previsto.
 
     Para cada recibido, lo guardado debe ser predict_stored_values(fila previa o {}, entrante):
-    con {} es exactamente la semántica de un insert. Además, entre todos, los recibidos deben
-    tener exactamente un mapeo del proveedor por partido.
+    con {} es exactamente la semántica de un insert. Si la evidencia no supera la clave de orden
+    (last_observed_at, last_state_hash) que tenía el partido (DI-A6), lo previsto es la fila previa
+    sin cambios. Además, entre todos, los recibidos deben tener exactamente un mapeo del proveedor
+    y exactamente una observación de esta evidencia por partido.
     """
     external_ids = [f.external_id for f in fixtures]
     after = runs.existing_fixtures(db, external_ids)
+    incoming = [_incoming_row(f, season_id, team_ids) for f in fixtures]
+    hashes = fixture_repository.state_hashes(db, incoming)
+
+    def expected(f: FixtureData, row: dict, state_hash: bytes) -> dict:
+        stored = existing.get(f.external_id)
+        if stored is not None and not fixture_repository.evidence_wins(evidence, state_hash, keys_before.get(f.external_id)):
+            return {c: stored[c] for c in _COMPARED_COLUMNS}  # evidencia más antigua: no toca fixtures
+        return predict_stored_values(stored or {}, row)
+
     mismatched = [
         f.external_id
-        for f in fixtures
+        for f, row, state_hash in zip(fixtures, incoming, hashes)
         if f.external_id not in after
-        or any(
-            after[f.external_id].get(c) != v
-            for c, v in predict_stored_values(existing.get(f.external_id, {}), _incoming_row(f, season_id, team_ids)).items()
-        )
+        or any(after[f.external_id].get(c) != v for c, v in expected(f, row, state_hash).items())
     ]
+    if not mismatched and sorted(fixture_repository.observed_external_ids(db, evidence.evidence_id)) != sorted(external_ids):
+        mismatched = sorted(external_ids)[:1]  # observaciones de más o de menos: se marca el par
     if not mismatched and runs.provider_mapping_count(db, provider_name, external_ids) != len(external_ids):
         mismatched = sorted(external_ids)[:1]  # mapeos de más o de menos: se marca el par
     return mismatched
