@@ -1,6 +1,21 @@
 # Estado: desarrollo modular
 
-Rama actual `feature/modular-data-m43`, checkpoint conocido `6952425` (`6952425e0e84bf78d6bc414df85a4b3263d9ff89`). Ver [workstreams.md](workstreams.md) y [agent-rules.md](agent-rules.md), teniendo en cuenta la deuda documental de ownership registrada abajo.
+## Ciclo actual (desde el checkpoint conjunto DI-A6 + Modular)
+
+- **Baseline canónico:** `1c06ef9` (`origin/integration/di-a6-modular-final`), Alembic `0008` (cabeza única; `0009` reservada para DI-A5D). Rama de trabajo: `feature/modular-m57-stats-as-of`.
+- **M5.6** (reconciliador live + scheduler C6): implementado, publicado y verificado con smokes supervisados en producción. Pendiente de activación: piloto de 24 h, catch-up manual y alertas.
+- **M5.7A: lectura as-of de estadísticas** (`app/schemas/statistics_knowledge.py`, `app/repositories/statistics_knowledge_repository.py`, `app/services/statistics_as_of.py`). Solo lee; sin migración.
+  - **Selección:** por partido y proveedor, observaciones con `available_at <= T` (incluido); manda la más reciente por `(observed_at, id)`, el orden de versionado del esquema.
+  - **Reconstrucción:** los valores salen del raw de ESA observación con el normalizador vigente (parser del adapter). Nunca de `fixture_team_statistics` (estado actual fusionado) ni fusionando versiones.
+  - **Calidad:** se recalculan los checks de identidad y de valores del service; con algún BLOCKING el partido queda `BLOCKED`, sin valores. Si el hash del raw, la disponibilidad registrada o los BLOCKING que registró el run no se reproducen: `RECONSTRUCTION_MISMATCH`, sin valores y sin elegir ganador.
+  - **Estados:** `UNKNOWN_AT_T`, `AVAILABLE`, `PARTIAL`, `EMPTY` (evidencia válida, no ceros), `BLOCKED`, `RECONSTRUCTION_MISMATCH`.
+  - **Procedencia:** `HISTORICAL_SYNTHETIC` (`backfill`, `available_at = kickoff + 6 h`) u `OPERATIONAL` (`live`/`manual`, `available_at = observed_at`). `observed_after(T)` marca lo disponible por política pero recibido después de T.
+  - **Contexto prepartido** (`app/services/statistics_prematch.py`, capa pura aparte): corte = kickoff del objetivo; se excluyen el propio partido y los de kickoff igual o posterior.
+  - **Pendiente para M5.7B:** fuente del kickoff de contexto (STRICT_KNOWLEDGE de DI-A6), proyección de una observación frente a fusión as-of, y la deuda de refresh histórico (una revisión descubierta tarde también recibe `kickoff + 6 h`).
+
+El resto de este documento conserva el estado anterior a este ciclo.
+
+Rama anterior `feature/modular-data-m43`, checkpoint conocido `6952425` (`6952425e0e84bf78d6bc414df85a4b3263d9ff89`). Ver [workstreams.md](workstreams.md) y [agent-rules.md](agent-rules.md), teniendo en cuenta la deuda documental de ownership registrada abajo.
 
 ## Estado actual
 
