@@ -129,3 +129,10 @@ def test_dataset_labels_causes_and_test_period_exclusion(db_session, season):
     last = {c["window_fixture_id"]: c["cause"] for c in coverage if c["target_fixture_id"] == season[8006] and c["side"] == "home"}
     assert last == {season[8004]: NOT_AVAILABLE_AT_T, season[8003]: EXTRA_TIME, season[8002]: EXTRA_TIME,
                     season[8001]: USED, season[8000]: NEVER_INGESTED}
+
+
+def test_groupings_use_competition_id_not_name():
+    from research.m58d.run import group_key
+
+    assert group_key(15, "Primera División") != group_key(23, "Primera División")
+    assert group_key(15, "Primera División", 2024) == "15:Primera División 2024"

@@ -92,6 +92,7 @@ def build_rows(db: Session, horizon: datetime, before: datetime = TEST_START) ->
         rows.append(row)
     for entry in coverage:  # temporada/competición del partido de ventana (no del objetivo)
         sid = season_of.get(entry["window_fixture_id"])
+        entry["window_competition_id"] = seasons[sid][0] if sid else None
         entry["window_competition"] = competitions[seasons[sid][0]] if sid else None
         entry["window_season"] = seasons[sid][1] if sid else None
     return rows, excluded, coverage

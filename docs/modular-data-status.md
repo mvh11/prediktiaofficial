@@ -42,6 +42,8 @@
   - **Origen móvil (4 trimestres de 2025, 5927 partidos evaluados):** log loss B0 1,0666, B1 1,0638, B2* 1,0292 [1,020; 1,040], B2 calibrado por clase 1,0301, ordinal 1,0297. B2* − B1 = −0,035 [−0,042; −0,027]. La calibración por clase y el ordinal no mejoran a B2* (diferencias con IC que incluye 0). C entre 0,003 y 0,01 es lo mejor; más C da peor log loss y p(D) más dispersa.
   - **Empate:** pendiente de calibración de D en B2* = 0,79 [0,52; 1,04] (el IC incluye 1), por clase 0,86 [0,48; 1,15] y ordinal 0,68 [0,40; 0,91]. El 0,42 de M5.8B no se reproduce antes de 2026.
   - **Sensibilidad:** B2* mejora a B1 en 12 de 13 competiciones; empeora en Argentina.
+  - **Agrupación:** el informe agrupaba por NOMBRE de competición, y "Primera División" junta competiciones distintas (sus cifras de cobertura y sensibilidad son de ese conjunto). El código agrupa ya por `competition_id`; las métricas experimentales no cambian y no se ha reejecutado (los datos se borraron).
+- **Estado:** M5.8D cerrado como investigación exploratoria; señal predictiva NO confirmada.
 
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 

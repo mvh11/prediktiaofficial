@@ -32,19 +32,26 @@ def _load(path: Path):
     return data["rows"], Counter(data["excluded"]), data["coverage"]
 
 
+def group_key(competition_id, name, season=None) -> str:
+    """Agrupación por competition_id (los nombres se repiten: varias "Primera División"); el nombre
+    solo es una etiqueta legible."""
+    key = f"{competition_id}:{name}"
+    return key if season is None else f"{key} {season}"
+
+
 def coverage_report(rows, coverage):
     by_cause = Counter(c["cause"] for c in coverage)
     total = sum(by_cause.values())
     by_comp_season = defaultdict(Counter)
     by_source = defaultdict(Counter)
     for c in coverage:
-        by_comp_season[f"{c['window_competition']} {c['window_season']}"][c["cause"]] += 1
+        by_comp_season[group_key(c.get("window_competition_id"), c["window_competition"], c["window_season"])][c["cause"]] += 1
         by_source[",".join(c["observation_sources"]) or "none"][c["cause"]] += 1
     features = {col: round(100 * sum(not r[f"{col}_missing"] for r in rows) / len(rows), 1)
                 for col in FEATURE_COLUMNS if not col.endswith("_missing") and col.startswith("home_")}
     informative = defaultdict(lambda: [0, 0])
     for r in rows:
-        key = f"{r['competition']} {r['season_year']}"
+        key = group_key(r["competition_id"], r["competition"], r["season_year"])
         informative[key][0] += all(r[f"{s}_n_used"] > 0 for s in SIDES)
         informative[key][1] += 1
     return {
@@ -170,7 +177,7 @@ def main(argv=None):
     report["paired_log_loss_diff_ci95"] = paired
 
     sens = defaultdict(lambda: {"n": 0})
-    for key_fn, name in ((lambda r: r["competition"], "competition"), (lambda r: str(r["season_year"]), "season")):
+    for key_fn, name in ((lambda r: group_key(r["competition_id"], r["competition"]), "competition"), (lambda r: str(r["season_year"]), "season")):
         groups = defaultdict(list)
         for r in base_rows:
             groups[key_fn(r)].append(r)
