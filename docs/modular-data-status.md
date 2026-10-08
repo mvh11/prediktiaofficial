@@ -27,6 +27,14 @@
   - **Rendimiento:** p50 24,5 ms, p95 41,5 ms, máx. 117 ms por feature; 3–7 SELECT constantes (igual con ventana 3/5/10), sin N+1.
   - **Reproducibilidad y leakage:** 400 recálculos idénticos; un refresh tardío no cambia nada con H fijo (30/30) y sí al ampliar H (30/30); cambiar el marcador actual no altera nada; solo SELECT; 0 violaciones de leakage.
 
+- **M5.8B: primer experimento cuantitativo 1X2 a 90' (retrospectivo).** Código en `backend/research/m58/` (fuera del runtime: `app/` no lo importa; dependencias en `requirements-research.txt`, nunca en `requirements.lock`). Modelos probados en `backend/research/tests` con el venv de investigación; el resto en la suite normal.
+  - **Datos:** snapshot de solo lectura 2026-10-08 02:45:25Z, restaurado en local con `0008` (H = 02:45:56Z), borrado al terminar. 13 913 filas con etiqueta verificable desde `STRICT_KNOWLEDGE(H)` (excluidas: 656 no finalizadas, 23 AET/PEN cuyo 90' no era empate); 51 AET/PEN liquidados como X; 0 discrepancias con el estado actual; 0 violaciones de leakage; todo `HISTORICAL_BACKTEST`.
+  - **Splits** (embargo 7 días): train 7227 (2024-01 → 2025-06), validación 2908 (A/B cronológicas), test 3681 (2026-01 → 2026-10), purgadas 97. Filas informativas (ambos equipos con ≥ 1 muestra): 91,9 % / 94,4 % / 47,5 % (el test incluye temporadas en curso sin stats disponibles en T).
+  - **Selección en validación A/B:** alpha(B1) = 200, C(B2) = 0,01, temperatura = 1,0 (sin cambio). Test evaluado una sola vez con la configuración congelada.
+  - **Test (log loss, IC 95 % por semanas):** B0 1,0706 [1,061; 1,081], B1 1,0688 [1,059; 1,079], B2 1,0474 [1,035; 1,060]. B2 − B1 = −0,021 [−0,030; −0,013]; B2 − B0 = −0,023 [−0,033; −0,014]. Brier 0,647 / 0,646 / 0,631; RPS 0,225 / 0,225 / 0,217.
+  - **Calibración de B2:** ECE medio 0,015; pendientes H 0,85, A 0,90, **D 0,42** (fuera de [0,8; 1,2]).
+  - **Criterios de aceptación:** mejora de log loss con IC < 0 sí; leakage 0 sí; **calibración del empate no; cobertura informativa del test 47,5 % < 60 % no** → señal **no confirmada** (INCONCLUSIVE). No se ha vuelto a evaluar test.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
