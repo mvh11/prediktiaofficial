@@ -282,7 +282,14 @@ def test_evaluation_classes_coverage_and_kickoff_changes(tmp_path, world):
     assert classes == {11: "INFORMATIVE", 12: "INFORMATIVE", 13: "KICKOFF_ADVANCED", 14: "NO_LABEL", 15: "UNANCHORED",
                        16: "DEGRADED", 17: "NOT_EMITTED", 18: "NO_RECORD"}
     cov = evaluation.coverage(evaluation.classify(universe, reg.records(), anchors_, labels, lambda a: True))
-    assert cov["denominator_labelled"] == 7 and cov["informative_coverage"] == pytest.approx(2 / 7) and cov["postponed"] == 1
+    # operativa: los 8 elegibles; emitidas 11-16 (6), informativas 11-15 (5), degradada 16, sin registro 18, no emitida 17
+    op = cov["operational"]
+    assert (op["denominator"], op["emitted"], op["emitted_informative"], op["emitted_degraded"], op["no_record"], op["not_emitted"]) == (8, 6, 5, 1, 1, 1)
+    assert op["emission_coverage"] == pytest.approx(6 / 8) and op["informative_emission_coverage"] == pytest.approx(5 / 8)
+    # evaluable: solo los 7 con etiqueta (14 no tiene); INFORMATIVE evaluables = 11 y 12
+    ev = cov["evaluable"]
+    assert (ev["denominator"], ev["informative"], ev["no_label_excluded"]) == (7, 2, 1) and ev["informative_coverage"] == pytest.approx(2 / 7)
+    assert cov["counts"]["DEGRADED"] == 1 and cov["counts"]["NO_RECORD"] == 1 and cov["counts"]["NO_LABEL"] == 1 and cov["postponed"] == 1
 
 
 def test_evaluation_refuses_a_tampered_registry_and_runs_once(tmp_path, world):
@@ -293,9 +300,70 @@ def test_evaluation_refuses_a_tampered_registry_and_runs_once(tmp_path, world):
     with pytest.raises(RegistryError):
         evaluation.classify([{"fixture_id": 1, "competition_id": 1, "final_kickoff": K}], recs, [], {1: "H"}, lambda a: True)
     ev = evaluation.ConfirmatoryEvaluation()
-    assert ev.run([])["status"] == "INSUFFICIENT_VOLUME"
+    eligible = {"EVALUATION_ELIGIBLE": True}
+    assert ev.run([], {"EVALUATION_ELIGIBLE": False})["status"] == "REGISTRY_NOT_ELIGIBLE"  # no gasta la puerta
+    assert ev.run([], eligible)["status"] == "INSUFFICIENT_VOLUME"
     with pytest.raises(RuntimeError):
-        ev.run([])  # una sola evaluación confirmatoria
+        ev.run([], eligible)  # una sola evaluación confirmatoria
+
+
+# --- Estado del registro: CHAIN_VALID / ANCHOR_VERIFIED / EVALUATION_ELIGIBLE --------------------
+
+ALWAYS = lambda a: True  # noqa: E731
+
+
+def _emitted(tmp_path, world, n=3):
+    reg = Registry(tmp_path / "r.jsonl")
+    for fid in range(21, 21 + n):
+        world.know(fid, K - timedelta(days=3), kickoff_at=K, home_team_id=10, away_team_id=20, competition_id=1)
+        world.emitter(reg).emit(fid)
+    return reg
+
+
+def _status(recs, anchors_):
+    s = evaluation.registry_status(recs, anchors_, ALWAYS)
+    return s["CHAIN_VALID"], s["ANCHOR_VERIFIED"], s["EVALUATION_ELIGIBLE"]
+
+
+def test_intact_chain_without_anchor_is_not_eligible(tmp_path, world):
+    recs = _emitted(tmp_path, world).records()
+    assert _status(recs, []) == (True, False, False)
+
+
+def test_truncated_chain_is_detected_by_its_anchor(tmp_path, world):
+    reg = _emitted(tmp_path, world)
+    recs = reg.records()
+    anchor = {**anchors.make_statement(recs), "authority": "project_thread", "external_time": world.now}
+    truncated = recs[:-1]  # se pierde el último registro: el prefijo sigue siendo una cadena válida
+    assert evaluation.registry_status(truncated, [], ALWAYS)["CHAIN_VALID"]
+    assert _status(truncated, [anchor]) == (True, False, False)  # el anclaje apunta a un seq que ya no existe
+
+
+def test_invalid_anchor_makes_the_registry_ineligible(tmp_path, world):
+    recs = _emitted(tmp_path, world).records()
+    good = {**anchors.make_statement(recs), "authority": "project_thread", "external_time": world.now}
+    assert _status(recs, [good, {**good, "head_hash": "e" * 64}]) == (True, False, False)
+    assert _status(recs, [{**good, "authority": "git_local_commit"}]) == (True, False, False)
+    assert evaluation.registry_status(recs, [good], lambda a: False)["EVALUATION_ELIGIBLE"] is False
+    broken = [dict(r) for r in recs]
+    broken[1]["fixture_id"] = 999
+    assert _status(broken, [good]) == (False, False, False)
+
+
+def test_anchor_after_kickoff_leaves_predictions_unanchored(tmp_path, world):
+    recs = _emitted(tmp_path, world, n=1).records()
+    late = {**anchors.make_statement(recs), "authority": "project_thread", "external_time": K + timedelta(minutes=1)}
+    assert _status(recs, [late]) == (True, True, True)  # el registro es íntegro y está anclado…
+    classes = evaluation.classify([{"fixture_id": 21, "competition_id": 1, "final_kickoff": K}], recs, [late], {21: "H"}, ALWAYS)
+    assert classes[0]["class"] == "UNANCHORED"  # …pero el anclaje llegó después del kickoff
+
+
+def test_valid_anchor_before_kickoff_makes_predictions_evaluable(tmp_path, world):
+    recs = _emitted(tmp_path, world, n=2).records()
+    anchor = {**anchors.make_statement(recs), "authority": "rfc3161", "external_time": K - timedelta(minutes=50)}
+    assert _status(recs, [anchor]) == (True, True, True)
+    universe = [{"fixture_id": f, "competition_id": 1, "final_kickoff": K} for f in (21, 22)]
+    assert [e["class"] for e in evaluation.classify(universe, recs, [anchor], {21: "H", 22: "A"}, ALWAYS)] == ["INFORMATIVE", "INFORMATIVE"]
 
 
 # --- Emisor contra la BD de tests (conocimiento y features reales) -------------------------------

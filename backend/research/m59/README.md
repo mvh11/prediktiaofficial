@@ -33,3 +33,19 @@ autoridad cuyo instante no controla Prediktia:
 Una predicción solo es evaluable si un anclaje verificado con `registry_seq >=` el suyo tiene
 instante externo anterior al kickoff final. La verificación de cada autoridad se inyecta
 (`external_check`); su implementación concreta es parte de M5.9C/M5.9D.
+
+## Estado del registro y coberturas (ajuste de cierre)
+- `registry_status` separa tres comprobaciones: `CHAIN_VALID` (cadena íntegra), `ANCHOR_VERIFIED`
+  (al menos un anclaje externo verificado sobre esta cadena y ningún anclaje presentado que falle;
+  uno que apunte a un seq inexistente delata una cadena truncada) y `EVALUATION_ELIGIBLE`
+  (las dos anteriores). Una cadena íntegra sin anclaje no es evaluable. Sin `EVALUATION_ELIGIBLE`
+  la evaluación confirmatoria no se ejecuta ni consume su única oportunidad.
+- Además, cada predicción solo es evaluable si un anclaje verificado anterior a su kickoff final la
+  cubre (si no, `UNANCHORED`).
+- Cobertura **operativa**: denominador = todos los partidos elegibles para emisión, con o sin
+  etiqueta (emitidas, informativas, degradadas, `NO_RECORD`, `NOT_EMITTED`).
+- Cobertura **evaluable**: denominador = partidos elegibles con etiqueta verificable; numerador =
+  `INFORMATIVE` (se cuentan aparte `NO_LABEL`, `DEGRADED`, `NO_RECORD`).
+- El umbral confirmatorio `informative_coverage_min = 0,60` se mide hoy sobre la cobertura
+  evaluable. Qué denominador rige el umbral (evaluable u operativo) se someterá a decisión
+  gerencial antes del preregistro definitivo; los umbrales no han cambiado.
