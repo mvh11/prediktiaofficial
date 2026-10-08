@@ -8,7 +8,7 @@
   - **Selección:** por partido y proveedor, observaciones con `available_at <= T` (incluido); manda la más reciente por `(observed_at, id)`, el orden de versionado del esquema.
   - **Reconstrucción:** los valores salen del raw de ESA observación con el normalizador vigente (parser del adapter). Nunca de `fixture_team_statistics` (estado actual fusionado) ni fusionando versiones.
   - **Calidad:** se recalculan los checks de identidad y de valores del service; con algún BLOCKING el partido queda `BLOCKED`, sin valores. Si el hash del raw, la disponibilidad registrada o los BLOCKING que registró el run no se reproducen: `RECONSTRUCTION_MISMATCH`, sin valores y sin elegir ganador.
-  - **Estados:** `UNKNOWN_AT_T`, `AVAILABLE`, `PARTIAL`, `EMPTY` (evidencia válida, no ceros), `BLOCKED`, `RECONSTRUCTION_MISMATCH`.
+  - **Estados:** `UNKNOWN_AT_T`, `AVAILABLE`, `PARTIAL`, `EMPTY` (evidencia válida, no ceros), `BLOCKED`, `RECONSTRUCTION_MISMATCH` e `IDENTITY_UNVERIFIED` (añadido en M5.7B).
   - **Procedencia:** `HISTORICAL_SYNTHETIC` (`backfill`, `available_at = kickoff + 6 h`) u `OPERATIONAL` (`live`/`manual`, `available_at = observed_at`). `observed_after(T)` marca lo disponible por política pero recibido después de T.
   - **Contexto prepartido** (`app/services/statistics_prematch.py`, capa pura aparte): corte = kickoff del objetivo; se excluyen el propio partido y los de kickoff igual o posterior.
 - **M5.7B: contrato temporal completo y `team_recent_form_v1`** (`app/schemas/prematch_features.py`, `app/services/prematch_features.py`). Solo lee; sin migración ni cambios en contratos de DI-A6 (solo los consume).
@@ -17,6 +17,23 @@
   - **Identidad** (fail-closed, `IDENTITY_UNVERIFIED` sin valores): home/away de la evidencia de DI-A6 en H (solo `KNOWN`); cada mapping de equipo activo y con `created_at <= observed_at` de la observación; BLOCKING recalculados = registrados por el run. Los mappings no tienen historia: una edición manual sin cambiar `created_at` no se detectaría.
   - **`team_recent_form_v1`:** T lo fija el llamador y se valida contra el kickoff conocido en H (T > K, objetivo desconocido, ambiguo o sin el equipo → fail-closed). Ventana = últimos 5 partidos JUGADOS antes de T según la evidencia (FT/AET/PEN, kickoff < T), por (kickoff, id) descendente, sin el objetivo; empate de kickoff en la frontera → `AMBIGUOUS_ORDER`. AET/PEN se excluyen de las medias con su motivo; una muestra sin estadísticas cuenta en la ventana y no se salta a partidos más viejos. Métricas a favor/en contra (tiros, tiros a puerta, córners, posesión, xG): media de los valores no nulos, mínimo 3 por métrica; nunca ceros. `fingerprint()` resume el contenido sin ids de observación (no depende del orden de ingestión).
   - **Pendiente:** disponibilidad sintética de RESULTADOS de fixtures para backtests históricos (semántica de DI: requiere revisión interdepartamental), historia de mappings, persistencia de features.
+- **M5.7C: validación empírica (VALIDATED).** Extracción única de solo lectura de la principal (una transacción `REPEATABLE READ READ ONLY`, snapshot 2026-10-08 02:12:59Z, 7 tablas con árbitro, sede y logos vaciados), restaurada en PostgreSQL 18.6 local desechable con `0008` aplicada SOLO en la copia (bootstrap local 02:13:31Z). Datos y contenedor borrados al terminar; 0 escrituras y 0 migraciones en producción. Medido en local (no es una cifra de producción):
+  - **Datos:** 18 671 fixtures; 12 064 observaciones de stats (backfill 11 723, manual 258, live 83), una versión por partido; 42 temporadas, 19 competiciones.
+  - **Muestra:** 840 partidos finales (20 por temporada con stats, orden md5(id)) × 2 equipos = 1680 features; T = kickoff − 1 h; H = bootstrap_at (`HISTORICAL_BACKTEST`).
+  - **Cobertura:** 1680 OK; ventana completa en el 89,5 %; métricas con ≥ 3 muestras: 72,7 % (córners 72,6 %, xG 47,1 %). 380 features sin muestras: 280 de temporadas en curso (stats operativas con `available_at` del 6–7 oct, posterior a T, correcto por contrato) y 100 de 1360 históricas (7,4 %).
+  - **Ventana (7842 partidos):** USED 6082, UNKNOWN_AT_T 1219, EMPTY 503, AET/PEN 37, BLOCKED 1. 0 `IDENTITY_UNVERIFIED`, 0 `RECONSTRUCTION_MISMATCH` (BLOCKING recalculados = registrados en todos).
+  - **Procedencia:** 100 % de las muestras `HISTORICAL_SYNTHETIC`, 100 % de las features retrospectivas.
+  - **Régimen estricto (H = T):** 100/100 `TARGET_UNKNOWN`, esperado: la evidencia de fixtures empieza en el bootstrap.
+  - **Rendimiento:** p50 24,5 ms, p95 41,5 ms, máx. 117 ms por feature; 3–7 SELECT constantes (igual con ventana 3/5/10), sin N+1.
+  - **Reproducibilidad y leakage:** 400 recálculos idénticos; un refresh tardío no cambia nada con H fijo (30/30) y sí al ampliar H (30/30); cambiar el marcador actual no altera nada; solo SELECT; 0 violaciones de leakage.
+
+**Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
+
+- **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
+- **Limitaciones aceptadas:** mappings sin historia; enumeración desde el estado actual de `fixtures` (los hechos salen de la evidencia); disponibilidad sintética del backfill (marcada como retrospectiva); exclusión de AET/PEN (0,5 %); xG con pocas muestras (tratarla como opcional).
+- **Bloqueo para modelar en régimen estricto:** el bootstrap de DI-A6 (todo lo anterior es `UNKNOWN_AT_T`).
+- **Corrección dentro de Modular, con autorización operativa:** catch-up de stats (temporadas previas y backlog actual) para subir la cobertura.
+- **Gates productivos pendientes (fuera de Modular):** aceptación de DI-A6 en producción y migración `0008` (producción sigue en `0007`); activación del scheduler C6 y piloto de 24 h; catch-up; DI-A5D/`0009`; integración en `main`.
 
 El resto de este documento conserva el estado anterior a este ciclo.
 
