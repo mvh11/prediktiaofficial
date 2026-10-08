@@ -35,6 +35,14 @@
   - **Calibración de B2:** ECE medio 0,015; pendientes H 0,85, A 0,90, **D 0,42** (fuera de [0,8; 1,2]).
   - **Criterios de aceptación:** mejora de log loss con IC < 0 sí; leakage 0 sí; **calibración del empate no; cobertura informativa del test 47,5 % < 60 % no** → señal **no confirmada** (INCONCLUSIVE). No se ha vuelto a evaluar test.
 
+- **M5.8C (diagnóstico):** los 23 AET/PEN excluidos en M5.8B eran todos vueltas de eliminatorias a doble partido empatadas en el global tras los 90' (verificado con una lectura de solo lectura acotada): la regla "AET/PEN ⇒ X" de M5.8A era errónea; los datos y DI son correctos.
+- **M5.8D: experimento EXPLORATORIO (no confirma señal).** Protocolo registrado antes de extraer datos (`backend/research/m58d/PROTOCOL.md`). Etiqueta 1X2 = `fulltime` del propio partido también en AET/PEN. Solo kickoff < 2026-01-01: el test de M5.8B no se usa. Snapshot de solo lectura 2026-10-08 03:20:19Z, `0008` local (H = 03:20:41Z), borrado al terminar.
+  - **Datos:** 10 239 filas (H 45,7 / D 25,6 / A 28,7 %); 7 AET/PEN no empatados a los 90' ahora etiquetados; 0 avisos de coherencia goals/fulltime/extratime; 0 leakage.
+  - **Cobertura por causa (96 797 partidos de ventana, < 2026):** USED 93,4 %, EMPTY 6,3 % (casi todo "Primera División" con stats vacías), AET/PEN 0,3 %, calidad/identidad 10 casos, **nunca ingeridas 0 y no disponibles en T 0**. La cobertura pobre del test de M5.8B no aparece antes de 2026 (no se ha inspeccionado ese periodo). xG presente en el 54,8 % de las features.
+  - **Origen móvil (4 trimestres de 2025, 5927 partidos evaluados):** log loss B0 1,0666, B1 1,0638, B2* 1,0292 [1,020; 1,040], B2 calibrado por clase 1,0301, ordinal 1,0297. B2* − B1 = −0,035 [−0,042; −0,027]. La calibración por clase y el ordinal no mejoran a B2* (diferencias con IC que incluye 0). C entre 0,003 y 0,01 es lo mejor; más C da peor log loss y p(D) más dispersa.
+  - **Empate:** pendiente de calibración de D en B2* = 0,79 [0,52; 1,04] (el IC incluye 1), por clase 0,86 [0,48; 1,15] y ordinal 0,68 [0,40; 0,91]. El 0,42 de M5.8B no se reproduce antes de 2026.
+  - **Sensibilidad:** B2* mejora a B1 en 12 de 13 competiciones; empeora en Argentina.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
