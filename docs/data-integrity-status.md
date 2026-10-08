@@ -806,13 +806,13 @@ Se mide `strict_knowledge()` real (consulta + construcción de los tipos) con id
   - una sola respuesta funciona con 2730, 4000, 5000, 10 000 y 20 000 partidos (20 000: 3,7 s y 96 MiB), siempre con rollback;
   - el siguiente límite técnico serían las listas `IN` (~65 535 ids por sentencia): DERIVADO, no medido;
   - **la política no cambia:** tope operativo **≤ 2000** y techo de la política de seguridad **2729** (no es el límite físico de UNNEST). Subirlos exige una decisión aparte del Chief.
-- **Revisión de Modular:** `3c5f12a` (tests del rollback del backfill) y `7a8643f` (solo la superficie compartida `upsert_origin_mappings` / sync de catálogo) siguen **PENDIENTES** de la revisión de comportamiento del dueño de Modular. UNNEST no cambia el comportamiento del backfill (paridad de su suite y de `PARITY`).
+- **Revisión de Modular:** `3c5f12a` (tests del rollback del backfill) y `7a8643f` (solo la superficie compartida `upsert_origin_mappings` / sync de catálogo): **APROBADAS** tras el cierre de sesión (ver [congelación final local](#di-a6-congelación-final-local)). UNNEST no cambia el comportamiento del backfill (paridad de su suite y de `PARITY`).
 - **Puertas que siguen abiertas:**
   - decisión del Chief sobre este candidato;
   - nueva medición en el entorno de destino;
   - arquitectura de almacenamiento y particionado de la evidencia;
   - verificación empírica en PostgreSQL 14–17 (aquí solo 18.6; `unnest()` de varios arrays y `INSERT ... SELECT ... ON CONFLICT` están documentados desde mucho antes de la 14);
-  - revisión de Modular de `3c5f12a`.
+  - ~~revisión de Modular de `3c5f12a`~~ (aprobada; ver [congelación final local](#di-a6-congelación-final-local)).
 
 ### Cierre de sesión DI-A6 (2026-10-07)
 
@@ -838,14 +838,57 @@ Estado vigente de DI-A6. Sustituye a los "pendiente de decisión" de C.11 y C.12
   - **publicación:** la referencia de seguimiento local `origin/feature/data-integrity-a6` apunta a `f1396ad` y la rama tiene ese upstream configurado. Esa referencia solo cambia con un push o un fetch correctos. La comprobación contra el remoto en vivo (`git ls-remote`) no se pudo ejecutar en esta sesión: el push y esa comprobación los bloqueó el control de permisos del agente, y el push lo hizo después el usuario a mano.
 - **REPORTADO:** los resultados de DI-A3F (`7a521fe`, cierre `e04cd9e`, en `feature/data-integrity-a3f`), usados como origen del mecanismo UNNEST. Aquí se volvió a medir y a validar el escritor portado; las cifras de DI-A3F no se han repetido como tales.
 - **PENDIENTE:**
-  - **revisión de comportamiento de Modular** (dueño de Modular), ninguna aprobada:
+  - ~~**revisión de comportamiento de Modular**~~ (dueño de Modular): **APROBADA después de este cierre**; ver [congelación final local](#di-a6-congelación-final-local):
     - `3c5f12a`: adaptación de tests del rollback por error de BD en el backfill;
     - `7a8643f`: **solo** la superficie compartida `upsert_origin_mappings`, que también usa la sync de catálogo (mismo comportamiento, otro transporte);
   - **nueva medición en el entorno de destino**;
   - **arquitectura de almacenamiento y particionado de la evidencia**;
   - verificación empírica en PostgreSQL 14–17 (aquí solo 18.6);
   - **aceptación de A6 para producción: HOLD.**
-- **Siguiente paso autorizado:** esperar la revisión del dueño de Modular o la siguiente sesión del Chief. Sin push nuevo, sin merge a `main`, sin migraciones, sin Neon y sin DI-A5D.
+- **Siguiente paso autorizado:** esperar la revisión del dueño de Modular o la siguiente sesión del Chief. Sin push nuevo, sin merge a `main`, sin migraciones, sin Neon y sin DI-A5D. (Superado por la [congelación final local](#di-a6-congelación-final-local).)
+
+### DI-A6: congelación final local
+
+Estado vigente de DI-A6; sustituye al cierre de sesión anterior donde difieran. **VERIFICADO** = comprobado en Git o en el repositorio; **REPORTADO** = decisión del dueño de Modular aprobada y comunicada por el Chief; **PENDIENTE** = trabajo futuro de nivel producción.
+
+- **Resumen de estado:**
+
+  ```
+  DI_A6_CROSS_DEPARTMENT_REVIEW:     CLOSED
+  DI_A6_LOCAL_IMPLEMENTATION:        FROZEN
+  OPTION_A:                          ACCEPTED
+  UPSERTCOUNTS_CONCURRENCY_BLOCK:    CLOSED
+  DB_ERROR_ROLLBACK_GAP:             CLOSED
+  UNNEST_LOCAL_PRODUCTION_CANDIDATE: ACCEPTED
+  A6_PRODUCTION_ACCEPTANCE:          HOLD
+  ```
+
+- **REPORTADO** (revisión de comportamiento del dueño de Modular tras el cierre de sesión, aprobada por el Chief):
+
+  | Punto | Resultado |
+  |---|---|
+  | `3c5f12a` (tests del rollback por error de BD en el backfill) | **APROBADO** |
+  | `7a8643f`, solo la superficie compartida de mappings y catálogo (`upsert_origin_mappings` / sync de catálogo) | **APROBADO** |
+  | Comportamiento de Modular preservado | **SÍ** |
+  | Comportamiento del backfill preservado | **SÍ** |
+  | Comportamiento de la sync de catálogo preservado | **SÍ** |
+  | Semántica de los mappings preservada | **SÍ** |
+  | Conflicto semántico | **NINGUNO** |
+
+  Con esto queda cerrada la revisión entre departamentos de DI-A6 (`7c41705`, `1920590` y `7e4af3e` ya estaban aprobados; ver [Revisión de Modular](#revisión-de-modular-aprobada)).
+- **VERIFICADO** (Git y repositorio, al registrar esta congelación):
+  - rama `feature/data-integrity-a6`; HEAD de código `f1396ad` (código igual que `afa686c`), con `3cadc92` como cierre de sesión (solo documentación); worktree limpio antes de este registro;
+  - `3c5f12a` y `7a8643f` existen y son ancestros del HEAD;
+  - el remoto en vivo (`git ls-remote`) tiene `feature/data-integrity-a6` en `f1396ad`; `3cadc92` y este registro son locales, sin push;
+  - **Alembic:** cabeza única **`0008`**; **`0009` ausente**, reservada para DI-A5D;
+  - **DI-A5D: no iniciado**;
+  - no se ha repetido la suite: desde `afa686c` solo ha cambiado documentación, así que la última suite completa (1355 passed, 0 failed, 0 skipped, 0 errors) sigue valiendo para el código actual.
+- **Política vigente (sin cambios):** tope operativo **≤ 2000** partidos por respuesta; **2729** es el techo de la política de seguridad, **no** el límite físico de UNNEST.
+- **PENDIENTE** (nivel producción; **no** bloquea el checkpoint de la línea base conjunta de desarrollo DI + Modular):
+  - nueva medición en el entorno de destino;
+  - arquitectura de almacenamiento y particionado de la evidencia;
+  - **aceptación de A6 para producción: HOLD.**
+- **Siguiente paso:** checkpoint de la línea base conjunta DI + Modular, cuando el Chief lo asigne. Sin push nuevo, sin merge a `main`, sin migraciones, sin Neon y sin DI-A5D.
 
 ## Auditoría hecha
 
