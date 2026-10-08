@@ -2,6 +2,25 @@
 
 Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Integrada con M4.2 en `checkpoint/m42-data-integrity` (ver [Checkpoint M4.2](#checkpoint-m42-ebcb076)). Ver [workstreams.md](workstreams.md).
 
+## Checkpoint conjunto DI-A6 + Modular (candidato a nuevo baseline)
+
+**Estado:** checkpoint conjunto **PASS** en local (2026-10-07). Pendiente de que el Chief lo establezca como nuevo baseline canónico; hasta entonces sigue vigente el baseline de abajo. Rama `integration/di-a6-modular-final` (worktree `prediktia-di-a6-modular-final`), **sin push** y sin merge a `main`.
+
+- **Entradas congeladas (commits exactos, no nombres de rama):**
+  - DI: `941a17344ad0cba4771b9738a876813223fa728b` (`feature/data-integrity-a6`, igual en el remoto; ver [congelación final local](#di-a6-congelación-final-local));
+  - Modular: `0bfb4cf82932033248e88049ba66a22f85508084` (`fix/c6-supply-chain-hardening`, PR #3): fija por SHA las actions de los workflows `ops-*`, añade `backend/requirements.lock` (instalación `--no-deps` + `pip check`) y la excepción del escaneo de secretos para esos SHA en `test_ops_tick.py`;
+  - **base común:** `a92e8a3` (`main`). DI aporta 28 commits encima y Modular 1; ninguno reescrito.
+- **Merge:** `15643f3`, `--no-ff` del commit exacto de Modular, **sin conflictos**. El árbol resultante es el previsto con `git merge-tree` antes del merge (`2d12cfe`). Frente a DI solo cambian los tres workflows, el lock y `test_ops_tick.py` (zonas distintas a las de DI).
+- **Superficies compartidas:** `backend/app` y `backend/alembic` son **idénticos** a DI `941a173`, así que se conservan sin cambios el escritor de la opción A (`UpsertCounts` exactos y bloqueo ordenado de filas), el transporte UNNEST, `fixture_observations` y la semántica de la evidencia, `upsert_origin_mappings` y la sync de catálogo, el backfill y `PARITY`, la sync en vivo, el scheduler, estadísticas y reconciliación, el rollback, los fallos del proveedor, los contratos de retorno, `STRICT_KNOWLEDGE` y `RETROSPECTIVE_FINAL_RESULTS`.
+  - **Nuevos escritores de fixtures:** NO. **Nuevos escritores de mappings compartidos:** NO.
+  - El lock fija las mismas versiones con las que se validó DI-A6 en local (SQLAlchemy 2.1.3, psycopg 3.3.6, alembic 1.20.0).
+- **Migraciones:** cabeza única **`0008`** (`0001 → … → 0007_match_statistics → 0008_fixture_observations`); sin migración de merge. **`0009`** sigue reservada para DI-A5D (no iniciado).
+- **Validación** (PostgreSQL 18.6 local desechable, nunca Neon):
+  - dirigidas (escritor, concurrencia, rollback, evidencia, repetición, backfill y su evidencia, mappings, catálogo, sync en vivo, `ops_tick`/scheduler, estadísticas y reconciliación, UNNEST, lecturas temporales, migraciones `0007`/`0008`): **787 passed**;
+  - **suite completa combinada: 1356 passed, 0 failed, 0 skipped, 0 errors, 1 warning** (`StarletteDeprecationWarning`, ajeno; 1356 = 1355 de DI + 1 test nuevo de Modular).
+- **Rendimiento:** no se vuelve a medir; el merge no toca el camino del escritor.
+- **Riesgos aceptados que siguen abiertos:** aceptación de A6 para producción **HOLD** (nueva medición en el entorno de destino; arquitectura de almacenamiento y particionado de la evidencia); verificación en PostgreSQL 14–17 (aquí solo 18.6); el lock solo vale para Linux + Python 3.12.
+
 ## Baseline reconciliado DI + Modular (vigente)
 
 **Estado:** `integration/di-modular-m43-reconcile` es el baseline canónico de Data Integrity integrado con Modular. Lo que diga la rama (Git, migraciones, tests) manda sobre este documento.
