@@ -13,14 +13,14 @@ from sqlalchemy import Integer, any_, bindparam, func, select
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session
 
-from app.models import Fixture, FixtureStatisticsObservation, StatisticsRun
+from app.models import Fixture, FixtureStatisticsObservation, StatisticsRun, TeamProviderMapping
 
 _O = FixtureStatisticsObservation.__table__.c
 
 
-def eligible_observations(db: Session, fixture_ids: Iterable[int], provider: str, cutoff: datetime) -> dict[int, Any]:
-    """Por partido: la versión vigente en T entre las disponibles en T (available_at <= T), por
-    (observed_at, id) descendente, más cuántas versiones eran elegibles. UNA consulta."""
+def eligible_observations(db: Session, fixture_ids: Iterable[int], provider: str, cutoff: datetime, horizon: datetime) -> dict[int, Any]:
+    """Por partido: la versión vigente entre las elegibles (available_at <= T y observed_at <= H),
+    por (observed_at, id) descendente, más cuántas versiones eran elegibles. UNA consulta."""
     ids = sorted(set(fixture_ids))
     if not ids:
         return {}
@@ -34,6 +34,7 @@ def eligible_observations(db: Session, fixture_ids: Iterable[int], provider: str
             _O.fixture_id == any_(bindparam("ids", ids, type_=ARRAY(Integer))),
             _O.provider == provider,
             _O.available_at <= cutoff,
+            _O.observed_at <= horizon,
         )
         .subquery()
     )
@@ -41,13 +42,27 @@ def eligible_observations(db: Session, fixture_ids: Iterable[int], provider: str
     return {row["fixture_id"]: row for row in rows}
 
 
-def fixture_teams(db: Session, fixture_ids: Iterable[int]) -> dict[int, tuple[int, int]]:
-    """{fixture_id: (home_team_id, away_team_id)}: la identidad del partido (no temporal)."""
-    ids = sorted(set(fixture_ids))
+def enumerate_team_fixtures(db: Session, team_id: int) -> list[int]:
+    """Partidos en los que el estado ACTUAL de fixtures pone al equipo. Solo enumera candidatos
+    (DI-A6C): ningún hecho del partido sale de aquí; se verifican con la evidencia."""
+    return list(db.scalars(
+        select(Fixture.id).where((Fixture.home_team_id == team_id) | (Fixture.away_team_id == team_id)).order_by(Fixture.id)
+    ))
+
+
+def team_mappings(db: Session, external_ids: Iterable[str], provider: str) -> dict[str, tuple[int, datetime]]:
+    """Mappings ACTIVOS de equipos: {id externo canónico: (team_id, created_at)}."""
+    ids = sorted(set(external_ids))
     if not ids:
         return {}
-    rows = db.execute(select(Fixture.id, Fixture.home_team_id, Fixture.away_team_id).where(Fixture.id.in_(ids)))
-    return {fixture_id: (home, away) for fixture_id, home, away in rows}
+    rows = db.execute(
+        select(TeamProviderMapping.external_id, TeamProviderMapping.team_id, TeamProviderMapping.created_at).where(
+            TeamProviderMapping.provider == provider,
+            TeamProviderMapping.is_active.is_(True),
+            TeamProviderMapping.external_id.in_(ids),
+        )
+    )
+    return {external_id: (team_id, created_at) for external_id, team_id, created_at in rows}
 
 
 def run_checks(db: Session, run_ids: Iterable[int]) -> dict[int, list[Any]]:

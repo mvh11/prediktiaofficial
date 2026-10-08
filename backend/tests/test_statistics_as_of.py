@@ -9,13 +9,13 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import event, select, update
 
-from app.models import Fixture, FixtureStatisticsObservation, FixtureTeamStatistics, StatisticsRun
+from app.models import Fixture, FixtureStatisticsObservation, FixtureTeamStatistics, StatisticsRun, TeamProviderMapping
 from app.repositories import fixture_repository
 from app.repositories import statistics_repository as repo
 from app.schemas.statistics import TeamStatisticValues
 from app.schemas.statistics_knowledge import StatisticsAsOfStatus as S
 from app.schemas.statistics_knowledge import StatisticsProvenance as P
-from app.schemas.statistics_knowledge import provenance_of
+from app.schemas.statistics_knowledge import KnowledgeRegime, provenance_of
 from app.services import statistics_as_of as as_of
 from app.services import statistics_quality_checks as qc
 from app.services.statistics_prematch import prematch_cutoff
@@ -26,6 +26,7 @@ pytestmark = pytest.mark.db
 PROVIDER = "api-football"
 KICKOFF = datetime(2026, 9, 14, 19, 0, tzinfo=timezone.utc)
 SYNTHETIC = KICKOFF + timedelta(hours=6)
+EARLY = datetime(2026, 9, 1, tzinfo=timezone.utc)  # evidencia del partido y mappings, antes de todo
 T1 = datetime(2026, 9, 14, 21, 30, tzinfo=timezone.utc)
 T2 = datetime(2026, 9, 15, 3, 30, tzinfo=timezone.utc)
 REAL = next(i for i in load_json("api_football/statistics/fixtures_ids_recorded.json")["response"] if i["fixture"]["id"] == 1557402)
@@ -41,7 +42,8 @@ def match(db_session):
     ]
     teams = [t for d in data for t in (d.home_team, d.away_team)]
     team_ids = fixture_repository.ensure_teams(db_session, teams, PROVIDER)
-    fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, PROVIDER, make_evidence(provider=PROVIDER))
+    fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, PROVIDER, make_evidence(EARLY, provider=PROVIDER))
+    db_session.execute(update(TeamProviderMapping).values(created_at=EARLY))  # mappings anteriores a las observaciones
     rows = db_session.execute(select(Fixture.external_id, Fixture.id, Fixture.home_team_id, Fixture.away_team_id)).all()
     return {int(ext): (fid, home, away) for ext, fid, home, away in rows}
 
@@ -136,9 +138,11 @@ def test_historical_synthetic_provenance_is_kept_and_flags_late_observation(db_s
     fid = match[1557402][0]
     observed = datetime(2026, 10, 6, 1, 0, tzinfo=timezone.utc)  # backfill real, semanas después
     _observe(db_session, fid, _payload(), observed_at=observed, source="backfill", available_at=SYNTHETIC)
-    assert _read(db_session, fid, SYNTHETIC - timedelta(seconds=1)).status is S.UNKNOWN_AT_T
-    result = _read(db_session, fid, SYNTHETIC)
+    assert _read(db_session, fid, SYNTHETIC).status is S.UNKNOWN_AT_T  # estricto (H = T): aún no recibida
+    assert as_of.statistics_as_of_fixture(db_session, fid, PROVIDER, SYNTHETIC - timedelta(seconds=1), horizon=observed).status is S.UNKNOWN_AT_T
+    result = as_of.statistics_as_of_fixture(db_session, fid, PROVIDER, SYNTHETIC, horizon=observed)
     assert result.status is S.AVAILABLE and result.provenance is P.HISTORICAL_SYNTHETIC
+    assert result.regime is KnowledgeRegime.HISTORICAL_BACKTEST and result.horizon == observed
     assert result.observation.available_at == SYNTHETIC and result.observation.observed_at == observed
     assert result.observation.observed_after(result.cutoff)  # disponible por política, no conocido entonces
 
@@ -308,3 +312,44 @@ def test_reads_never_write_and_preserve_the_original_evidence(db_session, match)
         event.remove(connection, "before_cursor_execute", capture)
     assert statements and set(statements) == {"SELECT"}
     assert _evidence(db_session) == before
+
+
+# --- Horizonte H e identidad desde la evidencia (M5.7B) -------------------------------------------
+
+
+def test_horizon_boundary_and_regime(db_session, match):
+    fid = match[1557402][0]
+    observed = T2 + timedelta(days=3)
+    _observe(db_session, fid, _payload(), observed_at=observed, source="backfill", available_at=SYNTHETIC)
+    at = as_of.statistics_as_of(db_session, [fid], PROVIDER, T2, horizon=observed)
+    assert at.regime is KnowledgeRegime.HISTORICAL_BACKTEST and at.results[fid].status is S.AVAILABLE  # observed_at == H incluido
+    before = as_of.statistics_as_of(db_session, [fid], PROVIDER, T2, horizon=observed - timedelta(microseconds=1))
+    assert before.results[fid].status is S.UNKNOWN_AT_T
+    assert as_of.statistics_as_of(db_session, [fid], PROVIDER, T2).regime is KnowledgeRegime.OPERATIONAL_STRICT
+    with pytest.raises(ValueError):
+        as_of.statistics_as_of(db_session, [fid], PROVIDER, T2, horizon=T2 - timedelta(seconds=1))
+
+
+def test_fixture_unknown_at_the_horizon_is_identity_unverified(db_session, match):
+    fid = match[1557402][0]
+    early_obs = EARLY - timedelta(days=1)  # estadísticas antes de la primera evidencia del partido
+    _observe(db_session, fid, _payload(), observed_at=early_obs)
+    result = _read(db_session, fid, early_obs + timedelta(hours=1))
+    assert result.status is S.IDENTITY_UNVERIFIED and result.teams == ()
+    assert result.issues[0].code == as_of.FIXTURE_UNKNOWN_AT_HORIZON
+
+
+def test_mapping_created_after_the_observation_is_identity_unverified(db_session, match):
+    fid = match[1557402][0]
+    _observe(db_session, fid, _payload(), observed_at=T1)
+    db_session.execute(update(TeamProviderMapping).where(TeamProviderMapping.external_id == "34").values(created_at=T1 + timedelta(seconds=1)))
+    result = _read(db_session, fid, T2)
+    assert result.status is S.IDENTITY_UNVERIFIED and (result.issues[0].code, result.issues[0].provider_team_id) == (as_of.MAPPING_CREATED_AFTER_OBSERVATION, 34)
+
+
+def test_sides_come_from_fixture_evidence_not_current_state(db_session, match):
+    fid, home_id, away_id = match[1557402]
+    _observe(db_session, fid, _payload(), observed_at=T1)
+    db_session.execute(update(Fixture).where(Fixture.id == fid).values(home_team_id=away_id, away_team_id=home_id))
+    result = _read(db_session, fid, T1)
+    assert (result.team("home").team_id, result.team("away").team_id) == (home_id, away_id)
