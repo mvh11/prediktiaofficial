@@ -1,0 +1,83 @@
+{
+  "status": "PHASE2_INCOMPLETE_CHECKPOINT",
+  "baseline": "1c06ef9c2a78a556cd8c7ded89853c19ec9a856a",
+  "owner": "OPENCODE_AGENT / EVIDENCE STORAGE LAB",
+  "run_root": "C:\\Users\\estef\\AppData\\Local\\Temp\\opencode\\evidence-storage-20261008-r2",
+  "raw_evidence_tracked_in_git": false,
+  "source_dataset_binary_copy_sha256": "9b0138593262db4526039ad5c5ec421cf5fac64bcbe9dec8f598faaec99759c3",
+  "missing_final_report": "v2/1m-bench.json",
+  "completed_1m": ["control", "registry_control", "monthly", "quarterly", "archive"],
+  "incomplete_1m": ["hotcold"],
+  "not_started_1m": ["brin", "covering"],
+  "termination_cause": "UNVERIFIED",
+  "final_architecture_classification": "PENDING",
+  "artifacts": [
+    {
+      "path": "owner.json",
+      "bytes": 453,
+      "sha256": "51ed8f73f782b10d63996e7160e296f08ec48b46e89621dab31c2fb94f166646"
+    },
+    {
+      "path": "gate3-init.json",
+      "bytes": 27064,
+      "sha256": "579860e23dafd2118a76f273cbb240db7fc26ad5ee2f2b6c8231b03ec81141fb"
+    },
+    {
+      "path": "gate3-gate.json",
+      "bytes": 37244,
+      "sha256": "c8e923983376713342ec22779da6eb34c0055184f8434ffbcbc1e974bc6f7ad8"
+    },
+    {
+      "path": "post-gate-checks-v2.json",
+      "bytes": 2606,
+      "sha256": "0dd40fb3ddc1382b8fdc6dcb426cbfcab7cc3f9d47c464f0cf5c8e90dcd997f8"
+    },
+    {
+      "path": "prediktia_lab_evidence_storage_gate3-recovery.dump",
+      "bytes": 2145296,
+      "sha256": "e40ccf1b5febacc2b07fe6a3ae66c6b21f9d2a625d1ae3cb8bb824b2a84e721c"
+    },
+    {
+      "path": "100k2-init.json",
+      "bytes": 27066,
+      "sha256": "3d1a5ee5115b430d23792728368de9eb29fc00d1f22ae6198baed4f89e7f0649"
+    },
+    {
+      "path": "v2/100k2-bench.json",
+      "bytes": 159504530,
+      "sha256": "3bc5536fbcbf41edcdd9b6adad947cbbdca5ec02eac4672254b88325ebc1e624"
+    },
+    {
+      "path": "v2/progress-100000.jsonl",
+      "bytes": 108727326,
+      "sha256": "acd79f5d6c9d1627a76e9229961ea69cd3c89fc62e7b1cdce3c44f0d0461af9a"
+    },
+    {
+      "path": "1m-admission.json",
+      "bytes": 394,
+      "sha256": "16befd2d80f431da601f78d8afa864855c962c400c4dcb1cf6ac9c6e5ad2f635"
+    },
+    {
+      "path": "1m-init.json",
+      "bytes": 27062,
+      "sha256": "f4be9d0098680dd0542b45a56978c548c870676ce98ae9049b350c63f0cebf31"
+    },
+    {
+      "path": "v2/progress-1000000.jsonl",
+      "bytes": 78869490,
+      "sha256": "68f56d59bb1ef84ce4a6bac0fe7c4aa48dcff85b0f2f19c2299cad90006d1f48"
+    },
+    {
+      "path": "100k-bench.json",
+      "bytes": 159539682,
+      "sha256": "f95b815bc5c0e727b96ff0a459bd21bd7684324c214001bc3f0e62206a009d78",
+      "checkpoint_eligible": false,
+      "reason": "Superseded synthetic response grouping; retained, not deleted."
+    },
+    {
+      "path": "excluded-first-100k.json",
+      "bytes": 506,
+      "sha256": "8228bdbb7fcb7e1452ec9f53f8e0ff061e0d8d082e25b57d60229e64cb64b394"
+    }
+  ]
+}
