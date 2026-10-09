@@ -133,3 +133,114 @@ def test_contradictory_receipt_metadata_rejected_before_any_sql():
             payload(2, datetime(2025, 1, 1, tzinfo=UTC), evidence_id=evidence_id)]
     with pytest.raises(ValueError, match="receipt metadata"):
         append_batch(None, None, CANDIDATES[0], rows, verify=False)
+
+
+@pytest.mark.parametrize("candidate", ["control", "registry_control", "monthly", "quarterly", "archive"])
+def test_missing_only_refuses_completed_candidates(candidate, tmp_path):
+    from tools.evidence_storage_lab.missing_only import parse_args as recovery_args
+    with pytest.raises(SystemExit):
+        recovery_args(["--run-root", str(tmp_path), "--output", str(tmp_path/"new"), "--candidates", candidate])
+
+
+def test_missing_only_requires_exact_order_and_fresh_output(tmp_path):
+    from tools.evidence_storage_lab.missing_only import parse_args as recovery_args
+    base = ["--run-root", str(tmp_path), "--output", str(tmp_path/"new"), "--candidates"]
+    assert recovery_args(base+["hotcold", "brin", "covering"]).candidates == ["hotcold", "brin", "covering"]
+    for names in (["hotcold"], ["brin", "hotcold", "covering"], ["hotcold", "hotcold", "covering"]):
+        with pytest.raises(SystemExit):
+            recovery_args(base+names)
+    (tmp_path/"new").mkdir()
+    with pytest.raises(SystemExit):
+        recovery_args(base+["hotcold", "brin", "covering"])
+
+
+def test_missing_only_disk_gate_projects_five_gib_reserve(monkeypatch):
+    from types import SimpleNamespace
+    from tools.evidence_storage_lab import missing_only
+    target = SimpleNamespace(cluster="unused")
+    def measured(free):
+        return {"disk_free_bytes": free, "available_memory_bytes": 3*1024**3}
+    monkeypatch.setattr(missing_only, "resources", lambda _: measured(missing_only.RESERVE+missing_only.ALLOWANCE-1))
+    with pytest.raises(RuntimeError, match="DISK_GATE_FAILED"):
+        missing_only.disk_gate(target, "test")
+    monkeypatch.setattr(missing_only, "resources", lambda _: measured(missing_only.RESERVE+missing_only.ALLOWANCE))
+    assert missing_only.disk_gate(target, "test")["disk_free_bytes"] == missing_only.RESERVE+missing_only.ALLOWANCE
+
+
+def test_offline_artifact_audit_detects_content_and_size_changes(tmp_path):
+    from tools.evidence_storage_lab.missing_only import file_digest
+    from tools.evidence_storage_lab.offline_audit import verify_artifact
+    path = tmp_path/"journal.jsonl"
+    path.write_bytes(b"original")
+    expected = {"bytes": path.stat().st_size, "sha256": file_digest(path)}
+    verify_artifact(path, expected)
+    for content in (b"modified", b"truncated"):
+        path.write_bytes(content)
+        with pytest.raises(AssertionError, match="checksum/size"):
+            verify_artifact(path, expected)
+
+
+@pytest.fixture
+def offline_records(monkeypatch):
+    from tools.evidence_storage_lab import offline_audit
+    from tools.evidence_storage_lab.benchmark import CUTOFFS
+    from tools.evidence_storage_lab.missing_only import COMPLETED, MISSING
+    # Exercise aggregation guards independently; real sample/plan auditing is
+    # performed by audit_record() on the retained artifacts, not these tiny stubs.
+    monkeypatch.setattr(offline_audit, "audit_record", lambda _: None)
+    def record(name):
+        value = {"candidate": name, "strict_parity": {"cutoffs": list(CUTOFFS)},
+                 "reads": [{"cutoff": cutoff, "batch": 380, "mode": "forced_generic", "result_counts": {"KNOWN": 380}} for cutoff in CUTOFFS],
+                 "late_read_after_insert": {"result_counts": {"KNOWN": 380}},
+                 "writes": [{"operation": op, "batch": batch} for op in ("observation_insert", "unchanged_confirmation") for batch in (1, 10, 380, 1000)],
+                 "index_alternative": {"existing_indexes_preserved": True}}
+        if name in MISSING:
+            value.update(execution_epoch="recovery", unpartitioned_control_parity={"status": "PASS"},
+                         post_measurement_semantics={"status": "PASS", "exact_replay": "PASS", "inconsistent_replay": "PASS",
+                             "confirmations_partial_ties": "PASS", "delete_restrict": ["fixtures", "providers"], "extra_evidence_committed": False})
+        return value
+    original = [record(name) for name in COMPLETED]
+    recovered = [record(name) for name in MISSING]
+    aggregate = {"status": "AUDITED_8_OF_8", "immutable_inputs_preserved": True, "observations": 1_000_000,
+                 "original_campaign_runtime_seconds": None, "original_campaign_wal_bytes": None,
+                 "candidates": copy.deepcopy([{**r, "execution_epoch": "original 2026-10-08"} for r in original]+recovered)}
+    return original, recovered, aggregate
+
+
+def test_offline_aggregation_accepts_unchanged_five_plus_three(offline_records):
+    from tools.evidence_storage_lab.offline_audit import compare_records
+    assert len(compare_records(*offline_records)) == 8
+
+
+@pytest.mark.parametrize("corruption", ["original", "recovery", "duplicate", "epoch", "runtime", "wal", "scale",
+                                        "classifications", "writes", "semantics", "indexes"])
+def test_offline_aggregation_rejects_tampered_evidence(offline_records, corruption):
+    from tools.evidence_storage_lab.offline_audit import compare_records
+    original, recovered, aggregate = offline_records
+    records = aggregate["candidates"]
+    if corruption == "original":
+        records[0]["extra"] = "changed"
+    elif corruption == "recovery":
+        records[5]["extra"] = "changed"
+    elif corruption == "duplicate":
+        records[-1]["candidate"] = "brin"
+    elif corruption == "epoch":
+        for r in recovered:
+            r["execution_epoch"] = "original 2026-10-08"
+        records[5:] = copy.deepcopy(recovered)
+    elif corruption in ("runtime", "wal"):
+        aggregate["original_campaign_runtime_seconds" if corruption == "runtime" else "original_campaign_wal_bytes"] = 123
+    elif corruption == "scale":
+        aggregate["observations"] = 5_000_000
+    else:
+        if corruption == "classifications":
+            recovered[0]["reads"][0]["result_counts"] = {"UNKNOWN_AT_T": 380}
+        elif corruption == "writes":
+            recovered[0]["writes"].pop()
+        elif corruption == "semantics":
+            recovered[0]["post_measurement_semantics"]["exact_replay"] = "FAIL"
+        elif corruption == "indexes":
+            recovered[0]["index_alternative"]["existing_indexes_preserved"] = False
+        records[5:] = copy.deepcopy(recovered)
+    with pytest.raises(AssertionError):
+        compare_records(original, recovered, aggregate)

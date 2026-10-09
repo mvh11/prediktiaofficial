@@ -1,0 +1,46 @@
+{
+  "status": "AUDITED_8_OF_8",
+  "owner": "OPENCODE_AGENT / EVIDENCE STORAGE LAB",
+  "authorized_checkpoint": "3f5b1c5000596055bbaaf80c19a5af68e0b9a657",
+  "run_root": "C:\\Users\\estef\\AppData\\Local\\Temp\\opencode\\evidence-storage-20261008-r2",
+  "original_manifest": "artifact-manifest.json",
+  "recovery_namespace": "option-b-recovery-20261009-r1",
+  "original_completed_1m": ["control", "registry_control", "monthly", "quarterly", "archive"],
+  "recovered_1m": ["hotcold", "brin", "covering"],
+  "completed_1m": 8,
+  "execution_epochs": ["original 2026-10-08", "2026-10-09T05:02:36.446908+00:00"],
+  "source_dataset_binary_copy_sha256": "9b0138593262db4526039ad5c5ec421cf5fac64bcbe9dec8f598faaec99759c3",
+  "original_journal_sha256": "68f56d59bb1ef84ce4a6bac0fe7c4aa48dcff85b0f2f19c2299cad90006d1f48",
+  "original_campaign_runtime_seconds": null,
+  "original_campaign_wal_bytes": null,
+  "final_architecture_classification": "A",
+  "final_recommendation": "KEEP_UNPARTITIONED",
+  "raw_evidence_tracked_in_git": false,
+  "artifacts": [
+    {
+      "path": "option-b-recovery-20261009-r1/aggregated-1m.json",
+      "bytes": 169176986,
+      "sha256": "89947e7311bcfb838a59bce54d71ff723cab47ab4c157700eb52a9038bd83551"
+    },
+    {
+      "path": "option-b-recovery-20261009-r1/immutable-inputs.json",
+      "bytes": 28018,
+      "sha256": "b3029220889da330ade0a51f52c3fe7bb564a960778b83195d81388070d27e9e"
+    },
+    {
+      "path": "option-b-recovery-20261009-r1/partial-hotcold-forensics.json",
+      "bytes": 214131,
+      "sha256": "9239386fe4ced4624c3056684dcbffaffb665bf10b77aec52cf9cd87cdcefe84"
+    },
+    {
+      "path": "option-b-recovery-20261009-r1/recovery-1m.jsonl",
+      "bytes": 37055591,
+      "sha256": "94b1c97cb5ffc94d2f9985969ecb985e1933dfedba04e52259a6bd4bb1c9eddd"
+    },
+    {
+      "path": "option-b-recovery-20261009-r1/output-checksums.json",
+      "bytes": 571,
+      "sha256": "926330f5fb53607394a8b12bd75a8f01d68ad9e6f4abcb33a7a01a2ad392d885"
+    }
+  ]
+}

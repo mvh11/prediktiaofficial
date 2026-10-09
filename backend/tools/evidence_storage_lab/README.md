@@ -6,35 +6,49 @@ Owned by **OPENCODE_AGENT / EVIDENCE STORAGE LAB**, baseline
 production policy, or authorization to deploy. Do not edit application code,
 existing migrations, 0009, A5D, canonical DI documentation or another worktree.
 
-## Current checkpoint: STOP / incomplete
+## Current result: COMPLETE / WAIT FOR CHIEF REVIEW
 
-**PHASE2_INCOMPLETE_CHECKPOINT**: the corrected 100k matrix completed; the 1M
-campaign terminated with five of eight candidates validated. Hot/cold is partial;
-BRIN and covering did not start. The termination cause is **UNVERIFIED**.
-Completed comparisons favor unpartitioned storage, but final architecture
-classification remains **PENDING**. This is not a deployment recommendation.
+**AUDITED_8_OF_8**: the corrected 100k matrix and final 1M comparison are complete.
+Chief authorized Option B missing-only recovery at checkpoint
+`3f5b1c5000596055bbaaf80c19a5af68e0b9a657`. Only hot/cold, BRIN and covering
+were executed, sequentially, using unchanged measured helpers. The five original
+completed candidates, source dataset and original journal were preserved.
 
-See [CHECKPOINT.md](CHECKPOINT.md) for the accepted state and recovery decision,
-and [artifact-manifest.json](artifact-manifest.json) for external evidence paths,
-sizes and SHA-256 checksums. Large raw evidence and the PostgreSQL cluster remain
-outside Git. They are local disposable storage, not a durable shared backup.
+Final architecture recommendation: **A — KEEP_UNPARTITIONED**. No production
+adoption, merge, additional execution or multi-million run is authorized.
+See [RESULTS.md](RESULTS.md) for evidence, qualifications and the decision.
 
-Chief decision: **Option D — stop current execution**. No benchmarks, recovery
-runner, candidate recreation, partial-state deletion or multi-million work are
-authorized. Option B is preferred later only with explicit authorization and a
-fresh conservative admission check requiring **at least 8.75 GiB free** while
-preserving **5 GiB**. Observed design-time free space was approximately 7.79 GiB.
+[CHECKPOINT.md](CHECKPOINT.md) and [artifact-manifest.json](artifact-manifest.json)
+remain the frozen **historical incomplete** checkpoint and original evidence
+manifest; they are not the current status. [recovery-manifest.json](recovery-manifest.json)
+adds the separate recovery namespace, epochs and checksums. Large raw evidence
+and the retained PostgreSQL cluster remain outside Git on local disposable
+storage, not a durable shared backup. Original whole-campaign WAL/runtime totals
+remain unavailable; recovery does not fabricate them.
 
-The checkpoint commit preserves the original baseline-pinned safety code.
-`assert_workspace()` deliberately refuses database commands when HEAD differs
-from the authorized baseline. Do not relax that guard to run this committed
-snapshot. Measurement provenance remains in the original reports; checkpoint
-documentation additions are not changes to the measured methodology.
+`missing_only.py` is a one-shot checkpoint-pinned wrapper, **not a resume API**.
+It rejects completed candidates, existing output and existing missing-candidate
+schemas, checks owned loopback/durable target identity and source provenance,
+and requires **8.75 GiB free** before every candidate/space-heavy stage to retain
+the **5 GiB** projected reserve. Incomplete hot/cold forensics were verified and
+preserved before dependency-checked, schema-local RESTRICT cleanup; no CASCADE.
+Its authorization expires when HEAD leaves that checkpoint. The original
+baseline-pinned safety guard was not relaxed. Do not rerun either campaign.
+
+Offline validation from `backend/` (no database connection or benchmark):
+
+```powershell
+.venv/Scripts/python.exe -B -m tools.evidence_storage_lab.offline_audit
+```
+
+This verifies both manifests, journals versus aggregate, unchanged measured
+sources (except documented README updates), eight-record sample/plan/count
+coverage, control classification parity, forensic metadata and separate epochs.
 
 ## Historical reproduction recipe (not execution authorization)
 
 The following recipe documents the original fresh-campaign workflow. Do not run
-it to resume this incomplete campaign or rerun the five completed candidates.
+it to resume or repeat this completed comparison.
 
 ```powershell
 python -m venv backend/.venv
