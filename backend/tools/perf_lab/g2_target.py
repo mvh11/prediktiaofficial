@@ -60,18 +60,18 @@ class TargetSpec:
     branch_id: str
 
 
-def authorize_target(environ) -> TargetSpec:
+def authorize_target(environ, *, url_env: str = URL_ENV, branch_env: str = BRANCH_ENV) -> TargetSpec:
     """Valida el entorno antes de importar la app o abrir una conexión."""
     if environ.get(CLASSIFICATION_ENV) != "NON_PRODUCTION":
         raise TargetRefused(f"{CLASSIFICATION_ENV} debe ser NON_PRODUCTION")
-    branch = environ.get(BRANCH_ENV, "")
+    branch = environ.get(branch_env, "")
     if not re.fullmatch(r"br-[a-z0-9-]{3,60}", branch):
-        raise TargetRefused(f"{BRANCH_ENV} ausente o inválido")
+        raise TargetRefused(f"{branch_env} ausente o inválido")
     if any(k.startswith("PG") and v for k, v in environ.items()):
         raise TargetRefused("El destino requiere un entorno sin variables PG*")
-    raw = environ.get(URL_ENV, "")
+    raw = environ.get(url_env, "")
     if not raw:
-        raise TargetRefused(f"Falta {URL_ENV}")
+        raise TargetRefused(f"Falta {url_env}")
     try:
         url = make_url(raw)
     except Exception as exc:  # noqa: BLE001  el mensaje podría contener la URL
