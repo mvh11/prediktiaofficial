@@ -21,6 +21,125 @@ Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Int
 - **Rendimiento:** no se vuelve a medir; el merge no toca el camino del escritor.
 - **Riesgos aceptados que siguen abiertos:** aceptación de A6 para producción **HOLD** (nueva medición en el entorno de destino; arquitectura de almacenamiento y particionado de la evidencia); verificación en PostgreSQL 14–17 (aquí solo 18.6); el lock solo vale para Linux + Python 3.12.
 
+## DI-A5D DESIGN: FROZEN
+
+**Estado:** diseño **CONGELADO** por el Chief (2026-10-08). Rama `feature/data-integrity-a5d` (worktree `prediktia-di-a5d`), base canónica `1c06ef9`. Implementación de A5D (solo esquema y modelos) autorizada; **A5E no empieza**. La semántica de A6 sigue congelada y no se toca.
+
+- **Origen:** auditoría DI-A5A "Recovery & Failure-Isolation Design Audit" (2026-10-05, aprobada). Sus columnas eran orientativas, no un esquema; este apartado es el esquema. La migración prevista entonces queda sustituida por **`0009`**.
+- **Qué es A5D:** la base persistente del recovery: dos tablas nuevas y sus modelos ORM. Ningún servicio, job ni proceso programado las lee ni las escribe todavía.
+
+### A5D: conceptos y tablas físicas
+
+| Concepto | Tabla física | Para qué |
+|---|---|---|
+| `sync_unit_state` | `sync_unit_states` | Estado actual de cada unidad recuperable: último intento, resultado, éxito y fallo |
+| `provider_incident` | `provider_incidents` | Un episodio por proveedor y tipo (credenciales, cuota, límite, caída): evidencia de SLA |
+
+### A5D: unidades recuperables
+
+**Identidad:** `provider + unit_kind + season_id`. Una temporada ya pertenece a una sola competición. Sin fila = **nunca intentada**.
+
+| `unit_kind` | Servicio | Petición por unidad | Se completa cuando |
+|---|---|---|---|
+| `fixtures_season` | `fixture_sync_service.sync_fixtures` | 1 `/fixtures?league&season` | commitea la transacción de escritura de esa competición (equipos, `fixtures`, `fixture_observations` y mapeos) para una petición de **temporada completa** |
+| `catalog_season_teams` | `catalog_sync_service.sync_catalog` | 1 `/teams` | commitea la transacción de equipos (`upsert_teams` + `link_teams_to_season`) |
+
+**Fuera de `sync_unit_states`:**
+
+- **Backfill histórico:** sigue con `season_backfill_runs` (Modular), sin cambios.
+- **Estadísticas:** siguen con `statistics_runs` y su propio estado (Modular), sin cambios.
+- **Syncs de fixtures por rango** (`date_from` / `date_to`): **no** marcan éxito ni fallo de `fixtures_season`.
+- `/leagues` del catálogo (requisito previo del run), el check de frescura (solo lee) y 5Dollar (sin unidades de sync).
+
+### A5D: esquema de `sync_unit_states`
+
+| Columna | Tipo | Nulo | Notas |
+|---|---|---|---|
+| `unit_kind` | text | NOT NULL | `IN ('fixtures_season', 'catalog_season_teams')` |
+| `provider` | text | NOT NULL | FK `providers.code` **ON DELETE RESTRICT** |
+| `season_id` | integer | NOT NULL | FK `seasons.id` **ON DELETE CASCADE** |
+| `last_attempt_started_at` | timestamptz | NULL | se escribe justo antes de la petición HTTP |
+| `last_outcome` | text | NULL | `IN ('succeeded', 'failed', 'skipped')` |
+| `last_outcome_at` | timestamptz | NULL | |
+| `last_success_at` | timestamptz | NULL | ver el contrato de éxito |
+| `consecutive_failures` | integer | NOT NULL, default 0 | ≥ 0 |
+| `last_failure_at` | timestamptz | NULL | |
+| `last_error_scope` | text | NULL | `IN ('unit', 'provider', 'database')` |
+| `last_error_class` | text | NULL | nombre de la clase de la excepción |
+| `last_error_status` | integer | NULL | código HTTP, 100–599 |
+| `last_error_message` | text | NULL | ≤ 500 caracteres, truncado y sin secretos |
+| `created_at` | timestamptz | NOT NULL | default `statement_timestamp()` |
+| `updated_at` | timestamptz | NOT NULL | default `statement_timestamp()` |
+
+- **PK:** `(unit_kind, provider, season_id)`. **Índice:** `ix_sync_unit_states_season (season_id)`, para la cascada de la FK.
+- **CHECK:**
+  - valores válidos de `unit_kind`, `last_outcome` y `last_error_scope`; `consecutive_failures ≥ 0`; estado HTTP entre 100 y 599; mensaje ≤ 500 caracteres;
+  - `(last_outcome IS NULL) = (last_outcome_at IS NULL)`;
+  - `succeeded` ⇒ `last_success_at = last_outcome_at` y `consecutive_failures = 0`;
+  - `failed` ⇒ `last_failure_at = last_outcome_at`, `consecutive_failures ≥ 1`, `last_error_class` y `last_error_scope` presentes;
+  - metadatos de fallo coherentes: `last_failure_at`, `last_error_class` y `last_error_scope` van juntos; `last_error_status` y `last_error_message` solo con fallo; `consecutive_failures > 0` exige `last_failure_at`;
+  - orden: sin `last_outcome_at` no hay `last_success_at` ni `last_failure_at`, y ninguno es posterior a `last_outcome_at`.
+- **Estado derivado, no guardado:** **interrumpida / desconocida** = `last_attempt_started_at` posterior a `last_outcome_at` (o sin resultado).
+- **No incluye:** el estado de claim de A5F (expiración ni dueño), `next_due_at`, `priority_class`, estado de orquestación, contadores de peticiones o de cuota, copias de payloads ni secretos.
+
+### A5D: esquema de `provider_incidents`
+
+| Columna | Tipo | Nulo | Notas |
+|---|---|---|---|
+| `id` | bigint identity | NOT NULL | PK |
+| `provider` | text | NOT NULL | FK `providers.code` **ON DELETE RESTRICT** |
+| `kind` | text | NOT NULL | `IN ('auth', 'quota', 'rate_limit', 'outage')` |
+| `opened_at` | timestamptz | NOT NULL | default `statement_timestamp()` |
+| `last_failure_at` | timestamptz | NOT NULL | |
+| `closed_at` | timestamptz | NULL | abierto = `closed_at IS NULL` (sin columna de estado) |
+| `close_reason` | text | NULL | `IN ('provider_recovered', 'manual')` |
+| `failure_count` | integer | NOT NULL, default 1 | ≥ 1 |
+| `affected_units` | integer | NOT NULL, default 0 | ≥ 0: la unidad que lo detectó más las que no se pidieron por él |
+| `last_error_class` | text | NOT NULL | |
+| `last_status_code` | integer | NULL | 100–599 |
+| `last_endpoint` | text | NULL | solo la ruta: `~ '^/[A-Za-z0-9/_-]*$'` (sin host ni query string) |
+| `retry_after_until` | timestamptz | NULL | solo si el proveedor mandó `Retry-After`; nunca una estimación local |
+
+- **CHECK:** `(closed_at IS NULL) = (close_reason IS NULL)`; `last_failure_at ≥ opened_at`; `closed_at IS NULL OR closed_at ≥ opened_at`; contadores y códigos como en la tabla.
+- **Índices:** `uq_provider_incidents_open (provider, kind) WHERE closed_at IS NULL` (como mucho un incidente abierto por proveedor y tipo) y `ix_provider_incidents_provider_opened (provider, opened_at)`.
+- **`outage`: RESERVED_BUT_INACTIVE.** La persistencia lo acepta, pero en A5D no hay ningún productor ni regla que lo abra. La regla histórica de fallos transitorios consecutivos **no** se implementa.
+- **Retención indefinida:** sin borrado ni compactación. Un incidente cerrado no se reabre: el siguiente fallo crea otra fila.
+- **Nunca se guardan:** credenciales, cabeceras, query strings ni payloads del proveedor.
+
+### A5D: contratos de transacción (para A5E)
+
+- **Éxito:** el estado que representa la unidad completada se escribe **dentro de la MISMA transacción de dominio que tiene éxito**. Un rollback también deshace `last_success_at`.
+  - **`last_success_at`** = instante de la BD en que se registra la unidad completada dentro de esa transacción: **`statement_timestamp()`**. **No** es `fixture_observations.observed_at` ni el inicio de la transacción (`now()` / `CURRENT_TIMESTAMP`).
+  - Al tener éxito, `consecutive_failures` vuelve a 0 y se vacían los campos de error.
+- **Fallo:** fallo de dominio → **rollback** → **transacción nueva** → registro del fallo, **best-effort**.
+  - Si el registro del fallo también falla: se conserva el fallo original (resultado, errores y códigos de salida, igual que hoy), no se resucita nada del dominio y **nunca** se convierte en éxito. La unidad queda como interrumpida / desconocida.
+- **Incidentes:** se abren o continúan con `INSERT … ON CONFLICT (provider, kind) WHERE closed_at IS NULL DO UPDATE` (atómico entre escritores concurrentes). Se cierran tras una respuesta correcta del mismo proveedor, después del commit de dominio y best-effort, o a mano. `ProviderNotConfiguredError` no es un incidente (es configuración local).
+
+### A5D: migración `0009`
+
+`0009_sync_recovery_state.py`, `down_revision = "0008"`, **una sola cabeza**.
+
+- **Upgrade:** `SET LOCAL lock_timeout = '5s'` (convención de `0008`); `provider_incidents` y después `sync_unit_states`, con sus CHECK, FK e índices. Sin carga inicial (tablas vacías), sin funciones y sin tocar tablas existentes.
+- **Downgrade:** borra `sync_unit_states` y después `provider_incidents`.
+- **Relación con `0008`:** ninguna salvo el orden. Las FK nuevas toman bloqueos breves en `providers` y `seasons`: se ejecuta con las syncs paradas, como `0008`.
+
+### A5D: fases aplazadas
+
+| Fase | Contenido |
+|---|---|
+| **A5E** | integración en los servicios: registrar y consumir el estado (intentos, éxitos, fallos, incidentes) |
+| **A5F** | claiming y propiedad concurrente de las unidades |
+| **Orquestación posterior** | ejecución programada, catch-up automático, bloqueo del proveedor y sondas |
+
+### A5D: frontera entre departamentos
+
+```
+A5D SCHEMA:              CROSS_DEPARTMENT_REVIEW_REQUIRED = NO
+A5E SERVICE INTEGRATION: CROSS_DEPARTMENT_REVIEW_REQUIRED = YES
+```
+
+A5E añade escrituras dentro de las transacciones compartidas de fixtures y catálogo (que audita `live_sync` de Modular), y `provider_incidents` se solapa con las guardas de `ops_tick` (circuito de credenciales y cuota, calculados con `live_sync_runs` y `statistics_runs`). Ambos puntos se revisan con Modular antes de A5E.
+
 ## Baseline reconciliado DI + Modular (vigente)
 
 **Estado:** `integration/di-modular-m43-reconcile` es el baseline canónico de Data Integrity integrado con Modular. Lo que diga la rama (Git, migraciones, tests) manda sobre este documento.
@@ -1062,6 +1181,6 @@ Verificación anterior, sobre `542c761` en esta rama: 204 passed, 0 skipped, con
   - reanudación y catch-up automático desde el último punto seguro, para no dejar huecos de datos;
   - evidencia suficiente para auditar el SLA y reclamar al proveedor si hubo una caída.
 
-  Esos registros nunca deben guardar secretos ni API keys. Todavía no hay diseño de tablas ni migraciones: solo se registra el pendiente.
+  Esos registros nunca deben guardar secretos ni API keys. La base persistente (tablas y migración `0009`) está diseñada y congelada en [DI-A5D DESIGN: FROZEN](#di-a5d-design-frozen); el resto (A5E en adelante) sigue pendiente.
 - **Normalización de hosts de Neon:** solo contempla `-pooler`. Sería más robusto comparar por el id del endpoint.
 - **Promoción a `main`:** el checkpoint `checkpoint/m42-data-integrity` (`ebcb076`) está validado y publicado, pero todavía no se ha integrado en `main`.
