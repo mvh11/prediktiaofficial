@@ -3,6 +3,15 @@
 **Solo laboratorio.** No es un ensayo de producción ni autoriza la aceptación de A6 para producción.
 Nunca se tocó Neon. Resultado y recomendación: `docs/data-integrity-status.md`, "DI-A6 G2".
 
+## Ejecuciones
+
+| Ejecución | Estado | Archivos |
+|---|---|---|
+| **G2_RUN_1** (2026-10-08) | **STORAGE_PRESSURE_SUSPECTED**: el SSD estaba casi lleno y la máquina llevaba varios días encendida. **Sus latencias quedan marcadas como contaminadas por el entorno**; WAL, HOT, almacenamiento, recuentos y corrección siguen siendo válidos (Run 2 los reproduce) | `*.json` y `SUMMARY.md` de esta carpeta (sin cambios) |
+| **G2_RUN_2** (2026-10-09) | **POST_RESTART / STORAGE_PRESSURE_RELIEVED**: tras reiniciar, con 107,6 GB libres de 930,4 GB (11,6 %). Misma metodología, mismos ajustes, mismo código | `run2/*.json` y `run2/SUMMARY.md` |
+
+Comparación directa: `COMPARISON.md`. **Las latencias de referencia de G2 son las de Run 2.**
+
 ## Candidato
 
 - Commit bajo prueba: `d31eebc8e923c3d0351ac55086e53e08c2a5f62b` (rama `lab/data-integrity-a6-g2`).
@@ -12,8 +21,8 @@ Nunca se tocó Neon. Resultado y recomendación: `docs/data-integrity-status.md`
   `bulk_rows`, `provider_mapping_repository`, la sync, el backfill ni las lecturas temporales, y el
   código añadido no escribe en la BD. El escritor medido es el de la base (opción A + UNNEST).
 - Esquema: cabeza `0008` (no existe `0009` en este árbol).
-- Prueba de que se midió UNNEST: el máximo de parámetros enlazados en una sentencia es 380 (solo
-  las listas `IN`); con VALUES serían ~24 por fila.
+- Prueba de que se midió UNNEST: el máximo de parámetros enlazados en una sentencia es 380–381
+  (solo las listas `IN`, igual en las dos ejecuciones); con VALUES serían ~24 por fila.
 
 ## Entorno
 
@@ -68,6 +77,8 @@ Las versiones de SQLAlchemy y psycopg sí coinciden con el lock.
 - `upgrade-*.json`: migración y bootstrap (duración, recuentos, tamaños, sonda).
 - `writes-pass{A,B,C}.json`: la matriz completa, con las muestras crudas (`raw_ms`, `raw_wal_bytes`).
 - `SUMMARY.md`: tablas generadas con `python -m tools.perf_lab.g2 summarize <json>...`.
+- `run2/`: los mismos archivos para Run 2.
+- `COMPARISON.md`: Run 1 frente a Run 2.
 
 Reproducir (desde `backend/`, PostgreSQL local desechable; nunca Neon):
 

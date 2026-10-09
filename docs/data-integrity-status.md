@@ -4,13 +4,46 @@ Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Int
 
 ## DI-A6 G2 (laboratorio): rendimiento del escritor UNNEST y ensayo de `0007 → 0008`
 
-**Estado:** evidencia de laboratorio recogida (2026-10-08). **Recomendación: CONDITIONAL_PASS.** No autoriza la aceptación de A6 para producción (sigue en **HOLD**). Rama `lab/data-integrity-a6-g2` (worktree `prediktia-di-a6-g2`), **sin push**. La base canónica sigue siendo `1c06ef9`. Nunca se tocó Neon; `0009` no está en este árbol. Detalle, entorno, metodología y JSON: `backend/tools/perf_lab/g2_evidence/`.
+**Estado:** evidencia de laboratorio recogida en dos ejecuciones: **Run 1** (2026-10-08, **STORAGE_PRESSURE_SUSPECTED**, latencias contaminadas por el entorno) y **Run 2** (2026-10-09, **POST_RESTART / STORAGE_PRESSURE_RELIEVED**, latencias de referencia); ver [Run 2](#g2-run-2-control-de-la-presión-de-almacenamiento). **Recomendación: CONDITIONAL_PASS.** No autoriza la aceptación de A6 para producción (sigue en **HOLD**). Rama `lab/data-integrity-a6-g2` (worktree `prediktia-di-a6-g2`), **sin push**. La base canónica sigue siendo `1c06ef9`. Nunca se tocó Neon; `0009` no está en este árbol. Detalle, entorno, metodología y JSON: `backend/tools/perf_lab/g2_evidence/`.
 
 - **Candidato:** `d31eebc` = `1c06ef9` + 15 commits de Modular (M5.7–M5.9B) que **solo añaden** archivos. Verificado en el diff: sin cambios en migraciones, modelos, escritor, mappings, sync, backfill ni lecturas temporales, y el código añadido no escribe en la BD. **G2_CANDIDATE_MISMATCH: NO.** Se midió UNNEST (máximo 380 parámetros por sentencia).
 - **Entorno:** PostgreSQL 18.6 local desechable con ajustes por defecto (`fsync` y `synchronous_commit` on), Windows 11, i3-12100F (4/8), 23,8 GB, SSD SATA, loopback sin pooler, Python 3.13.4. **Representatividad: LIMITED**: sin red hacia Neon, otro sistema operativo y otro runtime (C6 corre en Linux + Python 3.12), versión de PostgreSQL de Neon sin verificar.
 - **Método:** arnés de Checkpoint C (camino real `ensure_teams` + `upsert_fixtures`), 100 000 partidos sintéticos sembrados en `0007` y migrados con el bootstrap real. Lotes 380 / 1000 / 2000 × 7 modos (`insert`, `update`, `unchanged`, `older`, `mixed`, `tie`, `replay`), **30 muestras + 5 de calentamiento** por caso, **tres pases**: A (justo tras el bootstrap), B y C (estado estable). Sin descartar muestras.
 
-### G2: escritor (latencia total por respuesta, ms; 210 muestras por lote y pase = 7 modos × 30)
+### G2 Run 2: control de la presión de almacenamiento
+
+Después de Run 1 se supo que el SSD SATA estaba casi lleno durante las medidas y que la máquina llevaba varios días encendida. Run 2 repite **solo la evidencia sensible al rendimiento** tras reiniciar, con **107,6 GB libres de 930,4 GB (11,6 %)** antes de medir. Mismo commit `d31eebc`, mismo `g2.py`, cluster nuevo con los mismos ajustes por defecto, misma siembra, mismos 7 modos, 30 + 5 muestras, pases A/B/C y mismo orden. Detalle completo: `backend/tools/perf_lab/g2_evidence/COMPARISON.md`; JSON en `g2_evidence/run2/`.
+
+| Lote | Pase | p50 Run 1 → Run 2 (ms) | Δ | p95 Run 1 → Run 2 (ms) | Δ |
+|---:|---|---|---:|---|---:|
+| 380 | A | 92 → 71 | −22,6 % | 120 → 93 | −23,1 % |
+| 380 | C | 91 → 74 | −18,4 % | 121 → 87 | −28,1 % |
+| 1000 | A | 232 → 199 | −14,1 % | 296 → 253 | −14,6 % |
+| 1000 | C | 237 → 202 | −14,7 % | 296 → 230 | −22,1 % |
+| 2000 | A | 480 → 396 | −17,4 % | 563 → 443 | −21,3 % |
+| 2000 | C | 483 → 403 | −16,6 % | 602 → 463 | −23,2 % |
+
+- **Pase B:** p50 −11 % / −14 % / −14 % y p95 −13 % / −6 % / −18 % (380 / 1000 / 2000).
+- **Por modo:** 62 de las 63 combinaciones de modo, lote y pase bajan su p50 (−4,5 % a −29,5 %).
+- **Máximos de Run 2:** 997 ms con 1000 en el pase B (COMMIT de 802 ms durante un checkpoint) y 1211 ms con 2000 en el pase C (una muestra aislada antes del COMMIT; el p95 de ese caso es 579 ms).
+- **Dónde está la mejora:** antes del COMMIT, en la misma proporción en el cursor SQL (−12 % a −21 %) y en el trabajo de Python de SQLAlchemy antes del cursor, que es CPU del cliente sin E/S (−15 % a −22 %). **El COMMIT no mejora** (p50 1,2–4,6 ms en las dos ejecuciones; el p95 depende de los checkpoints).
+- **Frente a C.12:** el p50 por modo del pase C pasa de 85–98 / 215–256 / 457–519 ms (Run 1) a **70–79 / 190–217 / 378–431 ms** (Run 2), frente a 66–78 / 181–210 / 362–413 en C.12. La diferencia del 20–25 % baja a **~0–5 %**.
+- **WAL, HOT, almacenamiento y recuentos:** se reproducen. Hay dos excepciones con 2000 en los pases B y C, que dependen del estado de las páginas y van en ambos sentidos: el HOT varía (`update` B 99 → 62 %, `unchanged` C 100 → 89 %) y también el WAL de esos casos. Con 380 y 1000 el HOT de estado estable sigue en 99–100 %. 305–323 B por observación.
+- **Migración `0007 → 0008`:** casi igual (100 000: 7,31 → 7,40 s, +1,2 %; 250 000: 18,37 → 17,92 s, −2,5 %; BD del escritor 8,02 → 6,58 s, −18 %, que en Run 1 era la más lenta). Siguen siendo 66–74 µs por partido, lector bloqueado toda la migración, mismo crecimiento (615 B por partido) y mismos recuentos de bootstrap.
+- **Errores, timeouts y deadlocks:** 0. Los 5 rollbacks por pase son las conexiones de solo lectura del arnés, como en Run 1.
+
+**Respuestas:**
+- **PERFORMANCE_MATERIALLY_IMPROVED: YES** (latencia del escritor −11 % a −28 % en p50 y p95 en todos los lotes y pases; la migración y el COMMIT no cambian materialmente).
+- **PREVIOUS_VARIANCE: REDUCED.** La diferencia frente a C.12 baja de 20–25 % a ~0–5 %.
+- **RUN_1_LATENCY_CONTAMINATED: YES.** Las latencias del escritor de Run 1 quedan marcadas como contaminadas por el entorno. Sus WAL, HOT, almacenamiento, recuentos y corrección siguen siendo válidos (Run 2 los reproduce).
+
+**Causa: no atribuida a la presión de almacenamiento.** La comparación muestra que la diferencia era del estado de la máquina en Run 1, porque el mismo código, datos y ajustes dan otra latencia. Pero el trabajo de CPU de Python sin E/S mejora tanto como la ejecución SQL, mientras que el COMMIT (`fsync`) y la migración (sobre todo E/S del servidor) no mejoran. Eso no encaja con una lentitud solo de disco, y el reinicio cambió a la vez el espacio libre y el tiempo encendida, así que no se puede separar cuál de los dos (u otro estado del host) la causó.
+
+**Corrección de Run 2 (mínima):** por muestra, 1890 muestras sin violaciones (`UpsertCounts` exactos, `replay` sin observaciones ni actualizaciones, `older` sin actualizaciones, 380–381 parámetros por sentencia). Sobre toda la BD, 0 en todos los invariantes de A6 (ganador = observación, ninguna observación más nueva que la ganadora, sin duplicados, huérfanas ni partidos sin mapping, hashes de 32 B, solo el bootstrap multi-temporada). **FULL_SUITE_RERUN: NOT_REQUIRED**: ni la aplicación ni el arnés cambiaron.
+
+### G2 Run 1 (STORAGE_PRESSURE_SUSPECTED): escritor (latencia total por respuesta, ms; 210 muestras por lote y pase = 7 modos × 30)
+
+> **Latencias de Run 1 contaminadas por el entorno** (ver Run 2). Se conservan sin cambios; WAL, HOT, almacenamiento y corrección siguen siendo válidos.
 
 | Lote | Pase | p50 | p95 | máx | p50 por modo | COMMIT p50 / p95 | WAL por partido (update / unchanged / insert / replay) | HOT update / unchanged |
 |---:|---|---:|---:|---:|---|---|---|---|
@@ -25,7 +58,7 @@ Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Int
 - **Observaciones por muestra:** exactamente el lote en `insert`, `update`, `unchanged`, `older`, `mixed` y `tie`; **0** en `replay`. `UpsertCounts` exactos en todos los casos (p. ej. `mixed` 2000 = 667/667/666).
 - **Errores, timeouts y deadlocks:** 0 en los tres pases (2205 escrituras medidas; `pg_stat_database.deadlocks` = 0). Los 5–7 rollbacks por pase son conexiones de solo lectura del arnés, no escrituras fallidas: cada muestra comprobó sus aserciones.
 - **Primera escritura frente a estado estable:** la latencia apenas cambia. Cambia el HOT: justo tras el bootstrap, que reescribe todas las filas de `fixtures`, `update` con 380 cae al 33 % y su WAL a 1,47 KB por partido; desde el pase B ambos se estabilizan (HOT ~100 %, ~0,9 KB). El HOT del estado estable se midió **con** el `VACUUM ANALYZE` que el arnés ejecuta antes de cada caso.
-- **Frente a C.12 (mismo código del escritor):** aquí las latencias son un 20–25 % mayores (380: p50 79–103 frente a 66–78 ms). La diferencia está en la ejecución de sentencias, no en el COMMIT (~3 ms). Es variación de entorno y sesión, no atribuida.
+- **Frente a C.12 (mismo código del escritor):** aquí las latencias son un 20–25 % mayores (380: p50 79–103 frente a 66–78 ms). La diferencia está en la ejecución de sentencias, no en el COMMIT (~3 ms). Es variación de entorno y sesión, no atribuida. **Actualización (Run 2):** tras reiniciar la máquina baja a ~0–5 %; era del estado de la máquina en Run 1, sin poder separar la presión de almacenamiento del tiempo encendida.
 - **Almacenamiento:** 305–324 B por observación, índices incluidos (~170–180 MiB por cada 584 440 observaciones de un pase). En estado estable, `fixtures` no crece (+0,01 MiB por pase).
 
 ### G2: ensayo de `0007 → 0008` (LAB REHEARSAL, no ensayo de producción)
@@ -76,7 +109,7 @@ Se basan en lo medido. Las latencias deben **volver a medirse en el entorno de d
 - **Un solo cliente:** la concurrencia está cubierta por tests de corrección, no por medidas de rendimiento bajo contención.
 - **El HOT del estado estable** incluye el `VACUUM ANALYZE` del arnés entre casos.
 - **El ensayo de la migración** es de laboratorio, sobre datos sintéticos de 100 000 / 250 000 partidos; el volumen real de producción no se ha verificado aquí.
-- **Variación de entorno:** las latencias difieren un 20–25 % de C.12 con el mismo código; no se ha atribuido la causa.
+- **Variación de entorno:** en Run 1 las latencias diferían un 20–25 % de C.12 con el mismo código. En Run 2, tras reiniciar y con espacio libre en disco, la diferencia baja a ~0–5 %. La causa concreta (espacio en disco, tiempo encendida u otro estado del host) no se ha aislado. El mismo host da ±15–20 % según su estado, así que las latencias locales son orientativas y los umbrales deben fijarse con medidas en destino.
 
 ### G2: recomendación
 
@@ -87,6 +120,8 @@ Se basan en lo medido. Las latencias deben **volver a medirse en el entorno de d
 3. fijar la ventana de la migración `0008` con el recuento real de partidos.
 
 La arquitectura de almacenamiento y particionado de la evidencia sigue pendiente.
+
+**Conclusión local revisada (Run 2):** **CONDITIONAL_PASS**, sin cambios en la recomendación ni en las condiciones. Run 2 da latencias del escritor un 11–28 % menores que Run 1 (380: p95 87–93 ms; 2000: p95 443–463 ms), con más margen frente a C.10 (750 ms) y frente a los umbrales propuestos, que no cambian. WAL, HOT con lotes ≤ 1000, almacenamiento, migración, bootstrap y corrección se reproducen. **A6_CHANGE_REQUIRED: NO.** Las tres condiciones de arriba (Neon no productivo o equivalente, HOT bajo autovacuum, ventana de `0008` con el recuento real) siguen siendo necesarias. La sensibilidad al estado del host refuerza la primera.
 
 ## Checkpoint conjunto DI-A6 + Modular (candidato a nuevo baseline)
 
