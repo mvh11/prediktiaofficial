@@ -2,6 +2,116 @@
 
 Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Integrada con M4.2 en `checkpoint/m42-data-integrity` (ver [Checkpoint M4.2](#checkpoint-m42-ebcb076)). Ver [workstreams.md](workstreams.md).
 
+## DI-A6: ensayo operativo de `0008` y runbook de producción (propuesta)
+
+**Estado:** ensayo NO productivo **PASS** (2026-10-09). **Producción: `0008` NO ejecutada.** **PRODUCTION_READINESS: HOLD**, motivo `PRODUCTION_WRITER_INVENTORY_NOT_FULLY_RESOLVED`. No es un fallo de la arquitectura de A6, aceptada (**PASS**) por el Chief. Evidencia: `backend/tools/perf_lab/rehearsal_0008_evidence/`. Herramienta: `tools/perf_lab/rehearsal_0008.py`, solo para destinos NON_PRODUCTION verificados por `neon.branch_id`.
+
+### Resultado del ensayo (rama `di-a6-0008-rehearsal`, NON_PRODUCTION)
+
+| Paso | Resultado |
+|---|---|
+| Identidad (guarda fail-closed en cada conexión) | rama correcta, primario, PostgreSQL 18.6, pooled con `sslmode=require`, `0007`, 18 671 partidos y 18 671 mappings, `fixture_observations` ausente |
+| Escribible | `transaction_read_only` off; DDL de prueba dentro de una transacción que se deshace: correcto y sin residuos |
+| Grafo de migraciones | una sola cabeza `0008`, sin `0009`, camino `0007 → 0008` = `[0008]` |
+| Quiescencia | 0 otras transacciones, xids de escritura, bloqueos sobre `fixtures` y transacciones preparadas; 0 runs `running` |
+| Punto de recuperación | rama hija `di-a6-0008-rehearsal-checkpoint` creada por IT antes de migrar; **atestiguada por IT**, no verificable desde la sesión de BD; no se tocó |
+| Migración `alembic -c alembic.ini upgrade 0008` | **COMMITTED_0008** en **7,30 s**; bootstrap 2,01 s; lector bloqueado **3,37 s**; WAL 25,1 MiB; +600 B por partido |
+| Bootstrap | 18 671 = 18 671 = 18 671 con un único `evidence_id` y un único instante; hash recalculado desde la fila igual en el 100 %; 0 en todas las comprobaciones |
+| Integridad | 0 huérfanas, 0 duplicados, 0 observaciones más nuevas que la ganadora; UNIQUE y FK `RESTRICT` presentes; mappings intactos |
+| Prueba del escritor (20 partidos propios del ensayo) | **17/17**: inserción, repetición sin evidencia nueva, actualización, evidencia antigua que solo entra en la historia, rollback atómico y `DELETE` con historia rechazado. Filas reales intactas |
+| Invariantes tras la prueba | **PASS** |
+
+### Runbook propuesto para producción
+
+**Responsables:**
+- **CHIEF:** go/no-go y autoridad excepcional (rollback o restauración).
+- **IT_SUPPORT_AGENT:** identidad del entorno, scheduler y disparadores, punto de recuperación e infraestructura.
+- **CLAUDE_AGENT:** procedimiento de la migración y validaciones de BD.
+- **DATA-INTEGRITY-USER:** confirmación del operador en las acciones manuales.
+
+| # | Paso | Mecanismo real | Responsable |
+|---|---|---|---|
+| 0 | Go/no-go y franja | Elegir una franja **lejos de :00 (`ops-live`), :20 (`ops-stats`) y 04:50 UTC (`ops-catalog`)**, por ejemplo :35–:50 UTC | CHIEF |
+| 1 | **Inventario de escritores de `fixtures` cerrado** (precondición, hoy **UNRESOLVED**) | En el código: `ops-live` y `ops-catalog` (→ `live_sync`), `ops-stats` (`statistics_reconcile`, FK a `fixtures`), los jobs manuales `live_sync`, `history_backfill`, `statistics_reconcile` y `statistics_backfill`, y la API `POST /sync/catalog` y `/sync/fixtures` (detrás de `SYNC_ENDPOINTS_ENABLED`). Falta confirmar en el despliegue que no hay más | IT_SUPPORT_AGENT + DATA-INTEGRITY-USER |
+| 2 | Desactivar el scheduler | Variable del repositorio `PREDIKTIA_SCHEDULER_ENABLED` = `"false"` (Settings → Secrets and variables → Actions → Variables, o `gh variable set PREDIKTIA_SCHEDULER_ENABLED --body false`). Es la única puerta de los tres workflows, también para `workflow_dispatch` | IT_SUPPORT_AGENT (confirma DATA-INTEGRITY-USER) |
+| 3 | Parar los demás escritores | `SYNC_ENDPOINTS_ENABLED` en `false` o sin definir en la API desplegada; ninguna ejecución manual de los jobs del paso 1 | IT_SUPPORT_AGENT |
+| 4 | Quiescencia | (a) Ningún run de `ops-*` en curso (`gh run list --workflow ops-live.yml --status in_progress`, y lo mismo para `ops-stats` y `ops-catalog`; la puerta no para un run en marcha). (b) En la BD, solo lectura: los mismos recuentos de quiescencia del ensayo (otras transacciones, xids de escritura, bloqueos sobre `fixtures`, transacciones preparadas, filas `running`). Todo a 0; **si no, ABORT** | IT_SUPPORT_AGENT (a) + CLAUDE_AGENT (b) |
+| 5 | Punto de recuperación | Rama hija de Neon (o restore point) de `production` **después** de la quiescencia y **justo antes** de migrar. Se registran su id saneado, la hora, la revisión `0007` y el recuento de partidos | IT_SUPPORT_AGENT |
+| 6 | Precomprobación en BD | Revisión `0007`, recuento de partidos, `fixture_observations` ausente, una sola cabeza `0008` en el código (`alembic heads`), sin `0009`; rol con permiso para alterar `fixtures` | CLAUDE_AGENT |
+| 7 | **Migración (ventana protegida ≥ 60 s)** | Desde `backend/` del árbol aceptado: `alembic -c alembic.ini upgrade 0008` con la `DATABASE_URL` de producción cargada de forma opaca. **Nunca `upgrade head`.** Es una sola transacción con `lock_timeout` de 5 s | CLAUDE_AGENT (ejecuta el operador que el CHIEF designe) |
+| 8 | Validación del bootstrap y de la integridad | Las mismas consultas agregadas que `validate`, en solo lectura | CLAUDE_AGENT |
+| 9 | Prueba controlada del escritor | **No se usan datos sintéticos en producción.** Es la primera escritura normal, acotada: `python -m app.jobs.live_sync fixtures --competition-id <una competición seguida> --confirm-target <destino saneado>`. Después, los invariantes agregados (`invariants`) | IT_SUPPORT_AGENT ejecuta, CLAUDE_AGENT valida |
+| 10 | Reactivación | Ver el orden más abajo | IT_SUPPORT_AGENT (go del CHIEF) |
+| 11 | Vigilancia del primer ciclo | El primer `ops-live` (:00) y el primer `ops-stats` (:20): conclusión del run, clasificación de `ops_tick`, `live_sync_runs` `completed` e invariantes de nuevo | IT_SUPPORT_AGENT + CLAUDE_AGENT |
+
+**Duración prevista** (con los tiempos del ensayo):
+
+| Fase | Tiempo |
+|---|---|
+| Desactivar el scheduler y la API | 1–5 min, más hasta 20 min si hay un run en curso (la franja lo evita) |
+| Quiescencia | ~1–2 min |
+| Punto de recuperación | ~1–2 min |
+| Precomprobación | ~15–30 s |
+| **Migración** | **7–8 s**, con lectores bloqueados ~3,4 s, dentro de la **ventana protegida reservada ≥ 60 s** |
+| Validación | ~15–30 s |
+| Prueba del escritor más invariantes | ~1–3 min |
+| Reactivación | ~1 min |
+| Primer ciclo | hasta ~60 min de vigilancia (hasta el siguiente :00 y :20) |
+
+En total son **~10–20 min de operación activa**, más la vigilancia. La ventana de ≥ 60 s es la protección de la BD, no la duración del procedimiento.
+
+### Límites de rollback y de recuperación hacia delante
+
+- **Antes del COMMIT de `0008`:** la migración es una sola transacción. Un fallo, incluido un `lock_timeout` de 5 s con un escritor activo, la deshace entera y la BD queda en `0007`.
+  - **Respaldo:** los tests `test_bootstrap_failure_rolls_back_everything_and_rerun_succeeds` y `test_bootstrap_fails_fast_while_a_writer_holds_fixtures` (39 passed en este árbol). Además, la herramienta clasifica el estado como `COMMITTED_0008`, `ROLLED_BACK_AT_0007` o `AMBIGUOUS`.
+  - **Acción:** el scheduler y los escritores siguen parados. Se diagnostica y **no se reintenta a ciegas**: solo cuando la causa está clasificada y con el OK del responsable.
+  - **`AMBIGUOUS` → ABORT** y escalado al CHIEF.
+- **Después del COMMIT, antes de ningún escritor:** **recuperación hacia delante** por defecto, **sin downgrade rutinario**. El `downgrade` existe y está probado (`test_upgrade_downgrade_upgrade_0008`), pero usarlo solo lo decide el CHIEF.
+- **Después de la primera escritura bajo `0008`** (la prueba del paso 9): es el **punto sin rollback rutinario**. Un downgrade borraría `fixture_observations`, es decir, la evidencia temporal nueva: **prohibido sin decisión explícita del CHIEF**.
+- **Punto de recuperación del paso 5:** es un ancla de desastre, **no** un permiso para revertir tras una operación correcta. Restaurarlo pierde todo lo escrito después.
+
+**Recuperación hacia delante (todos los casos):** escritores y scheduler parados → conservar el estado y la evidencia → diagnosticar → reparar hacia delante → revalidar → solo entonces reactivar.
+
+| Caso | Respuesta |
+|---|---|
+| La validación falla tras el commit | Conservar; diagnosticar con consultas agregadas; corrección hacia delante autorizada por el CHIEF; revalidar |
+| Recuentos del bootstrap distintos | No debería pasar: la migración lo valida y se deshace. Si aparece tras el commit, ABORT, escalado al CHIEF y decisión sobre el ancla |
+| Falla la prueba del escritor | Su transacción se deshace entera (rollback atómico ensayado); el fallo queda en `live_sync_runs`; corregir y repetir la prueba. El scheduler sigue apagado |
+| El scheduler no arranca | No toca la BD: revisar la variable, los runs y la clasificación de `ops_tick`; `workflow_dispatch` tras corregir |
+| Fallo de proveedor o de sync tras reactivar | Manejo normal de C6 (corte por credenciales, guarda de cuota): un fallo no escribe nada; ninguna acción de esquema |
+
+### Orden de reactivación
+
+1. Migración PASS.
+2. Bootstrap e integridad PASS.
+3. Prueba del escritor PASS e invariantes PASS.
+4. Sin errores de BD inesperados.
+5. **Inventario de escritores de producción cerrado y bajo control.**
+6. Permitir el camino que escribe `fixtures`: la API sigue con `SYNC_ENDPOINTS_ENABLED` en `false` salvo decisión aparte.
+7. Verificar la primera escritura normal (la del paso 9).
+8. `PREDIKTIA_SCHEDULER_ENABLED` = `"true"`.
+9. Vigilar el primer ciclo programado.
+
+No se activa nada ajeno: ni A5E, ni la recuperación de estadísticas, ni predicciones, ni funcionalidad nueva del scheduler. En el ensayo, la desactivación y la reactivación se **modelaron**: no se cambió ninguna variable ni ningún workflow de producción.
+
+### Condiciones de ABORT
+
+- clasificación distinta de NON_PRODUCTION en un ensayo, o un destino de producción no esperado;
+- revisión inicial distinta de `0007`;
+- un escritor que no se puede parar o no se puede demostrar en reposo;
+- sin punto de recuperación;
+- `0009` en el camino de la migración;
+- estado de esquema ambiguo;
+- recuento de partidos cambiado;
+- observaciones de bootstrap distintas del número de partidos;
+- cualquier violación de un invariante;
+- prueba del escritor no atómica o incorrecta;
+- necesidad de cambiar el código de la aplicación.
+
+### Pendiente para levantar el HOLD
+
+**OTHER_FIXTURE_WRITERS: UNRESOLVED.** IT_SUPPORT_AGENT debe confirmar con evidencia del despliegue que los escritores del paso 1 son todos, o completar la lista, y cómo se para cada uno. También hay que designar quién ejecuta los pasos 7 y 9 y desde dónde: un puesto con la credencial cargada de forma opaca, como en el ensayo, o un workflow puntual autorizado.
+
 ## DI-A6 G2 en destino (rama Neon NO productiva)
 
 **Estado:** ensayo en destino completado (2026-10-09). **Recomendación: CONDITIONAL_PASS.** No autoriza la aceptación de A6 para producción (sigue en **HOLD**, decisión del Chief).

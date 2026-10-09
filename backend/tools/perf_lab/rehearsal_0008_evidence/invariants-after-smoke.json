@@ -1,0 +1,38 @@
+{
+  "status": "PASS",
+  "created_at": "2026-10-09T21:38:37.916255+00:00",
+  "alembic_version": "0008",
+  "fixtures_real": 18671,
+  "fixtures_lab": 20,
+  "observations_by_source": {
+    "bootstrap": 18671,
+    "sync": 60
+  },
+  "real_observations_non_bootstrap": 0,
+  "winner_not_an_observation": 0,
+  "newer_observation_than_winner": 0,
+  "duplicate_fixture_evidence": 0,
+  "unique_fixture_evidence_constraint": 1,
+  "evidence_spanning_seasons": 1,
+  "max_rows_per_sync_evidence": 20,
+  "orphan_observations": 0,
+  "real_fixtures_without_mapping_informative": 0,
+  "lab_fixtures_without_api_football_mapping": 0,
+  "bad_hash_length": 0,
+  "deadlocks_total": 0,
+  "quiescence": {
+    "other_sessions_by_state": {
+      "idle": 1
+    },
+    "other_sessions_in_transaction": 0,
+    "other_sessions_with_write_xid": 0,
+    "other_locks_on_fixtures": 0,
+    "prepared_transactions": 0,
+    "running_runs": {
+      "live_sync_runs": 0,
+      "season_backfill_runs": 0,
+      "statistics_runs": 0
+    },
+    "quiescent": true
+  }
+}

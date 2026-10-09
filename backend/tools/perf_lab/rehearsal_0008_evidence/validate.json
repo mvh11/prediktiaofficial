@@ -1,0 +1,49 @@
+{
+  "status": "PASS",
+  "created_at": "2026-10-09T21:38:08.816113+00:00",
+  "bootstrap": {
+    "alembic_version": "0008",
+    "fixtures": 18671,
+    "observations": 18671,
+    "bootstrap_observations": 18671,
+    "bootstrap_evidence_ids": 1,
+    "fixtures_without_bootstrap_observation": 0,
+    "duplicate_bootstrap_per_fixture": 0,
+    "winner_not_its_bootstrap_observation": 0,
+    "orphan_observations": 0,
+    "bad_hash_length": 0,
+    "null_order_columns": 0,
+    "bootstrap_observed_at_distinct": 1,
+    "bootstrap_with_provider": 0,
+    "last_observed_at_not_bootstrap_instant": 0,
+    "last_state_hash_not_recomputable": 0,
+    "observation_hash_differs_from_fixture": 0,
+    "recorded_at_null": 0
+  },
+  "bootstrap_pass": true,
+  "integrity": {
+    "newer_observation_than_winner": 0,
+    "duplicate_fixture_evidence": 0,
+    "unique_fixture_evidence_constraint": 1,
+    "fk_observation_fixture_restrict": 1,
+    "fixtures_without_mapping": 0,
+    "fixture_provider_mappings": 18671,
+    "mappings_without_fixture": 0
+  },
+  "integrity_pass": true,
+  "quiescence": {
+    "other_sessions_by_state": {
+      "idle": 1
+    },
+    "other_sessions_in_transaction": 0,
+    "other_sessions_with_write_xid": 0,
+    "other_locks_on_fixtures": 0,
+    "prepared_transactions": 0,
+    "running_runs": {
+      "live_sync_runs": 0,
+      "season_backfill_runs": 0,
+      "statistics_runs": 0
+    },
+    "quiescent": true
+  }
+}

@@ -1,0 +1,251 @@
+{
+  "status": "MIGRATED",
+  "error": null,
+  "schema_state": "COMMITTED_0008",
+  "command": "cd backend && alembic -c alembic.ini upgrade 0008  (con DATABASE_URL del entorno)",
+  "started_at": "2026-10-09T21:37:33.520098+00:00",
+  "finished_at": "2026-10-09T21:37:40.817050+00:00",
+  "migration_wall_seconds": 7.296918600004574,
+  "statements": [
+    {
+      "sql": "SELECT pg_catalog.pg_class.relname FROM pg_catalog.pg_class JOIN pg_catalog.pg_namespace O",
+      "ms": 313.5357999999542
+    },
+    {
+      "sql": "SELECT alembic_version.version_num FROM alembic_version",
+      "ms": 153.19240000098944
+    },
+    {
+      "sql": "SET LOCAL lock_timeout = '5s'",
+      "ms": 152.53590000065742
+    },
+    {
+      "sql": "CREATE FUNCTION fixture_state_hash_v1( kickoff_at timestamptz, status_short text, season_i",
+      "ms": 174.4018999961554
+    },
+    {
+      "sql": "CREATE TABLE fixture_observations ( id BIGINT GENERATED ALWAYS AS IDENTITY, evidence_id UU",
+      "ms": 208.82869999331888
+    },
+    {
+      "sql": "ALTER TABLE fixtures ADD COLUMN last_observed_at TIMESTAMP WITH TIME ZONE",
+      "ms": 152.9822000011336
+    },
+    {
+      "sql": "ALTER TABLE fixtures ADD COLUMN last_state_hash BYTEA",
+      "ms": 152.39650000148686
+    },
+    {
+      "sql": "ALTER TABLE fixtures ADD CONSTRAINT ck_fixtures_last_state_hash CHECK (octet_length(last_s",
+      "ms": 154.9629000001005
+    },
+    {
+      "sql": "LOCK TABLE fixtures IN ACCESS EXCLUSIVE MODE",
+      "ms": 152.3793999949703
+    },
+    {
+      "sql": "INSERT INTO fixture_observations (evidence_id, fixture_id, observed_at, source, provider, ",
+      "ms": 666.5218999987701
+    },
+    {
+      "sql": "UPDATE fixtures SET last_observed_at = %(bootstrap_at)s, last_state_hash = fixture_state_h",
+      "ms": 1191.3552000041818
+    },
+    {
+      "sql": "SELECT (SELECT count(*) FROM fixtures), (SELECT count(*) FROM fixture_observations WHERE e",
+      "ms": 171.7373999999836
+    },
+    {
+      "sql": "ALTER TABLE fixtures ALTER COLUMN last_observed_at SET NOT NULL",
+      "ms": 157.48960000200896
+    },
+    {
+      "sql": "ALTER TABLE fixtures ALTER COLUMN last_state_hash SET NOT NULL",
+      "ms": 156.89560000464553
+    },
+    {
+      "sql": "CREATE INDEX ix_fixture_observations_fixture_observed ON fixture_observations (fixture_id,",
+      "ms": 162.94460000062827
+    },
+    {
+      "sql": "UPDATE alembic_version SET version_num='0008' WHERE alembic_version.version_num = '0007'",
+      "ms": 153.68989999842597
+    }
+  ],
+  "statements_seconds": 4.275849899997411,
+  "bootstrap_statements": [
+    {
+      "sql": "LOCK TABLE fixtures IN ACCESS EXCLUSIVE MODE",
+      "ms": 152.3793999949703
+    },
+    {
+      "sql": "INSERT INTO fixture_observations (evidence_id, fixture_id, observed_at, source, provider, ",
+      "ms": 666.5218999987701
+    },
+    {
+      "sql": "UPDATE fixtures SET last_observed_at = %(bootstrap_at)s, last_state_hash = fixture_state_h",
+      "ms": 1191.3552000041818
+    }
+  ],
+  "bootstrap_seconds": 2.010256499997922,
+  "read_probe": {
+    "probe_reads": 18,
+    "interval_s": 0.05,
+    "max_read_ms": 3367.1922000066843,
+    "reads_over_100ms": 18,
+    "max_blocked_read_ms": 3367.1922000066843,
+    "errors": []
+  },
+  "wal_bytes": 26352408,
+  "before": {
+    "alembic_version": "0007",
+    "fixtures": 18671,
+    "fixture_provider_mappings": 18671,
+    "fixtures_without_mapping": 0,
+    "fixture_observations_present": false,
+    "relation_sizes": {
+      "fixtures": {
+        "heap_bytes": 3874816,
+        "index_bytes": 2662400,
+        "total_bytes": 6578176,
+        "rows": 18671
+      },
+      "fixture_provider_mappings": {
+        "heap_bytes": 2523136,
+        "index_bytes": 2916352,
+        "total_bytes": 5480448,
+        "rows": 18671
+      },
+      "team_provider_mappings": {
+        "heap_bytes": 114688,
+        "index_bytes": 147456,
+        "total_bytes": 303104,
+        "rows": 686
+      },
+      "teams": {
+        "heap_bytes": 122880,
+        "index_bytes": 73728,
+        "total_bytes": 237568,
+        "rows": 686
+      }
+    }
+  },
+  "after": {
+    "alembic_version": "0008",
+    "fixtures": 18671,
+    "fixture_provider_mappings": 18671,
+    "fixtures_without_mapping": 0,
+    "fixture_observations_present": true,
+    "relation_sizes": {
+      "fixtures": {
+        "heap_bytes": 8323072,
+        "index_bytes": 3981312,
+        "total_bytes": 12345344,
+        "rows": 18671
+      },
+      "fixture_observations": {
+        "heap_bytes": 3334144,
+        "index_bytes": 2064384,
+        "total_bytes": 5431296,
+        "rows": 18671
+      },
+      "fixture_provider_mappings": {
+        "heap_bytes": 2523136,
+        "index_bytes": 2916352,
+        "total_bytes": 5480448,
+        "rows": 18671
+      },
+      "team_provider_mappings": {
+        "heap_bytes": 114688,
+        "index_bytes": 147456,
+        "total_bytes": 303104,
+        "rows": 686
+      },
+      "teams": {
+        "heap_bytes": 122880,
+        "index_bytes": 73728,
+        "total_bytes": 237568,
+        "rows": 686
+      }
+    }
+  },
+  "relation_size_delta": {
+    "fixtures": {
+      "heap_bytes": 4448256,
+      "index_bytes": 1318912,
+      "total_bytes": 5767168,
+      "rows": 0
+    },
+    "fixture_observations": {
+      "heap_bytes": 3334144,
+      "index_bytes": 2064384,
+      "total_bytes": 5431296,
+      "rows": 18671
+    },
+    "fixture_provider_mappings": {
+      "heap_bytes": 0,
+      "index_bytes": 0,
+      "total_bytes": 0,
+      "rows": 0
+    },
+    "team_provider_mappings": {
+      "heap_bytes": 0,
+      "index_bytes": 0,
+      "total_bytes": 0,
+      "rows": 0
+    },
+    "teams": {
+      "heap_bytes": 0,
+      "index_bytes": 0,
+      "total_bytes": 0,
+      "rows": 0
+    }
+  },
+  "quiescence_before": {
+    "other_sessions_by_state": {},
+    "other_sessions_in_transaction": 0,
+    "other_sessions_with_write_xid": 0,
+    "other_locks_on_fixtures": 0,
+    "prepared_transactions": 0,
+    "running_runs": {
+      "live_sync_runs": 0,
+      "season_backfill_runs": 0,
+      "statistics_runs": 0
+    },
+    "quiescent": true
+  },
+  "post_migration_checks": {
+    "alembic_version": "0008",
+    "fixtures": 18671,
+    "observations": 18671,
+    "bootstrap_observations": 18671,
+    "bootstrap_evidence_ids": 1,
+    "fixtures_without_bootstrap_observation": 0,
+    "duplicate_bootstrap_per_fixture": 0,
+    "winner_not_its_bootstrap_observation": 0,
+    "orphan_observations": 0,
+    "bad_hash_length": 0,
+    "null_order_columns": 0
+  },
+  "vacuum_after_migration": "NONE (autovacuum)",
+  "migration_graph": {
+    "heads": [
+      "0008"
+    ],
+    "revisions": [
+      "0001",
+      "0002",
+      "0003",
+      "0004",
+      "0005",
+      "0006",
+      "0007",
+      "0008"
+    ],
+    "has_0009": false,
+    "upgrade_path_0007_to_0008": [
+      "0008"
+    ],
+    "0008_down_revision": "0007"
+  }
+}

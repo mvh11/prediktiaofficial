@@ -1,0 +1,120 @@
+{
+  "status": "PASS",
+  "created_at": "2026-10-09T21:38:29.455541+00:00",
+  "checks": {
+    "insert_counts": true,
+    "insert_evidence": true,
+    "insert_winner_is_observation": true,
+    "insert_mappings": true,
+    "replay_counts": true,
+    "replay_no_new_evidence": true,
+    "replay_state_unchanged": true,
+    "update_counts": true,
+    "update_evidence": true,
+    "update_winner_is_observation": true,
+    "update_changed_state": true,
+    "stale_counts": true,
+    "stale_history_only": true,
+    "stale_did_not_overwrite": true,
+    "rollback_atomic": true,
+    "delete_with_history_rejected": true,
+    "real_rows_untouched": true
+  },
+  "steps": {
+    "1_insert": {
+      "counts": {
+        "received": 20,
+        "created": 20,
+        "updated": 0,
+        "unchanged": 0
+      },
+      "state": {
+        "fixtures": 20,
+        "observations": 20,
+        "winner_not_observation": 0,
+        "fingerprint": "623764c376db1fa275a1326023f2c060",
+        "mappings": 20
+      }
+    },
+    "2_replay_same_evidence": {
+      "counts": {
+        "received": 20,
+        "created": 0,
+        "updated": 0,
+        "unchanged": 20
+      },
+      "state": {
+        "fixtures": 20,
+        "observations": 20,
+        "winner_not_observation": 0,
+        "fingerprint": "623764c376db1fa275a1326023f2c060",
+        "mappings": 20
+      }
+    },
+    "3_newer_update": {
+      "counts": {
+        "received": 20,
+        "created": 0,
+        "updated": 20,
+        "unchanged": 0
+      },
+      "state": {
+        "fixtures": 20,
+        "observations": 40,
+        "winner_not_observation": 0,
+        "fingerprint": "6fc77aafa98b5966e6f18ac58f1cb36e",
+        "mappings": 20
+      }
+    },
+    "4_stale_evidence": {
+      "counts": {
+        "received": 20,
+        "created": 0,
+        "updated": 0,
+        "unchanged": 20
+      },
+      "state": {
+        "fixtures": 20,
+        "observations": 60,
+        "winner_not_observation": 0,
+        "fingerprint": "6fc77aafa98b5966e6f18ac58f1cb36e",
+        "mappings": 20
+      }
+    },
+    "5_rolled_back_write": {
+      "counts": {
+        "received": 20,
+        "created": 0,
+        "updated": 20,
+        "unchanged": 0
+      },
+      "state": {
+        "fixtures": 20,
+        "observations": 60,
+        "winner_not_observation": 0,
+        "fingerprint": "6fc77aafa98b5966e6f18ac58f1cb36e",
+        "mappings": 20
+      }
+    },
+    "6_delete_with_history": {
+      "rejected_by_restrict": true,
+      "state": {
+        "fixtures": 20,
+        "observations": 60,
+        "winner_not_observation": 0,
+        "fingerprint": "6fc77aafa98b5966e6f18ac58f1cb36e",
+        "mappings": 20
+      }
+    }
+  },
+  "scope": {
+    "fixtures": 20,
+    "fixture_external_ids": "10800001..10800020",
+    "season": "1 (ensayo)",
+    "teams": 10,
+    "competition_external_id": 500801
+  },
+  "real_rows": {
+    "count": 18671
+  }
+}

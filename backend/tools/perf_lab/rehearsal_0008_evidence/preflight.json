@@ -1,0 +1,166 @@
+{
+  "status": "PASS",
+  "created_at": "2026-10-09T21:37:08.980673+00:00",
+  "checks": {
+    "identity_read_only_session": true,
+    "identity_branch": true,
+    "identity_revision": true,
+    "identity_fixtures": true,
+    "identity_postgres": true,
+    "identity_observations_absent": true,
+    "pooled_ssl_client": true,
+    "single_head_0008": true,
+    "upgrade_path_only_0008": true,
+    "writable": true,
+    "lab_ranges_empty": true,
+    "quiescent": true
+  },
+  "identity": {
+    "status": "VERIFIED",
+    "checks": {
+      "read_only_session": true,
+      "branch": true,
+      "revision": true,
+      "fixtures": true,
+      "postgres": true,
+      "observations_absent": true
+    },
+    "facts": {
+      "transaction_read_only": "on",
+      "neon_branch_id_matches": true,
+      "in_recovery": false,
+      "server_version": "18.6 (c021049)",
+      "alembic_version": "0007",
+      "fixtures": 18671,
+      "fixture_provider_mappings": 18671,
+      "fixture_observations_present": false,
+      "lab_range_rows": {
+        "fixtures": 0,
+        "teams": 0,
+        "competitions": 0
+      },
+      "server": {
+        "settings": {
+          "server_version": "18.6 (c021049)",
+          "fsync": "off",
+          "synchronous_commit": "on",
+          "full_page_writes": "off",
+          "wal_compression": "off",
+          "shared_buffers": "230MB",
+          "work_mem": "4MB",
+          "max_wal_size": "1GB",
+          "checkpoint_timeout": "5min",
+          "autovacuum": "on",
+          "autovacuum_naptime": "1min",
+          "autovacuum_max_workers": "3",
+          "autovacuum_vacuum_threshold": "50",
+          "autovacuum_vacuum_scale_factor": "0.2",
+          "autovacuum_vacuum_insert_threshold": "1000",
+          "autovacuum_vacuum_insert_scale_factor": "0.2",
+          "autovacuum_analyze_threshold": "50",
+          "autovacuum_analyze_scale_factor": "0.1",
+          "autovacuum_vacuum_cost_limit": "-1",
+          "autovacuum_vacuum_cost_delay": "2ms",
+          "jit": "on",
+          "max_connections": "901",
+          "default_transaction_isolation": "read committed"
+        },
+        "ssl_in_use": false,
+        "fixtures_reloptions": "default",
+        "autovacuum_table_options": "none"
+      },
+      "select1_round_trip_ms": {
+        "n": 30,
+        "min": 151.7348999987007,
+        "p50": 152.4218499980634,
+        "p95": 155.18080000038026,
+        "max": 304.21100000239676
+      },
+      "wal_lsn_readable": true
+    },
+    "client": {
+      "os": "Windows-11-10.0.26300-SP0",
+      "python": "3.13.4",
+      "sqlalchemy": "2.1.3",
+      "psycopg": "3.3.6",
+      "pooled_endpoint": true,
+      "sslmode": "require",
+      "target_classification": "NON_PRODUCTION",
+      "neon_branch_id_verified_on_every_connection": true
+    },
+    "created_at": "2026-10-09T21:37:00.951211+00:00"
+  },
+  "baseline": {
+    "alembic_version": "0007",
+    "fixtures": 18671,
+    "fixture_provider_mappings": 18671,
+    "fixtures_without_mapping": 0,
+    "fixture_observations_present": false,
+    "relation_sizes": {
+      "fixtures": {
+        "heap_bytes": 3874816,
+        "index_bytes": 2662400,
+        "total_bytes": 6578176,
+        "rows": 18671
+      },
+      "fixture_provider_mappings": {
+        "heap_bytes": 2523136,
+        "index_bytes": 2916352,
+        "total_bytes": 5480448,
+        "rows": 18671
+      },
+      "team_provider_mappings": {
+        "heap_bytes": 114688,
+        "index_bytes": 147456,
+        "total_bytes": 303104,
+        "rows": 686
+      },
+      "teams": {
+        "heap_bytes": 122880,
+        "index_bytes": 73728,
+        "total_bytes": 237568,
+        "rows": 686
+      }
+    }
+  },
+  "quiescence": {
+    "other_sessions_by_state": {},
+    "other_sessions_in_transaction": 0,
+    "other_sessions_with_write_xid": 0,
+    "other_locks_on_fixtures": 0,
+    "prepared_transactions": 0,
+    "running_runs": {
+      "live_sync_runs": 0,
+      "season_backfill_runs": 0,
+      "statistics_runs": 0
+    },
+    "quiescent": true
+  },
+  "migration_graph": {
+    "heads": [
+      "0008"
+    ],
+    "revisions": [
+      "0001",
+      "0002",
+      "0003",
+      "0004",
+      "0005",
+      "0006",
+      "0007",
+      "0008"
+    ],
+    "has_0009": false,
+    "upgrade_path_0007_to_0008": [
+      "0008"
+    ],
+    "0008_down_revision": "0007"
+  },
+  "writable_probe": {
+    "transaction_read_only": "off",
+    "default_transaction_read_only": "off",
+    "transactional_ddl": true,
+    "probe_left_behind": false,
+    "can_alter_fixtures": true
+  }
+}
