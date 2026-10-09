@@ -131,6 +131,20 @@ Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Int
 | **A5F** | claiming y propiedad concurrente de las unidades |
 | **Orquestación posterior** | ejecución programada, catch-up automático, bloqueo del proveedor y sondas |
 
+### A5D: implementación (esquema)
+
+**Estado:** implementada en local, pendiente de aceptación del Chief. **Sin push.** A5E **no** implementada; A6 sin cambios; nunca Neon.
+
+- **Commits:** `d346c9e` (este diseño congelado), `1afc2ff` (migración `0009` y modelos `SyncUnitState` / `ProviderIncident` en `app/models/sync_recovery.py`) y `292690a` (tests).
+- **Alembic:** `0001 → … → 0008 → 0009`, cabeza única **`0009`**. `test_migration_0008` ya no fija la cabeza (la fija `test_migration_0009`); sus aserciones sobre `0008` no cambian.
+- **Precisión de los CHECK de resultado:** `succeeded` ⇒ `last_success_at IS NOT DISTINCT FROM last_outcome_at` y `failed` ⇒ `last_failure_at IS NOT DISTINCT FROM last_outcome_at`. Con `=` un `last_success_at` NULL pasaba el CHECK (NULL no es falso); lo detectó un test.
+- **Tests (73 nuevos en `test_migration_0009.py`):** upgrade y downgrade `0008 ↔ 0009` (también con filas), cabeza única, columnas, nulabilidad, defaults (`statement_timestamp()`, sin default en `last_success_at`), PK, índices, FK (`CASCADE` al borrar una temporada, `RESTRICT` al borrar un proveedor), estados válidos e inválidos (25 casos), tipos de incidente (`outage` aceptado), contadores, códigos HTTP, rutas sin query string, apertura y cierre, orden temporal, un abierto por proveedor y tipo, el upsert congelado sobre el índice parcial (continúa el abierto; uno cerrado no se reabre), rollback de `last_success_at` con su transacción, `statement_timestamp()` por sentencia, ningún productor de `outage` y ningún uso de las tablas fuera de los modelos.
+- **Modelos frente a la migración:** `compare_metadata` de Alembic sin diferencias en las dos tablas nuevas.
+- **Regresiones** (PostgreSQL 18.6 local desechable, nunca Neon):
+  - dirigidas (A5D, escritor A6, concurrencia, evidencia, lecturas temporales, backfill, mappings, sync en vivo, `ops_tick`, estadísticas, migraciones `0007`–`0009`): **679 passed**;
+  - **suite completa combinada: 1429 passed, 0 failed, 0 skipped, 0 errors, 1 warning** (`StarletteDeprecationWarning`, ajeno; 1429 = 1356 + 73).
+- **Rendimiento:** no se vuelve a medir; A5D no toca el escritor ni ninguna tabla existente.
+
 ### A5D: frontera entre departamentos
 
 ```
