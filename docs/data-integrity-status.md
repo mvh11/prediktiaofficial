@@ -2,6 +2,92 @@
 
 Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Integrada con M4.2 en `checkpoint/m42-data-integrity` (ver [Checkpoint M4.2](#checkpoint-m42-ebcb076)). Ver [workstreams.md](workstreams.md).
 
+## DI-A6 G2 (laboratorio): rendimiento del escritor UNNEST y ensayo de `0007 → 0008`
+
+**Estado:** evidencia de laboratorio recogida (2026-10-08). **Recomendación: CONDITIONAL_PASS.** No autoriza la aceptación de A6 para producción (sigue en **HOLD**). Rama `lab/data-integrity-a6-g2` (worktree `prediktia-di-a6-g2`), **sin push**. La base canónica sigue siendo `1c06ef9`. Nunca se tocó Neon; `0009` no está en este árbol. Detalle, entorno, metodología y JSON: `backend/tools/perf_lab/g2_evidence/`.
+
+- **Candidato:** `d31eebc` = `1c06ef9` + 15 commits de Modular (M5.7–M5.9B) que **solo añaden** archivos. Verificado en el diff: sin cambios en migraciones, modelos, escritor, mappings, sync, backfill ni lecturas temporales, y el código añadido no escribe en la BD. **G2_CANDIDATE_MISMATCH: NO.** Se midió UNNEST (máximo 380 parámetros por sentencia).
+- **Entorno:** PostgreSQL 18.6 local desechable con ajustes por defecto (`fsync` y `synchronous_commit` on), Windows 11, i3-12100F (4/8), 23,8 GB, SSD SATA, loopback sin pooler, Python 3.13.4. **Representatividad: LIMITED**: sin red hacia Neon, otro sistema operativo y otro runtime (C6 corre en Linux + Python 3.12), versión de PostgreSQL de Neon sin verificar.
+- **Método:** arnés de Checkpoint C (camino real `ensure_teams` + `upsert_fixtures`), 100 000 partidos sintéticos sembrados en `0007` y migrados con el bootstrap real. Lotes 380 / 1000 / 2000 × 7 modos (`insert`, `update`, `unchanged`, `older`, `mixed`, `tie`, `replay`), **30 muestras + 5 de calentamiento** por caso, **tres pases**: A (justo tras el bootstrap), B y C (estado estable). Sin descartar muestras.
+
+### G2: escritor (latencia total por respuesta, ms; 210 muestras por lote y pase = 7 modos × 30)
+
+| Lote | Pase | p50 | p95 | máx | p50 por modo | COMMIT p50 / p95 | WAL por partido (update / unchanged / insert / replay) | HOT update / unchanged |
+|---:|---|---:|---:|---:|---|---|---|---|
+| 380 | A | 92 | 120 | 212 | 79–103 | 1,7 / 17,0 | 1471 / 938 / 1783 / 222 B | 33 % / 85 % |
+| 380 | C | 91 | 121 | 169 | 85–98 | 2,9 / 10,1 | 886 / 812 / 1744 / 222 B | 100 % / 100 % |
+| 1000 | A | 232 | 296 | 585 | 211–261 | 1,9 / 23,2 | 1109 / 843 / 1779 / 227 B | 71 % / 97 % |
+| 1000 | C | 237 | 296 | 386 | 215–256 | 2,5 / 15,1 | 894 / 822 / 1744 / 225 B | 100 % / 100 % |
+| 2000 | A | 480 | 563 | 706 | 447–496 | 3,0 / 29,9 | 1121 / 901 / 1772 / 321 B | 73 % / 90 % |
+| 2000 | C | 483 | 602 | 872 | 457–519 | 2,7 / 17,9 | 1100 / 840 / 1761 / 225 B | 100 % / 100 % |
+
+- **Pase B** (convergencia), en el mismo rango: p95 106 / 284 / 561 ms. Su máximo con 2000 (970 ms) coincide con un COMMIT de 466 ms (probable checkpoint); por eso el COMMIT se juzga en percentiles, no en el máximo.
+- **Observaciones por muestra:** exactamente el lote en `insert`, `update`, `unchanged`, `older`, `mixed` y `tie`; **0** en `replay`. `UpsertCounts` exactos en todos los casos (p. ej. `mixed` 2000 = 667/667/666).
+- **Errores, timeouts y deadlocks:** 0 en los tres pases (2205 escrituras medidas; `pg_stat_database.deadlocks` = 0). Los 5–7 rollbacks por pase son conexiones de solo lectura del arnés, no escrituras fallidas: cada muestra comprobó sus aserciones.
+- **Primera escritura frente a estado estable:** la latencia apenas cambia. Cambia el HOT: justo tras el bootstrap, que reescribe todas las filas de `fixtures`, `update` con 380 cae al 33 % y su WAL a 1,47 KB por partido; desde el pase B ambos se estabilizan (HOT ~100 %, ~0,9 KB). El HOT del estado estable se midió **con** el `VACUUM ANALYZE` que el arnés ejecuta antes de cada caso.
+- **Frente a C.12 (mismo código del escritor):** aquí las latencias son un 20–25 % mayores (380: p50 79–103 frente a 66–78 ms). La diferencia está en la ejecución de sentencias, no en el COMMIT (~3 ms). Es variación de entorno y sesión, no atribuida.
+- **Almacenamiento:** 305–324 B por observación, índices incluidos (~170–180 MiB por cada 584 440 observaciones de un pase). En estado estable, `fixtures` no crece (+0,01 MiB por pase).
+
+### G2: ensayo de `0007 → 0008` (LAB REHEARSAL, no ensayo de producción)
+
+| Partidos | Migración completa (una transacción) | Por partido | Lector bloqueado | Observaciones / `evidence_id` | Crecimiento |
+|---:|---:|---:|---:|---|---|
+| 100 000 | 7,31 s | 73 µs | 7,09 s | 100 000 / 1 | `fixtures` +30,7 MiB, `fixture_observations` +28,3 MiB (615 B por partido) |
+| 100 000 (BD del escritor) | 8,02 s | 80 µs | 7,87 s | 100 000 / 1 | igual |
+| 250 000 | 18,37 s | 73 µs | 18,18 s | 250 000 / 1 | 146,9 MiB (616 B por partido) |
+
+- **Escala lineal** con el número de partidos. Recuentos antes y después idénticos (100 000 / 250 000). El `ACCESS EXCLUSIVE` bloquea a cualquier lector de `fixtures` durante toda la migración: hace falta una ventana con syncs paradas y lecturas en pausa.
+- **Fallo y rollback** (tests de `test_migration_0008`, misma revisión): un fallo después del bootstrap deshace todo y se puede volver a lanzar; con un escritor que bloquea `fixtures`, la migración falla por `lock_timeout` (5 s) sin dejar nada a medias.
+
+### G2: corrección
+
+- **Tras los tres pases, sobre toda la BD:**
+  - 0 partidos cuyo estado ganador no sea una observación;
+  - 0 observaciones más nuevas que la ganadora (la evidencia antigua nunca pisó el estado);
+  - 0 pares `(fixture_id, evidence_id)` duplicados;
+  - 0 observaciones huérfanas y 0 partidos sin mapping;
+  - todos los hashes de 32 B;
+  - el único `evidence_id` que abarca varias temporadas es el del bootstrap (por diseño); cada evidencia de sync tiene ≤ 380 filas (una respuesta).
+- **`replay`:** 0 inserciones de evidencia y 0 actualizaciones de `fixtures` por muestra. **`older`:** solo historia, 0 actualizaciones.
+- **Tests dirigidos** (escritor, concurrencia de la opción A, evidencia, hash, `STRICT_KNOWLEDGE` / `RETROSPECTIVE_FINAL_RESULTS`, sync con evidencia, backfill, mappings, migración `0008`, perf lab): **369 passed**.
+- **Suite completa** del árbol candidato: **1474 passed, 0 failed, 0 skipped, 0 errors**, 1 warning ajeno. G2 solo añade herramientas de laboratorio (`tools/perf_lab/g2.py`, `tests/test_perf_lab_g2.py`) y evidencia: **ningún cambio en el código de la aplicación**.
+
+### G2: propuesta de umbrales para producción (para decisión del Chief)
+
+Se basan en lo medido. Las latencias deben **volver a medirse en el entorno de destino** antes de fijarse como definitivas.
+
+| Métrica | Propuesta | Tipo | Motivo |
+|---|---|---|---|
+| Invariantes A6 (ganador = observación, sin evidencia nueva perdida, sin duplicados, `replay` sin inserciones) | 0 violaciones | **HARD_GATE** | Es la corrección del contrato; cualquier violación es un defecto |
+| Errores, timeouts y deadlocks del escritor | 0 en el benchmark; 0 deadlocks en los tests de concurrencia | **HARD_GATE** | Un escritor único no debe fallar; la concurrencia está cubierta por 24 tests |
+| Respuesta máxima operativa | ≤ 2000 partidos (techo de seguridad 2729, sin cambios) | **HARD_GATE** | Política vigente; 2000 medido con holgura |
+| p95 con 380 (respuesta típica de la sync en vivo) | WARNING > 500 ms; HARD > 2 s | **WARNING** / **HARD_GATE** | Local 106–121 ms: margen ~4× para el RTT de Neon. Un tick con ~26 respuestas a 2 s ya tarda ~1 min y mantiene más tiempo los bloqueos de fila |
+| p95 con 2000 | WARNING > 1,5 s; HARD > 5 s | **WARNING** / **HARD_GATE** | Local 0,56–0,60 s. Los `FOR UPDATE` de la opción A se mantienen toda la transacción y otro escritor espera ese tiempo |
+| Latencia del COMMIT | p50 y p95, nunca el máximo | **OBSERVATIONAL** | p50 ~3 ms; picos aislados de 0,3–0,5 s coinciden con checkpoints |
+| WAL por partido en estado estable | WARNING > 1,0 KB confirmado, > 1,4 KB actualizado (umbrales de C.10) | **WARNING** | Estado estable 0,81–1,10 KB; tras el bootstrap 1,47 KB es esperable |
+| Almacenamiento por observación | WARNING > 350 B | **WARNING** | Medido 305–324 B; alimenta la arquitectura de almacenamiento y particionado, pendiente |
+| HOT | estado estable ≥ 90 % con lotes ≤ 1000 bajo **autovacuum** (sin el VACUUM del arnés); tras la migración solo se observa | **WARNING** / **OBSERVATIONAL** | Con VACUUM entre casos ~100 %; justo tras el bootstrap 33–85 %. En destino debe medirse sin VACUUM manual |
+| Duración de `0007 → 0008` | WARNING > 0,2 ms por partido; la ventana planificada debe cubrir el bloqueo total | **WARNING** + requisito operativo | Local 73–80 µs por partido, lineal; los lectores quedan bloqueados toda la migración |
+| Bootstrap | observaciones = partidos y un solo `evidence_id` (lo valida la migración) | **HARD_GATE** | Si no, la migración se deshace sola |
+
+### G2: limitaciones
+
+- **Sin el entorno de destino:** sin red (Neon añade un RTT por sentencia; el escritor ejecuta ~27 sentencias por lote de 3 respuestas en el arnés), otro sistema operativo y otro runtime, `shared_buffers` por defecto, un solo disco.
+- **Un solo cliente:** la concurrencia está cubierta por tests de corrección, no por medidas de rendimiento bajo contención.
+- **El HOT del estado estable** incluye el `VACUUM ANALYZE` del arnés entre casos.
+- **El ensayo de la migración** es de laboratorio, sobre datos sintéticos de 100 000 / 250 000 partidos; el volumen real de producción no se ha verificado aquí.
+- **Variación de entorno:** las latencias difieren un 20–25 % de C.12 con el mismo código; no se ha atribuido la causa.
+
+### G2: recomendación
+
+**CONDITIONAL_PASS.** La evidencia local cumple con margen los umbrales de C.10 (380: p95 ≤ 121 ms frente a 750; WAL, almacenamiento, HOT en estado estable y bootstrap dentro de límites) y la corrección es completa. **A6_CHANGE_REQUIRED: NO.** Antes de aceptar A6 para producción hace falta:
+
+1. repetir este mismo arnés en un Neon no productivo aislado (o equivalente), con el runtime Linux + Python 3.12 y la red real;
+2. medir el HOT bajo autovacuum;
+3. fijar la ventana de la migración `0008` con el recuento real de partidos.
+
+La arquitectura de almacenamiento y particionado de la evidencia sigue pendiente.
+
 ## Checkpoint conjunto DI-A6 + Modular (candidato a nuevo baseline)
 
 **Estado:** checkpoint conjunto **PASS** en local (2026-10-07). Pendiente de que el Chief lo establezca como nuevo baseline canónico; hasta entonces sigue vigente el baseline de abajo. Rama `integration/di-a6-modular-final` (worktree `prediktia-di-a6-modular-final`), **sin push** y sin merge a `main`.
