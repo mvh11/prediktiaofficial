@@ -2,6 +2,146 @@
 
 Rama `feature/data-integrity-sync` (congelada en `61428e3`), base `298b2f3`. Integrada con M4.2 en `checkpoint/m42-data-integrity` (ver [Checkpoint M4.2](#checkpoint-m42-ebcb076)). Ver [workstreams.md](workstreams.md).
 
+## DI-A6 G2 en destino (rama Neon NO productiva)
+
+**Estado:** ensayo en destino completado (2026-10-09). **Recomendación: CONDITIONAL_PASS.** No autoriza la aceptación de A6 para producción (sigue en **HOLD**, decisión del Chief).
+
+- **Destino:** rama `g2-di-a6-target` (NON_PRODUCTION, creada desde `production`, handoff de IT_SUPPORT_AGENT). Se conservó sin borrar.
+- **Producción:** no se tocó. `0008` no se aplicó en producción y `0009` no está en este árbol.
+- **Rama de trabajo:** `lab/data-integrity-a6-g2`, **sin push**.
+- **Candidato:** `d31eebc` (escritor UNNEST de la opción A). Ningún cambio en la aplicación: solo herramientas de laboratorio (`tools/perf_lab/g2_target.py`).
+- **Detalle y JSON:** `backend/tools/perf_lab/g2_evidence/target/`.
+
+### Destino: identidad y representatividad
+
+- **Identidad VERIFIED** (solo lectura): `neon.branch_id` igual al del handoff (se vuelve a comprobar en cada conexión nueva), primario, PostgreSQL 18.6, revisión `0007`, **18 671 partidos** y 18 671 mappings, `fixture_observations` ausente.
+- **Entorno:**
+  - endpoint pooled (PgBouncer de Neon) con `sslmode=require`;
+  - `SELECT 1` con p50 de **139–149 ms** desde este cliente;
+  - `fsync` y `full_page_writes` off: la durabilidad la da el almacenamiento de Neon;
+  - autovacuum por defecto;
+  - cliente Windows con Python 3.13.4, SQLAlchemy 2.1.3 y psycopg 3.3.6.
+- **TARGET_REPRESENTATIVENESS: PARTIAL.**
+  - **Reales:** el motor, el pooler, el SSL, la red desde este cliente, los datos de la migración y el autovacuum.
+  - **No reales:** el runtime de C6 (Linux + Python 3.12), la ruta de red desde el host de producción, los datos del escritor (sintéticos) y la concurrencia (un solo cliente).
+
+### Destino: `0007 → 0008` sobre los 18 671 partidos reales
+
+| Medida | Valor |
+|---|---|
+| Migración completa (una transacción, incluida la conexión de Alembic) | **6,96 s** (16 sentencias, 4,10 s; el resto es conexión y arranque) |
+| Bootstrap (LOCK + INSERT + UPDATE) | **1,84 s** (99 µs por partido) |
+| Lector bloqueado (lectura más larga de la sonda) | **3,24 s** |
+| WAL | 25,1 MiB |
+| Crecimiento | +10,7 MiB (**600 B por partido**: `fixtures` +5,5, `fixture_observations` +5,2) |
+| Resultado | `0008`; 18 671 partidos = 18 671 observaciones de bootstrap con un único `evidence_id`; 0 en todas las comprobaciones (sin observación, duplicados, ganador distinto, huérfanas, hash, columnas nulas) |
+
+### Destino: escritor (dataset sintético aislado, sin VACUUM forzado)
+
+Se creó un dataset sintético después de medir la migración (3800 partidos en rangos de ids reservados), con el escritor real. Se usó la misma metodología que Run 2: 7 modos, 30 + 5 muestras, tres pases. Ninguna escritura tocó filas reales.
+
+| Lote | p50 / p95, pase C (estable) | p50 / p95, pase A | COMMIT p50 | Sentencias por muestra | WAL por partido (update / unchanged / insert) | HOT ≤ 1000 |
+|---:|---|---|---:|---:|---|---|
+| 380 | **1,93 / 2,29 s** | 2,02 / 5,91 s ¹ | 155 ms | 10 | 1261 / 1176 / 2095 B | 100 % |
+| 1000 | **5,11 / 5,92 s** | 4,86 / 5,66 s | 155 ms | 30 | 1258 / 1180 / 2096 B | 100 % |
+| 2000 (lote real 2000) | **10,05 / 11,38 s** | 9,62 / 10,89 s | 155 ms | 60 | 1271 / 1203 / 2098 B | (`update` 2000: 79 % en A, 97–100 % en B/C) |
+
+¹ Los tres primeros casos de 380 del pase A fueron lentos: p50 de hasta 5,9 s, con un WAL 2–3× mayor por muestra que apunta a actividad simultánea del servidor. No se ha atribuido la causa. El resto del pase y los pases B y C están en 1,8–2,3 s.
+
+- **Observaciones:** exactamente el lote en cada muestra (0 en `replay`). `UpsertCounts` exactos. Errores, timeouts y deadlocks: **0** (1890 muestras medidas; 3 rollbacks por pase, todos de conexiones de solo lectura del arnés).
+- **Almacenamiento:** 301–324 B por observación.
+- **Interrupción:** el primer intento del pase A se cortó al cerrarse la sesión del agente; su transacción se deshizo y la verificación posterior salió limpia. El pase se relanzó completo. Por eso el pase A del destino no es una primera escritura pura con 380; en el intento cortado, `update_380` tuvo un HOT del 44 %.
+
+### Destino: HOT solo con autovacuum
+
+| Pase | HOT del pase (`pg_stat_user_tables`) | autovacuum `fixtures` / `fixture_observations` | VACUUM manual |
+|---|---:|---|---:|
+| A | 91,3 % (370 416 / 405 541) | 29 / 10 | 0 |
+| B | 97,5 % (340 638 / 349 541) | 22 / 4 | 0 |
+| C | 97,5 % (340 644 / 349 541) | 25 / 2 | 0 |
+
+**HOT_AUTOVACUUM_ONLY: ≥ 97 % en estado estable y 100 % por muestra con lotes ≤ 1000.** Cumple el umbral de ≥ 90 % sin el VACUUM del arnés, que en el destino estuvo desactivado.
+
+### Destino: corrección (tras los tres pases)
+
+- **Invariantes de A6, todos en 0:**
+  - ganadores que no son una observación;
+  - evidencia más nueva que la ganadora;
+  - `(fixture_id, evidence_id)` duplicados (la UNIQUE está presente);
+  - huérfanas;
+  - partidos del laboratorio sin mapping;
+  - hashes con longitud distinta de 32 B.
+- **Evidencia:** solo el bootstrap abarca varias temporadas; ≤ 380 filas por evidencia de sync.
+- **Filas reales:** solo su observación de bootstrap.
+- **Por muestra:** `replay` sin evidencia nueva y `older` sin actualizar `fixtures`.
+- **Prueba de rollback** con el escritor real: **atómica**, sin ningún cambio en recuentos ni en la huella de estado.
+
+### Local (Run 2) frente a destino
+
+| Lote | p50 / p95 local, pase C | p50 / p95 destino, pase C | Factor |
+|---:|---|---|---:|
+| 380 | 74 / 87 ms | 1,93 / 2,29 s | ×26 |
+| 1000 | 202 / 230 ms | 5,11 / 5,92 s | ×25 |
+| 2000 | 403 / 463 ms | 10,05 / 11,38 s | ×25 |
+
+- **Casi todo es red.** Cada muestra son 10 / 30 / 60 sentencias más el COMMIT, y cada una paga un viaje de ~150 ms. El COMMIT es exactamente un viaje.
+- **Lo que no es red:** el p50 menos `(sentencias + 1) × RTT` deja ~0,3 / 0,5 / 1,0 s para el servidor y el envío de los arrays (DERIVADO). El Python del cliente (SQLAlchemy antes del cursor) es menos del 0,5 % del total.
+- **El coste crece con las sentencias, no con las filas:** el escritor manda un grupo de sentencias por temporada de la respuesta.
+- **Un RTT distinto mueve la latencia en proporción.** Con la ruta real de C6 la latencia se escala con su RTT, aproximadamente `(sentencias + 1) × RTT + 0,3–1,0 s`. No se hereda ningún "p95 < 1 s".
+- **Lo que no depende de la red** coincide con el local:
+  - HOT en estado estable;
+  - almacenamiento (301–324 frente a 305–324 B por observación);
+  - bootstrap (99 frente a 66–74 µs por partido);
+  - corrección.
+- **WAL:** un 20–40 % mayor en Neon. Es otro almacenamiento, así que los umbrales de WAL son por entorno.
+
+### G2: umbrales finales propuestos (para decisión del Chief)
+
+Combinan G2 local (Run 2), G2 en destino y el comportamiento operativo. Las latencias van **en función del RTT medido** de la ruta real (`SELECT 1` p50) y, como referencia, en segundos para un RTT de ~150 ms.
+
+| Métrica | Propuesta | Tipo | Motivo |
+|---|---|---|---|
+| Invariantes A6 (ganador = observación, sin evidencia nueva perdida, sin duplicados, `replay` sin inserciones, `older` sin sobrescribir) | 0 violaciones | **HARD_GATE** | Es el contrato; 0 en local y en destino |
+| Errores, timeouts y deadlocks del escritor | 0 | **HARD_GATE** | 0 en 1890 + 1890 muestras; la concurrencia está cubierta por 24 tests |
+| Respuesta máxima operativa | ≤ 2000 partidos (techo de seguridad 2729 sin cambios) | **HARD_GATE** | 2000 medido en destino: 11,4 s de p95 con 60 sentencias |
+| p95 con 380 | WARNING > 20 × RTT (≈ 3 s); HARD > 50 × RTT (≈ 7,5 s) | **WARNING** / **HARD_GATE** | Destino estable 2,29 s ≈ 15 RTT. Los bloqueos `FOR UPDATE` de la opción A duran toda la transacción; más de 50 RTT indica un problema del servidor, no de la red |
+| p95 con 1000 | WARNING > 50 × RTT (≈ 7,5 s); HARD > 100 × RTT (≈ 15 s) | **WARNING** / **HARD_GATE** | Destino 5,92 s ≈ 39 RTT |
+| p95 con 2000 | WARNING > 90 × RTT (≈ 13,5 s); HARD > 180 × RTT (≈ 27 s) | **WARNING** / **HARD_GATE** | Destino 11,38 s ≈ 76 RTT; el HARD queda por debajo de un `statement_timeout` de minutos |
+| Latencia del COMMIT | p50 ≈ 1 RTT; solo percentiles, nunca el máximo | **OBSERVATIONAL** | Destino 148–155 ms = 1 viaje; en local los picos coinciden con checkpoints |
+| HOT con lotes ≤ 1000 bajo autovacuum, en estado estable | WARNING < 90 % | **WARNING** | Destino 100 % por muestra y 97,5 % por pase sin VACUUM manual |
+| HOT tras la migración o en la primera escritura | se observa | **OBSERVATIONAL** | 33–44 % en la primera escritura (local y destino); se recupera solo con autovacuum |
+| WAL por partido en estado estable | WARNING > 1,6 KB (Neon) / > 1,4 KB (local) en `update` | **WARNING** | Neon 1,26 KB y local 0,89 KB; umbral por entorno |
+| Almacenamiento | WARNING > 350 B por observación | **WARNING** | 301–324 B en los dos entornos |
+| Duración de `0007 → 0008` | WARNING > 30 s con el recuento real | **WARNING** | 6,96 s con 18 671 (red incluida); lineal con los partidos |
+| Ventana de bloqueo de lectores | ventana planificada ≥ 60 s con syncs y lecturas paradas; WARNING si la lectura bloqueada supera 15 s | **WARNING** + requisito operativo | El `ACCESS EXCLUSIVE` bloquea `fixtures` toda la transacción: 3,24 s en destino |
+| Bootstrap | observaciones = partidos y un único `evidence_id` | **HARD_GATE** | La migración lo valida y, si no, se deshace sola |
+| Duración del bootstrap | WARNING > 0,5 ms por partido | **OBSERVATIONAL** / **WARNING** | 99 µs en destino y 66–74 µs en local |
+| Crecimiento de almacenamiento | ~600 B por partido en la migración; ~0,3 KB por observación después | **OBSERVATIONAL** | Alimenta la arquitectura de retención y particionado, pendiente |
+
+Estos umbrales sustituyen a la propuesta local de [la sección de laboratorio](#g2-propuesta-de-umbrales-para-producción-para-decisión-del-chief). Allí los límites de latencia (500 ms / 2 s con 380) no contaban el RTT real de Neon: con ~150 ms por sentencia, 380 ya tarda ~2 s solo de red.
+
+### Destino: limitaciones
+
+- **Cliente:** Windows y Python 3.13 desde la red de este equipo, no Linux + Python 3.12 en el host de C6. La latencia depende del RTT de la ruta real, que no se ha medido.
+- **Escritor sobre datos sintéticos** (3800 partidos en una liga) junto a los 18 671 reales. La forma y los tamaños son reales; los valores de negocio, no.
+- **Un solo cliente:** la contención está cubierta por los tests, no por esta medida.
+- **Interrupción:** el pase A se relanzó tras un corte; los tres primeros casos de 380 fueron lentos sin causa atribuida.
+- **TLS:** el `sslmode=require` del cliente se comprobó en la configuración. El servidor ve la conexión pooler → compute sin SSL; el tramo cliente → pooler no puede verse desde la BD.
+
+### Destino: recomendación
+
+**CONDITIONAL_PASS.** **A6_CHANGE_REQUIRED: NO.**
+- **Corrección:** completa en datos reales (migración) y en el destino (escritor).
+- **HOT bajo autovacuum:** ≥ 97 %.
+- **Migración:** 7 s con el recuento real.
+- **Latencia:** explicada por el RTT de Neon, sin anomalías del servidor.
+
+Dos de las tres condiciones de la recomendación local quedan **resueltas** (HOT bajo autovacuum y ventana de `0008` con el recuento real). Queda una:
+
+1. **Medir el RTT desde el host de C6 hasta Neon** (por ejemplo, `SELECT 1` en solo lectura) y aplicar los umbrales en múltiplos de RTT. Si el host está en la región de Neon, las latencias bajarán en proporción.
+
+Además, antes de aplicar `0008` en producción, la decisión del Chief debe planificar la ventana operativa de lectores (≥ 60 s con syncs parados).
+
 ## DI-A6 G2 (laboratorio): rendimiento del escritor UNNEST y ensayo de `0007 → 0008`
 
 **Estado:** evidencia de laboratorio recogida en dos ejecuciones: **Run 1** (2026-10-08, **STORAGE_PRESSURE_SUSPECTED**, latencias contaminadas por el entorno) y **Run 2** (2026-10-09, **POST_RESTART / STORAGE_PRESSURE_RELIEVED**, latencias de referencia); ver [Run 2](#g2-run-2-control-de-la-presión-de-almacenamiento). **Recomendación: CONDITIONAL_PASS.** No autoriza la aceptación de A6 para producción (sigue en **HOLD**). Rama `lab/data-integrity-a6-g2` (worktree `prediktia-di-a6-g2`), **sin push**. La base canónica sigue siendo `1c06ef9`. Nunca se tocó Neon; `0009` no está en este árbol. Detalle, entorno, metodología y JSON: `backend/tools/perf_lab/g2_evidence/`.

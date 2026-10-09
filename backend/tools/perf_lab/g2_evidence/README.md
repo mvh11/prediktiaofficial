@@ -10,7 +10,9 @@ Nunca se tocó Neon. Resultado y recomendación: `docs/data-integrity-status.md`
 | **G2_RUN_1** (2026-10-08) | **STORAGE_PRESSURE_SUSPECTED**: el SSD estaba casi lleno y la máquina llevaba varios días encendida. **Sus latencias quedan marcadas como contaminadas por el entorno**; WAL, HOT, almacenamiento, recuentos y corrección siguen siendo válidos (Run 2 los reproduce) | `*.json` y `SUMMARY.md` de esta carpeta (sin cambios) |
 | **G2_RUN_2** (2026-10-09) | **POST_RESTART / STORAGE_PRESSURE_RELIEVED**: tras reiniciar, con 107,6 GB libres de 930,4 GB (11,6 %). Misma metodología, mismos ajustes, mismo código | `run2/*.json` y `run2/SUMMARY.md` |
 
-Comparación directa: `COMPARISON.md`. **Las latencias de referencia de G2 son las de Run 2.**
+| **G2 en destino** (2026-10-09) | **NON_PRODUCTION**: rama Neon `g2-di-a6-target`, representatividad **PARTIAL**. Migración real de 18 671 partidos y escritor sobre un dataset sintético aislado, sin VACUUM forzado | `target/` (README propio con la metodología, los resultados y la comparación con Run 2) |
+
+Comparación directa: `COMPARISON.md`. **Las latencias de referencia locales son las de Run 2**; las del destino, las de `target/`.
 
 ## Candidato
 

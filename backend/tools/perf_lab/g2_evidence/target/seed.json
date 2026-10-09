@@ -1,0 +1,31 @@
+{
+  "status": "SEMBRADO",
+  "created_at": "2026-10-09T06:03:55.538214+00:00",
+  "dataset": {
+    "fixtures": 3800,
+    "seed": 20261004,
+    "seasons": 10,
+    "teams": 20,
+    "competitions": 1,
+    "as_of": "2026-10-04T18:00:00+00:00"
+  },
+  "ranges": {
+    "fixture_external_id": ">= 10000000 (inserts temporales >= 100000000)",
+    "team_external_id": "1000001..1000020",
+    "competition_external_id": 500001
+  },
+  "writer_counts": {
+    "received": 3800,
+    "created": 3800,
+    "updated": 0,
+    "unchanged": 0
+  },
+  "lab_rows": {
+    "fixtures": 3800,
+    "teams": 20,
+    "competitions": 1
+  },
+  "lab_observations": 3800,
+  "seconds": 27.809927199999947,
+  "method": "competición y temporadas por INSERT; equipos, partidos, mappings y observaciones por el escritor real (ensure_teams + upsert_fixtures con evidencia), una respuesta por temporada"
+}

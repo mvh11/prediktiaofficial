@@ -1,0 +1,654 @@
+{
+  "status": "MEDIDO",
+  "error": null,
+  "created_at": "2026-10-09T06:02:51.801935+00:00",
+  "from_revision": "0007",
+  "to_revision": "0008",
+  "fixtures_before": 18671,
+  "migration_wall_seconds": 6.959559700000682,
+  "statements": [
+    {
+      "sql": "SELECT pg_catalog.pg_class.relname FROM pg_catalog.pg_class JOIN pg_catalog.pg_namespace O",
+      "ms": 301.2205000004542
+    },
+    {
+      "sql": "SELECT alembic_version.version_num FROM alembic_version",
+      "ms": 144.75399999992078
+    },
+    {
+      "sql": "SET LOCAL lock_timeout = '5s'",
+      "ms": 144.7840000000724
+    },
+    {
+      "sql": "CREATE FUNCTION fixture_state_hash_v1( kickoff_at timestamptz, status_short text, season_i",
+      "ms": 182.46040000030916
+    },
+    {
+      "sql": "CREATE TABLE fixture_observations ( id BIGINT GENERATED ALWAYS AS IDENTITY, evidence_id UU",
+      "ms": 216.5807000001223
+    },
+    {
+      "sql": "ALTER TABLE fixtures ADD COLUMN last_observed_at TIMESTAMP WITH TIME ZONE",
+      "ms": 145.41689999987284
+    },
+    {
+      "sql": "ALTER TABLE fixtures ADD COLUMN last_state_hash BYTEA",
+      "ms": 145.3505999998015
+    },
+    {
+      "sql": "ALTER TABLE fixtures ADD CONSTRAINT ck_fixtures_last_state_hash CHECK (octet_length(last_s",
+      "ms": 191.98689999939234
+    },
+    {
+      "sql": "LOCK TABLE fixtures IN ACCESS EXCLUSIVE MODE",
+      "ms": 144.79239999946003
+    },
+    {
+      "sql": "INSERT INTO fixture_observations (evidence_id, fixture_id, observed_at, source, provider, ",
+      "ms": 651.7897000003359
+    },
+    {
+      "sql": "UPDATE fixtures SET last_observed_at = %(bootstrap_at)s, last_state_hash = fixture_state_h",
+      "ms": 1046.6349999996964
+    },
+    {
+      "sql": "SELECT (SELECT count(*) FROM fixtures), (SELECT count(*) FROM fixture_observations WHERE e",
+      "ms": 187.74479999956384
+    },
+    {
+      "sql": "ALTER TABLE fixtures ALTER COLUMN last_observed_at SET NOT NULL",
+      "ms": 148.80230000017036
+    },
+    {
+      "sql": "ALTER TABLE fixtures ALTER COLUMN last_state_hash SET NOT NULL",
+      "ms": 149.03330000015558
+    },
+    {
+      "sql": "CREATE INDEX ix_fixture_observations_fixture_observed ON fixture_observations (fixture_id,",
+      "ms": 155.31929999997374
+    },
+    {
+      "sql": "UPDATE alembic_version SET version_num='0008' WHERE alembic_version.version_num = '0007'",
+      "ms": 145.8900999996331
+    }
+  ],
+  "bootstrap_statements": [
+    {
+      "sql": "LOCK TABLE fixtures IN ACCESS EXCLUSIVE MODE",
+      "ms": 144.79239999946003
+    },
+    {
+      "sql": "INSERT INTO fixture_observations (evidence_id, fixture_id, observed_at, source, provider, ",
+      "ms": 651.7897000003359
+    },
+    {
+      "sql": "UPDATE fixtures SET last_observed_at = %(bootstrap_at)s, last_state_hash = fixture_state_h",
+      "ms": 1046.6349999996964
+    }
+  ],
+  "bootstrap_statements_seconds": 1.8432170999994923,
+  "wal_bytes": 26356344,
+  "relation_sizes_before": {
+    "fixtures": {
+      "heap_bytes": 3874816,
+      "index_bytes": 2662400,
+      "total_bytes": 6578176,
+      "rows": 18671
+    },
+    "fixture_provider_mappings": {
+      "heap_bytes": 2523136,
+      "index_bytes": 2916352,
+      "total_bytes": 5480448,
+      "rows": 18671
+    },
+    "team_provider_mappings": {
+      "heap_bytes": 114688,
+      "index_bytes": 147456,
+      "total_bytes": 303104,
+      "rows": 686
+    },
+    "teams": {
+      "heap_bytes": 122880,
+      "index_bytes": 73728,
+      "total_bytes": 237568,
+      "rows": 686
+    }
+  },
+  "relation_sizes_after": {
+    "fixtures": {
+      "heap_bytes": 8323072,
+      "index_bytes": 3981312,
+      "total_bytes": 12345344,
+      "rows": 18671
+    },
+    "fixture_observations": {
+      "heap_bytes": 3334144,
+      "index_bytes": 2064384,
+      "total_bytes": 5431296,
+      "rows": 18671
+    },
+    "fixture_provider_mappings": {
+      "heap_bytes": 2523136,
+      "index_bytes": 2916352,
+      "total_bytes": 5480448,
+      "rows": 18671
+    },
+    "team_provider_mappings": {
+      "heap_bytes": 114688,
+      "index_bytes": 147456,
+      "total_bytes": 303104,
+      "rows": 686
+    },
+    "teams": {
+      "heap_bytes": 122880,
+      "index_bytes": 73728,
+      "total_bytes": 237568,
+      "rows": 686
+    }
+  },
+  "relation_size_delta": {
+    "fixtures": {
+      "heap_bytes": 4448256,
+      "index_bytes": 1318912,
+      "total_bytes": 5767168,
+      "rows": 0
+    },
+    "fixture_observations": {
+      "heap_bytes": 3334144,
+      "index_bytes": 2064384,
+      "total_bytes": 5431296,
+      "rows": 18671
+    },
+    "fixture_provider_mappings": {
+      "heap_bytes": 0,
+      "index_bytes": 0,
+      "total_bytes": 0,
+      "rows": 0
+    },
+    "team_provider_mappings": {
+      "heap_bytes": 0,
+      "index_bytes": 0,
+      "total_bytes": 0,
+      "rows": 0
+    },
+    "teams": {
+      "heap_bytes": 0,
+      "index_bytes": 0,
+      "total_bytes": 0,
+      "rows": 0
+    }
+  },
+  "read_probe": {
+    "probe_reads": 17,
+    "interval_s": 0.05,
+    "max_read_ms": 3244.1289999997025,
+    "reads_over_100ms": 17,
+    "max_blocked_read_ms": 3244.1289999997025,
+    "errors": []
+  },
+  "checks": {
+    "alembic_version": "0008",
+    "fixtures": 18671,
+    "observations": 18671,
+    "bootstrap_observations": 18671,
+    "bootstrap_evidence_ids": 1,
+    "fixtures_without_bootstrap_observation": 0,
+    "duplicate_bootstrap_per_fixture": 0,
+    "winner_not_its_bootstrap_observation": 0,
+    "orphan_observations": 0,
+    "bad_hash_length": 0,
+    "null_order_columns": 0
+  },
+  "vacuum_after_migration": "NONE (autovacuum only)",
+  "environment": {
+    "python": "3.13.4 (tags/v3.13.4:8a526ec, Jun  3 2025, 17:46:04) [MSC v.1943 64 bit (AMD64)]",
+    "sqlalchemy": "2.1.3",
+    "psycopg": "3.3.6",
+    "os": "Windows-11-10.0.26300-SP0",
+    "processor": "Intel64 Family 6 Model 151 Stepping 5, GenuineIntel",
+    "postgresql": "PostgreSQL 18.6 (c021049) on aarch64-unknown-linux-gnu, compiled by gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0, 64-bit",
+    "postgresql_settings": {
+      "shared_buffers": "230MB",
+      "work_mem": "4MB",
+      "effective_cache_size": "6553MB",
+      "synchronous_commit": "on",
+      "fsync": "off",
+      "full_page_writes": "off",
+      "max_connections": "901",
+      "default_statistics_target": "100",
+      "autovacuum": "on",
+      "statement_timeout": "2min"
+    },
+    "table_sizes": [
+      {
+        "relname": "alembic_version",
+        "total_bytes": 24576
+      },
+      {
+        "relname": "competition_provider_mappings",
+        "total_bytes": 65536
+      },
+      {
+        "relname": "competitions",
+        "total_bytes": 49152
+      },
+      {
+        "relname": "fixture_observations",
+        "total_bytes": 5431296
+      },
+      {
+        "relname": "fixture_provider_mappings",
+        "total_bytes": 5480448
+      },
+      {
+        "relname": "fixture_statistics_observations",
+        "total_bytes": 14262272
+      },
+      {
+        "relname": "fixture_team_statistics",
+        "total_bytes": 8691712
+      },
+      {
+        "relname": "fixtures",
+        "total_bytes": 12345344
+      },
+      {
+        "relname": "live_sync_runs",
+        "total_bytes": 98304
+      },
+      {
+        "relname": "providers",
+        "total_bytes": 32768
+      },
+      {
+        "relname": "season_backfill_runs",
+        "total_bytes": 188416
+      },
+      {
+        "relname": "season_teams",
+        "total_bytes": 229376
+      },
+      {
+        "relname": "seasons",
+        "total_bytes": 98304
+      },
+      {
+        "relname": "statistics_runs",
+        "total_bytes": 761856
+      },
+      {
+        "relname": "team_provider_mappings",
+        "total_bytes": 303104
+      },
+      {
+        "relname": "teams",
+        "total_bytes": 237568
+      }
+    ],
+    "indexes": [
+      {
+        "tablename": "alembic_version",
+        "indexname": "alembic_version_pkc",
+        "indexdef": "CREATE UNIQUE INDEX alembic_version_pkc ON public.alembic_version USING btree (version_num)"
+      },
+      {
+        "tablename": "competition_provider_mappings",
+        "indexname": "competition_provider_mappings_pkey",
+        "indexdef": "CREATE UNIQUE INDEX competition_provider_mappings_pkey ON public.competition_provider_mappings USING btree (id)"
+      },
+      {
+        "tablename": "competition_provider_mappings",
+        "indexname": "ix_competition_provider_mappings_competition_id",
+        "indexdef": "CREATE INDEX ix_competition_provider_mappings_competition_id ON public.competition_provider_mappings USING btree (competition_id, provider)"
+      },
+      {
+        "tablename": "competition_provider_mappings",
+        "indexname": "uq_competition_provider_mappings_provider_external",
+        "indexdef": "CREATE UNIQUE INDEX uq_competition_provider_mappings_provider_external ON public.competition_provider_mappings USING btree (provider, external_id)"
+      },
+      {
+        "tablename": "competitions",
+        "indexname": "competitions_pkey",
+        "indexdef": "CREATE UNIQUE INDEX competitions_pkey ON public.competitions USING btree (id)"
+      },
+      {
+        "tablename": "competitions",
+        "indexname": "ix_competitions_external_id",
+        "indexdef": "CREATE UNIQUE INDEX ix_competitions_external_id ON public.competitions USING btree (external_id)"
+      },
+      {
+        "tablename": "fixture_observations",
+        "indexname": "fixture_observations_pkey",
+        "indexdef": "CREATE UNIQUE INDEX fixture_observations_pkey ON public.fixture_observations USING btree (id)"
+      },
+      {
+        "tablename": "fixture_observations",
+        "indexname": "ix_fixture_observations_fixture_observed",
+        "indexdef": "CREATE INDEX ix_fixture_observations_fixture_observed ON public.fixture_observations USING btree (fixture_id, observed_at)"
+      },
+      {
+        "tablename": "fixture_observations",
+        "indexname": "uq_fixture_observations_fixture_evidence",
+        "indexdef": "CREATE UNIQUE INDEX uq_fixture_observations_fixture_evidence ON public.fixture_observations USING btree (fixture_id, evidence_id)"
+      },
+      {
+        "tablename": "fixture_provider_mappings",
+        "indexname": "fixture_provider_mappings_pkey",
+        "indexdef": "CREATE UNIQUE INDEX fixture_provider_mappings_pkey ON public.fixture_provider_mappings USING btree (id)"
+      },
+      {
+        "tablename": "fixture_provider_mappings",
+        "indexname": "ix_fixture_provider_mappings_fixture_id",
+        "indexdef": "CREATE INDEX ix_fixture_provider_mappings_fixture_id ON public.fixture_provider_mappings USING btree (fixture_id, provider)"
+      },
+      {
+        "tablename": "fixture_provider_mappings",
+        "indexname": "uq_fixture_provider_mappings_provider_external",
+        "indexdef": "CREATE UNIQUE INDEX uq_fixture_provider_mappings_provider_external ON public.fixture_provider_mappings USING btree (provider, external_id)"
+      },
+      {
+        "tablename": "fixture_statistics_observations",
+        "indexname": "fixture_statistics_observations_pkey",
+        "indexdef": "CREATE UNIQUE INDEX fixture_statistics_observations_pkey ON public.fixture_statistics_observations USING btree (id)"
+      },
+      {
+        "tablename": "fixture_statistics_observations",
+        "indexname": "ix_fso_fixture_provider_available",
+        "indexdef": "CREATE INDEX ix_fso_fixture_provider_available ON public.fixture_statistics_observations USING btree (fixture_id, provider, available_at)"
+      },
+      {
+        "tablename": "fixture_statistics_observations",
+        "indexname": "uq_fso_id_fixture_provider",
+        "indexdef": "CREATE UNIQUE INDEX uq_fso_id_fixture_provider ON public.fixture_statistics_observations USING btree (id, fixture_id, provider)"
+      },
+      {
+        "tablename": "fixture_statistics_observations",
+        "indexname": "uq_fso_one_latest",
+        "indexdef": "CREATE UNIQUE INDEX uq_fso_one_latest ON public.fixture_statistics_observations USING btree (fixture_id, provider) WHERE is_latest"
+      },
+      {
+        "tablename": "fixture_team_statistics",
+        "indexname": "fixture_team_statistics_pkey",
+        "indexdef": "CREATE UNIQUE INDEX fixture_team_statistics_pkey ON public.fixture_team_statistics USING btree (id)"
+      },
+      {
+        "tablename": "fixture_team_statistics",
+        "indexname": "ix_fts_observation",
+        "indexdef": "CREATE INDEX ix_fts_observation ON public.fixture_team_statistics USING btree (observation_id)"
+      },
+      {
+        "tablename": "fixture_team_statistics",
+        "indexname": "ix_fts_team_fixture",
+        "indexdef": "CREATE INDEX ix_fts_team_fixture ON public.fixture_team_statistics USING btree (team_id, fixture_id)"
+      },
+      {
+        "tablename": "fixture_team_statistics",
+        "indexname": "uq_fts_fixture_side_provider",
+        "indexdef": "CREATE UNIQUE INDEX uq_fts_fixture_side_provider ON public.fixture_team_statistics USING btree (fixture_id, side, provider)"
+      },
+      {
+        "tablename": "fixture_team_statistics",
+        "indexname": "uq_fts_fixture_team_provider",
+        "indexdef": "CREATE UNIQUE INDEX uq_fts_fixture_team_provider ON public.fixture_team_statistics USING btree (fixture_id, team_id, provider)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "fixtures_pkey",
+        "indexdef": "CREATE UNIQUE INDEX fixtures_pkey ON public.fixtures USING btree (id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_away_team_id",
+        "indexdef": "CREATE INDEX ix_fixtures_away_team_id ON public.fixtures USING btree (away_team_id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_external_id",
+        "indexdef": "CREATE UNIQUE INDEX ix_fixtures_external_id ON public.fixtures USING btree (external_id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_home_team_id",
+        "indexdef": "CREATE INDEX ix_fixtures_home_team_id ON public.fixtures USING btree (home_team_id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_kickoff_at",
+        "indexdef": "CREATE INDEX ix_fixtures_kickoff_at ON public.fixtures USING btree (kickoff_at)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_season_id",
+        "indexdef": "CREATE INDEX ix_fixtures_season_id ON public.fixtures USING btree (season_id)"
+      },
+      {
+        "tablename": "fixtures",
+        "indexname": "ix_fixtures_status_short",
+        "indexdef": "CREATE INDEX ix_fixtures_status_short ON public.fixtures USING btree (status_short)"
+      },
+      {
+        "tablename": "live_sync_runs",
+        "indexname": "ix_live_sync_runs_job_started",
+        "indexdef": "CREATE INDEX ix_live_sync_runs_job_started ON public.live_sync_runs USING btree (job_type, started_at)"
+      },
+      {
+        "tablename": "live_sync_runs",
+        "indexname": "live_sync_runs_pkey",
+        "indexdef": "CREATE UNIQUE INDEX live_sync_runs_pkey ON public.live_sync_runs USING btree (id)"
+      },
+      {
+        "tablename": "live_sync_runs",
+        "indexname": "uq_live_sync_runs_one_running",
+        "indexdef": "CREATE UNIQUE INDEX uq_live_sync_runs_one_running ON public.live_sync_runs USING btree (lock_scope) WHERE (status = 'running'::text)"
+      },
+      {
+        "tablename": "providers",
+        "indexname": "providers_pkey",
+        "indexdef": "CREATE UNIQUE INDEX providers_pkey ON public.providers USING btree (code)"
+      },
+      {
+        "tablename": "season_backfill_runs",
+        "indexname": "ix_season_backfill_runs_competition_year",
+        "indexdef": "CREATE INDEX ix_season_backfill_runs_competition_year ON public.season_backfill_runs USING btree (competition_id, requested_year)"
+      },
+      {
+        "tablename": "season_backfill_runs",
+        "indexname": "ix_season_backfill_runs_season_status",
+        "indexdef": "CREATE INDEX ix_season_backfill_runs_season_status ON public.season_backfill_runs USING btree (season_id, status)"
+      },
+      {
+        "tablename": "season_backfill_runs",
+        "indexname": "season_backfill_runs_pkey",
+        "indexdef": "CREATE UNIQUE INDEX season_backfill_runs_pkey ON public.season_backfill_runs USING btree (id)"
+      },
+      {
+        "tablename": "season_backfill_runs",
+        "indexname": "uq_season_backfill_runs_one_running",
+        "indexdef": "CREATE UNIQUE INDEX uq_season_backfill_runs_one_running ON public.season_backfill_runs USING btree (competition_id, requested_year) WHERE (status = 'running'::text)"
+      },
+      {
+        "tablename": "season_teams",
+        "indexname": "ix_season_teams_team_id",
+        "indexdef": "CREATE INDEX ix_season_teams_team_id ON public.season_teams USING btree (team_id)"
+      },
+      {
+        "tablename": "season_teams",
+        "indexname": "season_teams_pkey",
+        "indexdef": "CREATE UNIQUE INDEX season_teams_pkey ON public.season_teams USING btree (season_id, team_id)"
+      },
+      {
+        "tablename": "seasons",
+        "indexname": "ix_seasons_competition_id",
+        "indexdef": "CREATE INDEX ix_seasons_competition_id ON public.seasons USING btree (competition_id)"
+      },
+      {
+        "tablename": "seasons",
+        "indexname": "seasons_pkey",
+        "indexdef": "CREATE UNIQUE INDEX seasons_pkey ON public.seasons USING btree (id)"
+      },
+      {
+        "tablename": "seasons",
+        "indexname": "uq_seasons_competition_year",
+        "indexdef": "CREATE UNIQUE INDEX uq_seasons_competition_year ON public.seasons USING btree (competition_id, year)"
+      },
+      {
+        "tablename": "statistics_runs",
+        "indexname": "ix_statistics_runs_season_started",
+        "indexdef": "CREATE INDEX ix_statistics_runs_season_started ON public.statistics_runs USING btree (season_id, started_at)"
+      },
+      {
+        "tablename": "statistics_runs",
+        "indexname": "statistics_runs_pkey",
+        "indexdef": "CREATE UNIQUE INDEX statistics_runs_pkey ON public.statistics_runs USING btree (id)"
+      },
+      {
+        "tablename": "statistics_runs",
+        "indexname": "uq_statistics_runs_one_running",
+        "indexdef": "CREATE UNIQUE INDEX uq_statistics_runs_one_running ON public.statistics_runs USING btree (lock_scope) WHERE (status = 'running'::text)"
+      },
+      {
+        "tablename": "team_provider_mappings",
+        "indexname": "ix_team_provider_mappings_team_id",
+        "indexdef": "CREATE INDEX ix_team_provider_mappings_team_id ON public.team_provider_mappings USING btree (team_id, provider)"
+      },
+      {
+        "tablename": "team_provider_mappings",
+        "indexname": "team_provider_mappings_pkey",
+        "indexdef": "CREATE UNIQUE INDEX team_provider_mappings_pkey ON public.team_provider_mappings USING btree (id)"
+      },
+      {
+        "tablename": "team_provider_mappings",
+        "indexname": "uq_team_provider_mappings_provider_external",
+        "indexdef": "CREATE UNIQUE INDEX uq_team_provider_mappings_provider_external ON public.team_provider_mappings USING btree (provider, external_id)"
+      },
+      {
+        "tablename": "teams",
+        "indexname": "ix_teams_external_id",
+        "indexdef": "CREATE UNIQUE INDEX ix_teams_external_id ON public.teams USING btree (external_id)"
+      },
+      {
+        "tablename": "teams",
+        "indexname": "teams_pkey",
+        "indexdef": "CREATE UNIQUE INDEX teams_pkey ON public.teams USING btree (id)"
+      }
+    ],
+    "branch": "lab/data-integrity-a6-g2",
+    "head": "dc983744a5a4f270a1c74fae32d844fab0107d7c",
+    "git_status": "?? tools/perf_lab/results/target/",
+    "source_sha256": {
+      "app/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/api/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/api/errors.py": "0b53fb9fe1ea543892010eb4b17d2e14da42f363e86c00cac120569a132d0a44",
+      "app/api/router.py": "728a76838e542903e9079ecc2903c4d5160141ea433cbe6bc3c770eb935500bc",
+      "app/api/routes/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/api/routes/catalog.py": "08aa5a53fbcbd5e4a90103a59c7448f0b0956a23ebec0d1821d16cce4a6902e0",
+      "app/api/routes/fixtures.py": "c93bd88b57564c6112ab453e1417eeb1b35f705468bfb9d0dc87485868e22e8c",
+      "app/api/routes/health.py": "a8f33e501e2363913a1811b0882900a48d11856b285665a53561485b4835e5c0",
+      "app/api/routes/providers.py": "134e7f29be59e662577aaedc44aa0e3a16e2d27a6dc60b5374d9599b6a53437b",
+      "app/core/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/core/config.py": "e17d32aad12fa109febdc7d632e7512ead0244162155f3d6b6e20a760fcb7690",
+      "app/core/logging.py": "20e30720cbb1d7d5e7af68350754f8287e3c5620ac2d41f866ba69fe981f602e",
+      "app/db/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/db/database.py": "fa7292da55c842e57cd717c1f23ce15d6c1590edb9a0122eb3c7dd5a7ad18b2f",
+      "app/db/session.py": "28eaa12ad765c232ce2ebec177d07f3f97a3407a077494212a2eb822d7a1e77a",
+      "app/integrations/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/integrations/exceptions.py": "4d3f2c3fcde76676c375a7a5afec1b3b05bf4479d0ed01c41ed7033394b239cf",
+      "app/integrations/football/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/integrations/football/api_football.py": "5a0e966b9013df4a3863c55f5a6a3b958703eb94cfc2ad39a776416a89b87aa8",
+      "app/integrations/football/api_football_history.py": "849a1e7cf98f28f04f1bfcc318c175e07778871c44b7d9b4bd770f4edece220a",
+      "app/integrations/football/api_football_statistics.py": "a1751d2450641ca3a334b304b0f76d1d6ef6754e6496ac49b95851ea098b93db",
+      "app/integrations/football/base.py": "0a1909bf9db55c47892d6e882bf1a912171f5c4ba0fcd89203f49b687e47d5a7",
+      "app/integrations/http.py": "8cba5aa4a64d9d1d8c46d92dd1cfbf1e0948bb0f9bf80a5228cf7808672d5e0b",
+      "app/integrations/odds/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/integrations/odds/base.py": "31a21b1968057e75f25adc4b9ecc5d846e01ed8c6827c22288919464a92ce2d6",
+      "app/integrations/odds/five_dollar.py": "07cd7592cc759ae32c5ca86cfa3f177198d290c8136660e07761c51eb8759b2f",
+      "app/integrations/request_stats.py": "6017be1ea4931b72f65b34034c711fa3b657c4587290b654446003259987c9ac",
+      "app/jobs/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/jobs/history_backfill.py": "99beefbf7386ac31e3db1f76511408568545c02b911f712651b8ecef8f1f6735",
+      "app/jobs/live_sync.py": "81a6e77f46598ca0963de6fd40f63d41f054f66630f575040f717b42eb960b27",
+      "app/jobs/ops_tick.py": "1c5f7cea35a34b7e2a6340f02c97c160082810c6ad7cd580a583525c365ff0ed",
+      "app/jobs/statistics_backfill.py": "302908495179ef95e231313306bfe05f31b61570503982569208c3168e3492a1",
+      "app/jobs/statistics_reconcile.py": "67913af3dd3e788b44a4dbb6aee4b058ec4a988b1e6afaaaaa12ae685e5152a5",
+      "app/main.py": "e2d640df3ac73f673096b0147f4fa319eb40321029f47b1ebbc7040dc2ab882d",
+      "app/models/__init__.py": "879d569af561aca3a5000b9735191bbb572f09f242e8d05b663aac0e42876d22",
+      "app/models/backfill.py": "010d70e875fa0866f65d914fc6c4d82db8c01251261bd8dcae54d55a15f60d59",
+      "app/models/competition.py": "5f4f62ed4a833f0fcae3e24db8a8a8fa89cdd8c5ec0ef05dfe6ab98516fd7463",
+      "app/models/fixture.py": "246062a582130ebd741c69e5fbb205e7e551ffdd770fc458e5422dee9444f672",
+      "app/models/fixture_observation.py": "7e7cb7f6503f22fc45f3eff6f5898283d484f9f98cc257146187420fee2d6c02",
+      "app/models/live_sync.py": "a4fca06b13d6f3c110b9357740eff6c8cc1f067427586460c71cde62177f5c40",
+      "app/models/provider.py": "afe6a4a311757739effdfbebbf0e81838b1796f4545651ad72a739cb63adb608",
+      "app/models/provider_mapping.py": "c9b26ad497f117ab355545dbe285c8f2a5a370d712fbc34dfb772772b05814f3",
+      "app/models/season.py": "f2efc85d2a49bca6c834ae7d0b38bc1f207abfdb9137fafc5f546b984d431cd2",
+      "app/models/statistics.py": "36d43183248b1f5e99c40b1371e65991f1f936222b842ea4470bfb02fcbdf8cd",
+      "app/models/team.py": "8c671cbfa45ae0f26077e38e2ef7bb19831881b7224ee4ba540ff20fe2cc1aa9",
+      "app/repositories/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/repositories/backfill_repository.py": "9b8fede441a8cb5869e975848da3fe7cca3a0a6ef1d2696be13c9dbedfb6e38d",
+      "app/repositories/bulk_rows.py": "3d0e54da634d1977656eebd2d80fd444d12a7c35e0e8b396baaeb872061a2e28",
+      "app/repositories/catalog_repository.py": "2246ae3d120ca68402dbd8f51df40b7b498f81319aabb9dffb9312b9718c57b9",
+      "app/repositories/fixture_knowledge_repository.py": "7eed82ec1e00811acaab703eb891472afbe5480fff4b5525542f265b1090ec76",
+      "app/repositories/fixture_repository.py": "e365c0bff17c67b07b3c082814c53ee1e0f9cfff2fd1390fbb396de7b55cb145",
+      "app/repositories/fixture_retrospective_repository.py": "bde41de5709f5f61695b7e758fef4bedd08323fdccc306b4835a3fc10d6d56b3",
+      "app/repositories/live_sync_repository.py": "c6c926f2a27ae6d068548f52676d6da371e342d17c5777b2fac35716273d8122",
+      "app/repositories/provider_mapping_repository.py": "e6f14dbe152d50f586653b5701931491fc21ad53a2e6fbc3f56ae0905a2b7d28",
+      "app/repositories/statistics_knowledge_repository.py": "640597df4b55177ab2e38d39dc3488c7b80df7576b4f22085326a7f9b2acdbbc",
+      "app/repositories/statistics_repository.py": "8aba3ab3e33f35f38d15b036fbacb9e31eedd4df3e2f9547bd49a934b8466cf2",
+      "app/repositories/statistics_run_repository.py": "0c396defbe72718cc035707de995bcead660834f906af1ab5d8415d06726f370",
+      "app/schemas/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/schemas/backfill.py": "aeee81e04e8cfb1f400ab75b465dae59c86b5096e1fb4ad11b2b46c07a8d8fc5",
+      "app/schemas/catalog.py": "7ffe291fedef3dd126d800e5d725071960943172bb6d282c462f147a2d68df76",
+      "app/schemas/fixture.py": "2bbb95aaa1c6606970268690d90d68648cde8436f6b3319c1693d5e59c5d0df6",
+      "app/schemas/fixture_evidence.py": "d7ce52b19f2e7c4f8f55f586226bfdb78a4b30999793581d67de8dda356e3b02",
+      "app/schemas/fixture_knowledge.py": "31ba1998f83a012de7f3d2671d29852350f19a15f05ecb3666974c05aae37d3f",
+      "app/schemas/prematch_features.py": "5b3517fbaebcc8bfbe9500918daad67ff6819dc71817063d5198c759c30a2f6e",
+      "app/schemas/provider.py": "43714630fe7e2246c469c370a4911346fc4303fb3ffd5c04856583424944c7e7",
+      "app/schemas/statistics.py": "960c5ab15665a79caae53713f3ccd060f8cbe18c609723bf2a08466a0180ebd1",
+      "app/schemas/statistics_knowledge.py": "164327c07e397d99a68aa8bf0bc672ed420241a0de250b2498f53e6dff65caf9",
+      "app/services/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "app/services/catalog_sync_service.py": "71c3fa6f709009b4181825e85cd91de46af398f75cda02c107795e6de09d427f",
+      "app/services/fixture_sync_service.py": "b2d315baa53dd70edd45b0b7a55c4d92bb35041df271f8287f42db028f9794f7",
+      "app/services/freshness_checks.py": "eeb84a669b280b3aae8962128fbefccb6ffe6a388e45c6e1b3983668f1cf2065",
+      "app/services/history_backfill_service.py": "6392a9b8ba9ee6dda3dea1bc27153e5a28588021cb63e109574cbe3b76692537",
+      "app/services/history_quality_checks.py": "cc63c058088cc5f3130275efb47080811b7cc54a3d7bc6dc94f8c774b4440b68",
+      "app/services/polling_eligibility.py": "6877764d0d1d2fcb238f101130516097a3a80a03ffe36955141bf327c393e0c0",
+      "app/services/prematch_features.py": "ae9fddffab5a31089952a6e3b341f6a220d6f35487d61c06a96f5038db0cfda4",
+      "app/services/provider_service.py": "a65c0901d597887d67ad6f4ff6447c62c4b31ceeacca863d94e8df04e257fe04",
+      "app/services/season_membership.py": "5564658bd96193161db444cad1a94582375ae3a7605538d163accecc89317a56",
+      "app/services/statistics_as_of.py": "5e15d2afe48554de519bee6b7c84789b20cc5cd45e46fdeb41f10b21a8d5e7ec",
+      "app/services/statistics_coverage.py": "bb9838b8dcc41271b9898fc8e519d23bcac2028b1f410ce69323fccbdd7c3245",
+      "app/services/statistics_prematch.py": "4fd4585b45619fb101c8725ebacd47e6455641f6dd6767bd484a3c069ed5d8c9",
+      "app/services/statistics_quality_checks.py": "98b9df118f9b853eae72808860857b44278cacbe497b678b6f3d05d4ce54edb8",
+      "app/services/statistics_reconcile_service.py": "431c8eeddd018af2f2778e61d3ea95814337162ed46c2a5b80ff821c21da0735",
+      "app/services/statistics_service.py": "c4ce6d6daa4fe544e45b06e3053f555cd9aac084a1cae02c2894a295a1b2d7c6",
+      "app/services/sync_failures.py": "40c2c6ebcb1ee595f7a8119f630068d74c96f67bef43a70346a033b5356397f5",
+      "alembic/env.py": "3ab45a643d00c112890c407f8402a1d5a5e1e9abb1356c135c878c432ea29a69",
+      "alembic/versions/0001_initial.py": "2ce08dfc065abd4ccb08539cded5b0a52f6a46762b7f74938deafa258b77dbe0",
+      "alembic/versions/0002_catalog.py": "10ccbb731f48f576d298a6e8348c079b3b7a4abea72d0ee11359ae902b9e8a80",
+      "alembic/versions/0003_fixtures.py": "a29a8ec76f9652822cb426a61363055f436914ff8b2b7a524cf932710a933501",
+      "alembic/versions/0004_provider_mappings_fulltime.py": "6f47df5a5a201c57b99eef711536f843aa272255d930472da9957011b5dbf24c",
+      "alembic/versions/0005_season_backfill_runs.py": "6b7ad5677c6f54b189a1aa6e0046a214b4d7b26dd4f1556e3fbc978e01ba1f83",
+      "alembic/versions/0006_live_sync_runs.py": "a9b3af5727f244e39359c39e77da4626208e02c31aa4e1c49abe68156bb2c72f",
+      "alembic/versions/0007_match_statistics.py": "a71aa84ab32618c9e5095e932ade4f40d20feed526977568548bd72007d2a45d",
+      "alembic/versions/0008_fixture_observations.py": "3293768e918abfe95873f3268aade1e4eebae2d248b3bcaf0ecc98048337b31e",
+      "tools/perf_lab/__init__.py": "39bb5427b967d794e58a54650e2161ebd59afdcb8eff41c2b6b2f699b1f01bca",
+      "tools/perf_lab/__main__.py": "d2ee659ad141f2673cf5e341cbd615e16290852ff3d350fe572b8a0d922bb08a",
+      "tools/perf_lab/a6.py": "ba8609b278f0d6103c2b5605c3cf5cb05304bb630f312a5cae6d2c7dfcc039c5",
+      "tools/perf_lab/benchmark.py": "a2ab554fcebb95f1b6a753c76d0aac95fac814e3042e7f5eef4ab006745e90e6",
+      "tools/perf_lab/dataset.py": "4af1fabc849c5c6b7c511f2aa682995ea13e14dde22dc13daecbd9bdb5d76e2b",
+      "tools/perf_lab/g2.py": "8debadf5d00e399a2a155e82089f2e3f71ce42cb3da1bdabbc54bb50b5d162fb",
+      "tools/perf_lab/g2_target.py": "dd7af1c1a0d934af14adcb5c693aa0ed8db8fd290309632a29de5b064851759b",
+      "tools/perf_lab/profiler.py": "87b581a8d8140df11e55b47bd7448795ac2d44f939c839441afad17d544c99c2",
+      "tools/perf_lab/safety.py": "3fef06e0f244bda457cdbde9d8a4d387136347b9877d8e6dc2a607f35bd1f987"
+    }
+  },
+  "client": {
+    "os": "Windows-11-10.0.26300-SP0",
+    "python": "3.13.4",
+    "sqlalchemy": "2.1.3",
+    "psycopg": "3.3.6",
+    "pooled_endpoint": true,
+    "sslmode": "require",
+    "target_classification": "NON_PRODUCTION",
+    "neon_branch_id_verified_on_every_connection": true
+  },
+  "note": "alembic upgrade 0008 = UNA transacción (DDL + bootstrap + índices): ACCESS EXCLUSIVE sobre fixtures hasta el COMMIT"
+}

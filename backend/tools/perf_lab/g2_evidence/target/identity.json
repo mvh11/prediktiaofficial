@@ -1,0 +1,75 @@
+{
+  "status": "VERIFIED",
+  "checks": {
+    "read_only_session": true,
+    "branch": true,
+    "revision": true,
+    "fixtures": true,
+    "postgres": true,
+    "observations_absent": true
+  },
+  "facts": {
+    "transaction_read_only": "on",
+    "neon_branch_id_matches": true,
+    "in_recovery": false,
+    "server_version": "18.6 (c021049)",
+    "alembic_version": "0007",
+    "fixtures": 18671,
+    "fixture_provider_mappings": 18671,
+    "fixture_observations_present": false,
+    "lab_range_rows": {
+      "fixtures": 0,
+      "teams": 0,
+      "competitions": 0
+    },
+    "server": {
+      "settings": {
+        "server_version": "18.6 (c021049)",
+        "fsync": "off",
+        "synchronous_commit": "on",
+        "full_page_writes": "off",
+        "wal_compression": "off",
+        "shared_buffers": "230MB",
+        "work_mem": "4MB",
+        "max_wal_size": "1GB",
+        "checkpoint_timeout": "5min",
+        "autovacuum": "on",
+        "autovacuum_naptime": "1min",
+        "autovacuum_max_workers": "3",
+        "autovacuum_vacuum_threshold": "50",
+        "autovacuum_vacuum_scale_factor": "0.2",
+        "autovacuum_vacuum_insert_threshold": "1000",
+        "autovacuum_vacuum_insert_scale_factor": "0.2",
+        "autovacuum_analyze_threshold": "50",
+        "autovacuum_analyze_scale_factor": "0.1",
+        "autovacuum_vacuum_cost_limit": "-1",
+        "autovacuum_vacuum_cost_delay": "2ms",
+        "jit": "on",
+        "max_connections": "901",
+        "default_transaction_isolation": "read committed"
+      },
+      "ssl_in_use": false,
+      "fixtures_reloptions": "default",
+      "autovacuum_table_options": "none"
+    },
+    "select1_round_trip_ms": {
+      "n": 30,
+      "min": 144.49960000001738,
+      "p50": 145.0668500001484,
+      "p95": 145.91029999974126,
+      "max": 289.8945000006279
+    },
+    "wal_lsn_readable": true
+  },
+  "client": {
+    "os": "Windows-11-10.0.26300-SP0",
+    "python": "3.13.4",
+    "sqlalchemy": "2.1.3",
+    "psycopg": "3.3.6",
+    "pooled_endpoint": true,
+    "sslmode": "require",
+    "target_classification": "NON_PRODUCTION",
+    "neon_branch_id_verified_on_every_connection": true
+  },
+  "created_at": "2026-10-09T06:02:02.706454+00:00"
+}
