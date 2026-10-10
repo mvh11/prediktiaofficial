@@ -46,13 +46,28 @@
 - **Estado:** M5.8D cerrado como investigación exploratoria; señal predictiva NO confirmada.
 - **M5.9B: infraestructura local de predicción prospectiva** (`backend/research/m59/`, ver su README): manifiestos JSON sellados de B0/B1/B2 con inferencia en Python puro (equivalente a sklearn a < 1e-12), registro append-only con cadena de hashes, anclajes externos (RFC 3161, hora del servidor de GitHub o del hilo del proyecto; nunca un commit local), emisor con reloj inyectable (T = K − 1 h, H = emisión <= T, sin emisión tardía ni fallback, B2 nulo si no hay features) y contrato de evaluación con preregistro y evaluación única. Todo simulado: 0 predicciones reales. Cierre técnico: el registro distingue CHAIN_VALID / ANCHOR_VERIFIED / EVALUATION_ELIGIBLE (sin anclaje externo verificado no se evalúa) y la cobertura se separa en operativa (todos los elegibles) y evaluable (elegibles con etiqueta); el denominador del umbral confirmatorio queda para decisión gerencial antes del preregistro.
 
+**DI-A6 en producción (decisión del Chief, 2026-10-10):** cerrado y aceptado.
+
+- `A6_PRODUCTION_READ_ONLY_AUDIT: PASS`
+- `PRODUCTION_SCHEMA: 0008`
+- `A6_PRODUCTION_DATA_STATE: CLOSED_ACCEPTED`
+- `FIRST_POST_0008_WRITE: DEFERRED` (no se ha ejecutado ninguna escritura normal posterior a `0008`).
+
+**Candidato de integración compatible con A6 (`integration/a6-main-compat`, local; sin integrar en `main` ni desplegar):**
+
+- **Origen:** `origin/main` `c3d16d2` + Modular `d31eebc` (que contiene el baseline canónico `1c06ef9`), merge `--no-ff`. Merge-base `a92e8a3`.
+- **Drift de `main`:** solo `.github/workflows/diagnostic-c6-neon-rtt.yml` (autocontenido, sin checkout del repositorio). Ningún archivo tocado por ambos lados; 0 conflictos.
+- **Esquema:** cabeza única `0008`; `0008_fixture_observations.py` idéntica al baseline; `alembic check` sin operaciones pendientes en PostgreSQL 18.6 local. Sin migraciones nuevas.
+- **Contrato A6:** `app/`, `alembic/`, `tests/`, `tools/` y los workflows `ops-*` sin archivos modificados ni borrados respecto de `1c06ef9`. `upsert_fixtures` exige `FixtureEvidence` y solo lo llaman `fixture_sync_service` y `history_backfill_service`.
+- **Tests:** suite completa 1472 passed, 0 skipped (PostgreSQL local desechable); research 13 passed.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
 - **Limitaciones aceptadas:** mappings sin historia; enumeración desde el estado actual de `fixtures` (los hechos salen de la evidencia); disponibilidad sintética del backfill (marcada como retrospectiva); exclusión de AET/PEN (0,5 %); xG con pocas muestras (tratarla como opcional).
 - **Bloqueo para modelar en régimen estricto:** el bootstrap de DI-A6 (todo lo anterior es `UNKNOWN_AT_T`).
 - **Corrección dentro de Modular, con autorización operativa:** catch-up de stats (temporadas previas y backlog actual) para subir la cobertura.
-- **Gates productivos pendientes (fuera de Modular):** aceptación de DI-A6 en producción y migración `0008` (producción sigue en `0007`); activación del scheduler C6 y piloto de 24 h; catch-up; DI-A5D/`0009`; integración en `main`.
+- **Gates productivos pendientes (fuera de Modular):** primera escritura normal posterior a `0008` (diferida); activación del scheduler C6 y piloto de 24 h; catch-up; DI-A5D/`0009`; integración en `main`. La aceptación de DI-A6 en producción y la migración `0008` ya están cerradas (ver arriba).
 
 El resto de este documento conserva el estado anterior a este ciclo.
 
