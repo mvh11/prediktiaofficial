@@ -8,7 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.models import Fixture, FixtureProviderMapping
 from app.repositories import fixture_repository
-from tests.conftest import make_competition, make_fixture_data
+from tests.conftest import make_competition, make_evidence, make_fixture_data
 
 pytestmark = pytest.mark.db
 
@@ -35,7 +35,8 @@ def season_id(db_session) -> int:
 def _upsert(db, season_id: int, *fixtures) -> None:
     teams = [f.home_team for f in fixtures] + [f.away_team for f in fixtures]
     team_ids = fixture_repository.ensure_teams(db, teams, "api-football")
-    fixture_repository.upsert_fixtures(db, season_id, list(fixtures), team_ids, "api-football")
+    # Cada llamada es una respuesta nueva y posterior a la anterior (DI-A6)
+    fixture_repository.upsert_fixtures(db, season_id, list(fixtures), team_ids, "api-football", make_evidence())
     db.flush()
 
 

@@ -30,7 +30,7 @@ from app.repositories import live_sync_repository as live_runs
 from app.repositories import statistics_run_repository as stats_runs
 from app.services import statistics_reconcile_service as reconcile
 from app.services.freshness_checks import run_checks
-from tests.conftest import make_competition, make_fixture_data
+from tests.conftest import make_competition, make_evidence, make_fixture_data
 from tests.test_live_sync_fixtures import FakeProvider, ft
 from tests.test_statistics_service import FakeStatsProvider, full_item, item
 
@@ -137,13 +137,30 @@ def test_workflow_schedule_task_and_concurrency(task):
     assert not any(f"ops_tick {o}" in raw for o in others)  # selección de tarea inequívoca
 
 
+SECRET_LIKE = re.compile(r"postgres(ql)?(\+\w+)?://|npg_|neon\.tech|x-apisports-key|[0-9a-f]{32}", re.I)
+# Única excepción: el SHA de 40 hex de una action fijada (`uses: owner/repo@<sha>`); el resto de la línea se sigue escaneando.
+PINNED_ACTION_SHA = re.compile(r"^(\s*(?:-\s+)?uses:\s+[\w.-]+/[\w.-]+@)[0-9a-f]{40}(?=\s|$)", re.M)
+
+
+def _secret_like(raw):
+    return SECRET_LIKE.search(PINNED_ACTION_SHA.sub(r"\1<sha>", raw))
+
+
 @pytest.mark.parametrize("task", ["catalog", "live", "stats"])
 def test_workflow_secrets_are_referenced_never_materialized(task):
     raw, wf = _workflow(task)
     env = wf["jobs"]["tick"]["env"]
     for name in ("DATABASE_URL", "API_FOOTBALL_KEY", "PREDIKTIA_EXPECTED_DB_TARGET"):
         assert env[name] == "${{ secrets.%s }}" % name
-    assert not re.search(r"postgres(ql)?(\+\w+)?://|npg_|neon\.tech|x-apisports-key|[0-9a-f]{32}", raw, re.I)
+    assert not _secret_like(raw)
+
+
+def test_secret_scan_ignores_only_pinned_action_shas():
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    assert not _secret_like(f"    steps:\n      - uses: actions/checkout@{sha} # v4.4.0\n")
+    assert _secret_like(f"    env:\n      TOKEN: {sha}\n")  # mismo hex fuera de `uses:` se detecta
+    assert _secret_like(f"      - run: echo {sha}\n")
+    assert _secret_like(f"      - uses: actions/checkout@{sha} # {sha[:32]}\n")  # el resto de la línea se escanea
 
 
 # --- Separación y subprocesos ------------------------------------------------------------------
@@ -258,7 +275,7 @@ def current_league(db, external_id=265, name="Liga live"):
 def add_ft(db, sid, n=1, start=1001, kickoff=None):
     data = [make_fixture_data(start + i, home=2 * (start + i) + 1, away=2 * (start + i) + 2, status="FT", kickoff_at=kickoff or NOW - timedelta(hours=5)) for i in range(n)]
     team_ids = fixture_repository.ensure_teams(db, [t for f in data for t in (f.home_team, f.away_team)], "api-football")
-    fixture_repository.upsert_fixtures(db, sid, data, team_ids, "api-football")
+    fixture_repository.upsert_fixtures(db, sid, data, team_ids, "api-football", make_evidence())
     db.commit()
     return [(f.external_id, f.home_team.external_id, f.away_team.external_id) for f in data]
 

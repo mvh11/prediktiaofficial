@@ -1,0 +1,12 @@
+# Dependencias SOLO de investigación (M5.8): experimentos offline en backend/research/.
+# Nunca forman parte del runtime operativo: no van en requirements.txt ni en requirements.lock,
+# y el CI/scheduler no las instala. app/ no puede importarlas (lo comprueba un test).
+#
+# Entorno aislado (venv aparte, fuera del repo), con las mismas versiones de la app que el lock:
+#   python -m venv <venv-research>
+#   <venv-research>/python -m pip install -r requirements-dev.txt -r requirements-research.txt -c requirements.lock
+numpy==2.5.3
+scipy==1.18.1
+scikit-learn==1.9.1
+joblib==1.6.0
+threadpoolctl==3.7.0

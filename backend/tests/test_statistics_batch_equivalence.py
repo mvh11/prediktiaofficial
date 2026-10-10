@@ -344,6 +344,11 @@ def _measure(db, season, impl, items, at, **options):
 def _fresh(db, season, n, start):
     """La temporada pasa a tener EXACTAMENTE n partidos FT (ids externos desde `start`), sin estadísticas."""
     wipe(db)
+    # DI-A6: la evidencia temporal (RESTRICT) se borra explícitamente antes que sus fixtures
+    db.execute(
+        text("DELETE FROM fixture_observations WHERE fixture_id IN (SELECT id FROM fixtures WHERE season_id = :s)"),
+        {"s": season["season_id"]},
+    )
     db.execute(text("DELETE FROM fixtures WHERE season_id = :s"), {"s": season["season_id"]})
     db.commit()
     return season["add"](n, start=start)

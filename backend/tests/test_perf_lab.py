@@ -202,3 +202,97 @@ def test_profiler_import_does_not_load_app():
         capture_output=True, text=True, check=False,
     )
     assert result.returncode == 0, result.stderr
+
+
+# --- DI-A6 Checkpoint C: escritor con evidencia y lectura temporal ------------------------------
+
+
+@pytest.mark.parametrize(("sql", "family"), [
+    ("SELECT %(param_1)s AS i, fixture_state_hash_v1(CAST(%(param_2)s AS TIMESTAMP WITH TIME ZONE), ...) AS h "
+     "UNION ALL SELECT ...", "hash_select"),
+    ("INSERT INTO fixtures (external_id, round) VALUES (%(external_id_m0)s, %(round_m0)s) ON CONFLICT (external_id) "
+     "DO UPDATE SET round = excluded.round WHERE (fixtures.last_observed_at, fixtures.last_state_hash) < (...)",
+     "fixtures_upsert"),
+    ("INSERT INTO fixture_observations (evidence_id, fixture_id) VALUES (%(e)s, %(f)s) ON CONFLICT DO NOTHING "
+     "RETURNING fixture_observations.fixture_id", "observations_insert"),
+    ("INSERT INTO fixture_provider_mappings (fixture_id) VALUES (%(x)s) ON CONFLICT ON CONSTRAINT uq DO UPDATE SET x = 1",
+     "fixture_mappings_upsert"),
+    ("INSERT INTO teams (external_id) VALUES (%(x)s) ON CONFLICT (external_id) DO NOTHING", "teams_insert"),
+    ("SELECT fixture_observations.fixture_id \nFROM fixture_observations JOIN (SELECT ...) AS anon_1 ON ...",
+     "select_fixture_observations"),
+    ("SELECT fixtures.external_id, fixtures.id \nFROM fixtures \nWHERE fixtures.external_id IN (%(p)s)", "select_fixtures"),
+    ("SET LOCAL statement_timeout = 60000", "other"),
+])
+def test_a6_statement_family(sql, family):
+    from tools.perf_lab.a6 import statement_family as a6_family
+
+    assert a6_family(sql) == family
+
+
+def test_a6_payloads_change_only_what_each_scenario_needs():
+    from tools.perf_lab.a6 import INSERT_OFFSET, MIXED_INSERT_OFFSET, groups_for
+
+    config = DatasetConfig(1000)
+    flat = lambda groups: [f for fs in groups.values() for f in fs]  # noqa: E731
+    base = flat(groups_for(config, 400, "unchanged", 0))
+    assert len(base) == 400 and len(groups_for(config, 400, "unchanged", 0)) == 2  # dos respuestas (temporadas)
+    assert all(f.external_id >= INSERT_OFFSET for f in flat(groups_for(config, 10, "insert", 0)))
+    update = [flat(groups_for(config, 10, "update", v)) for v in (0, 1)]
+    assert all(a.venue_name != b.venue_name and a.kickoff_at == b.kickoff_at for a, b in zip(*update))
+    tie = [flat(groups_for(config, 10, "tie", v)) for v in (0, 1)]
+    assert all(a.kickoff_at != b.kickoff_at for a, b in zip(*tie))  # estados distintos (hash distinto)
+    mixed = flat(groups_for(config, 9, "mixed", 0))
+    assert sum(f.external_id >= MIXED_INSERT_OFFSET for f in mixed) == 3
+
+
+def test_a6_ceiling_payload_is_one_response_with_valid_matches():
+    from tools.perf_lab.a6 import ceiling_payload
+
+    season_id, fixtures = ceiling_payload(DatasetConfig(1000), 3000)
+    assert season_id == 1 and len({f.external_id for f in fixtures}) == 3000
+    assert all(f.home_team.external_id != f.away_team.external_id for f in fixtures)
+
+
+def test_a6_evidence_clock_is_utc_and_older_is_strictly_older():
+    from datetime import datetime, timezone
+
+    from tools.perf_lab.a6 import EvidenceClock
+
+    current = datetime(2026, 1, 7, 9, tzinfo=timezone(timedelta(hours=-3)))  # como lo devuelve la sesión
+    clock = EvidenceClock(current)
+    first, second = clock.older(), clock.older()
+    assert first.observed_at.utcoffset() == timedelta(0) and second.observed_at < first.observed_at < current
+    assert first.evidence_id != second.evidence_id and clock.newer().observed_at > current
+
+
+def test_a6_stats_delta_isolates_the_measured_transaction():
+    from tools.perf_lab.a6 import stats_delta
+
+    before = {"fixtures": {"n_tup_ins": 5, "n_tup_upd": 3, "n_tup_hot_upd": 2, "n_tup_del": 0}}
+    after = {"fixtures": {"n_tup_ins": 5, "n_tup_upd": 13, "n_tup_hot_upd": 6, "n_tup_del": 0},
+             "fixture_observations": {"n_tup_ins": 10, "n_tup_upd": 0, "n_tup_hot_upd": 0, "n_tup_del": 0}}
+    delta = stats_delta(before, after)
+    assert delta["fixtures"] == {"n_tup_ins": 0, "n_tup_upd": 10, "n_tup_hot_upd": 4, "n_tup_del": 0}
+    assert delta["fixture_observations"]["n_tup_ins"] == 10
+
+
+def test_a6_cli_commands():
+    args = parse_args(["a6", "writes", "--output", "unused.json"])
+    assert (args.batches, args.samples, args.warmup) == ([10, 100, 380, 1000, 2000], 30, 5)
+    assert parse_args(["init", "--revision", "0007"]).revision == "0007"
+    assert parse_args(["upgrade", "--output", "unused.json"]).command == "upgrade"
+    for bad in (["a6", "writes", "--output", "u.json", "--samples", "5"],
+                ["a6", "writes", "--output", "u.json", "--modes", "delete"],
+                ["a6", "history", "--output", "u.json", "--per-fixture", "1"],
+                ["a6", "unknown", "--output", "u.json"]):
+        with pytest.raises(SystemExit) as exc:
+            parse_args(bad)
+        assert exc.value.code == 2
+
+
+def test_a6_module_import_does_not_load_app():
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys; import tools.perf_lab.a6; assert 'app.db.database' not in sys.modules"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr

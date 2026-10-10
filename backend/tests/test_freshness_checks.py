@@ -10,7 +10,7 @@ from app.models import Fixture, LiveSyncRun, Season
 from app.repositories import fixture_repository
 from app.repositories import live_sync_repository as runs
 from app.services.freshness_checks import run_checks
-from tests.conftest import make_competition, make_fixture_data
+from tests.conftest import make_competition, make_evidence, make_fixture_data
 
 pytestmark = pytest.mark.db
 
@@ -24,7 +24,7 @@ def _add(db, sid, *specs):
     """specs: (external_id, status, horas desde el kickoff)."""
     data = [make_fixture_data(e, status=s, kickoff_at=runs.now(db) - timedelta(hours=h)) for e, s, h in specs]
     team_ids = fixture_repository.ensure_teams(db, [f.home_team for f in data] + [f.away_team for f in data], "api-football")
-    fixture_repository.upsert_fixtures(db, sid, data, team_ids, "api-football")
+    fixture_repository.upsert_fixtures(db, sid, data, team_ids, "api-football", make_evidence())
     db.flush()
 
 
@@ -115,7 +115,7 @@ def test_info_checks_do_not_change_the_global_status(db_session, now):
     db_session.flush()
     _add_to_season = make_fixture_data(3, status="FT", season=2024)
     team_ids = fixture_repository.ensure_teams(db_session, [_add_to_season.home_team, _add_to_season.away_team], "api-football")
-    fixture_repository.upsert_fixtures(db_session, old.id, [_add_to_season], team_ids, "api-football")
+    fixture_repository.upsert_fixtures(db_session, old.id, [_add_to_season], team_ids, "api-football", make_evidence())
     report = run_checks(db_session, now)
     assert (_check(report, "F8_old_postponed")["status"], _check(report, "F8_old_postponed")["samples"]) == ("INFO", [1])
     assert (_check(report, "F9_pending_reconciliation")["status"], _check(report, "F9_pending_reconciliation")["count"]) == ("INFO", 1)

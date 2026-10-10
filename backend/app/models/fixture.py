@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, LargeBinary, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -22,6 +22,7 @@ class Fixture(Base):
             "fulltime_home IS NULL OR (fulltime_home >= 0 AND fulltime_away >= 0)",
             name="ck_fixtures_fulltime_nonneg",
         ),
+        CheckConstraint("octet_length(last_state_hash) = 32", name="ck_fixtures_last_state_hash"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -57,6 +58,11 @@ class Fixture(Base):
     # Es el que liquida los mercados FT/90'. Solo tiene valor si status_short es FT, AET o PEN
     fulltime_home: Mapped[int | None] = mapped_column(Integer)
     fulltime_away: Mapped[int | None] = mapped_column(Integer)
+
+    # Clave de orden (observed_at, state_hash) de la observación ganadora (DI-A6). last_state_hash es
+    # el hash de lo OBSERVADO en esa evidencia, no necesariamente el de esta fila tras fusionar pares
+    last_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_state_hash: Mapped[bytes] = mapped_column(LargeBinary)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

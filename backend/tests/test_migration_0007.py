@@ -9,7 +9,7 @@ from sqlalchemy.exc import DataError, IntegrityError
 
 from app.models import Fixture
 from app.repositories import fixture_repository
-from tests.conftest import alembic_run, make_competition, make_fixture_data
+from tests.conftest import alembic_run, make_competition, make_evidence, make_fixture_data
 
 pytestmark = pytest.mark.db
 
@@ -109,7 +109,7 @@ def match(db_session):
     data = [make_fixture_data(1, status="FT", home_goals=1, away_goals=0, fulltime_home=1, fulltime_away=0),
             make_fixture_data(2, home=3, away=4, status="FT", home_goals=0, away_goals=0, fulltime_home=0, fulltime_away=0)]
     team_ids = fixture_repository.ensure_teams(db_session, [t for f in data for t in (f.home_team, f.away_team)], "api-football")
-    fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, "api-football")
+    fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, "api-football", make_evidence())
     rows = db_session.execute(select(Fixture.id, Fixture.home_team_id, Fixture.away_team_id).order_by(Fixture.external_id)).all()
     return tuple(rows[0]), tuple(rows[1])
 
@@ -292,6 +292,9 @@ def test_deleting_a_fixture_cleans_its_statistics(db_session, match):
     (fid, home, _), (other_fid, other_home, _) = match
     _team_row(db_session, fid, home, _observation(db_session, fid))
     _team_row(db_session, other_fid, other_home, _observation(db_session, other_fid))
+    # DI-A6: un fixture con evidencia temporal no se borra en silencio (RESTRICT); el borrado
+    # explícito quita antes su evidencia. Las estadísticas siguen yendo en CASCADE
+    db_session.execute(text("DELETE FROM fixture_observations WHERE fixture_id = :f"), {"f": fid})
     db_session.execute(text("DELETE FROM fixtures WHERE id = :f"), {"f": fid})
     count = lambda t, f: db_session.execute(text(f"SELECT count(*) FROM {t} WHERE fixture_id = :f"), {"f": f}).scalar_one()  # noqa: E731
     assert count("fixture_statistics_observations", fid) == count("fixture_team_statistics", fid) == 0

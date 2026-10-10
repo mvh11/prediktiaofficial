@@ -5,10 +5,10 @@ comparten columnas a través de ProviderMappingMixin.
 """
 
 from sqlalchemy import func
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.models.provider_mapping import ProviderMappingMixin
+from app.repositories.bulk_rows import insert_rows
 
 
 def canonical_external_id(value: int | str) -> str:
@@ -49,7 +49,7 @@ def upsert_origin_mappings(
             row["raw_name"] = raw_name
         by_external[key] = row  # ON CONFLICT no admite la misma fila dos veces
 
-    stmt = insert(model).values(list(by_external.values()))
+    stmt = insert_rows(model, list(by_external.values()))
     set_ = {"last_seen_at": func.now()}
     if has_raw_name:
         set_["raw_name"] = stmt.excluded.raw_name

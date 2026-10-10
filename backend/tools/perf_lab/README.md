@@ -201,3 +201,35 @@ repositorios ni configuración del servidor.
 - Limitaciones: `thread_time` en Windows avanza en escalones de 15,625 ms (solo válido en
   agregados); la alternancia plain/instrumentada puede sincronizarse con el GC de generación 2
   (en lote 1000 cayó siempre en las plain); no se mide el tiempo exclusivo del servidor.
+
+## DI-A6 — Checkpoint C (G2, medición primero)
+
+`a6` mide el escritor con evidencia y la lectura temporal con el **mismo arnés** sobre dos árboles:
+A6 (`0008`) y la línea base pre-A6 (`9a5a5f2`, `0007`, sacada con `git archive` y con este
+`tools/perf_lab` superpuesto; `PERF_LAB_CODE_LABEL` la identifica en el JSON). El modo se detecta
+por la firma de `upsert_fixtures`; `older`, `tie` y `replay` son NO APLICA en la línea base.
+
+```powershell
+# A6: sembrar en 0007 y pasar a 0008 con el bootstrap real (como en producción)
+& $py -m tools.perf_lab init --revision 0007
+& $py -m tools.perf_lab seed --fixtures 100000 --output tools/perf_lab/results/a6c-a6-100k-seed.json
+& $py -m tools.perf_lab upgrade --output tools/perf_lab/results/a6c-a6-100k-upgrade.json
+& $py -m tools.perf_lab a6 writes  --output tools/perf_lab/results/a6c-a6-100k-writes.json
+& $py -m tools.perf_lab a6 ceiling --output tools/perf_lab/results/a6c-a6-100k-ceiling.json
+& $py -m tools.perf_lab a6 hash    --output tools/perf_lab/results/a6c-a6-100k-hash.json
+& $py -m tools.perf_lab a6 reads   --output tools/perf_lab/results/a6c-a6-100k-reads-1perfixture.json
+& $py -m tools.perf_lab a6 history --per-fixture 10 --ambiguity-every 10 --output tools/perf_lab/results/a6c-a6-100k-history.json
+& $py -m tools.perf_lab a6 reads   --output tools/perf_lab/results/a6c-a6-100k-reads-10perfixture.json
+```
+
+- `seed` rechaza un esquema `0008`: el COPY no puede fabricar evidencia.
+- Escenarios de `writes`: `insert`, `update`, `unchanged` (confirmación), `older` (evidencia
+  antigua), `mixed` (1/3 cada uno), `tie` (mismo instante, otro estado) y `replay` (misma respuesta).
+  Un grupo de temporada = una respuesta lógica = una evidencia; un COMMIT por lote.
+- Por muestra, fuera del reloj: WAL (`pg_current_wal_insert_lsn`), contadores de la transacción
+  (`pg_stat_xact_user_tables` leído antes y después dentro de la misma transacción, porque desde
+  PG15 incluye contadores pendientes de transacciones anteriores), validaciones de invariantes A6.
+- `ceiling`: una sola respuesta creciente hasta el primer fallo, siempre con rollback.
+- Las limpiezas de `insert` borran antes la evidencia (`ON DELETE RESTRICT`).
+- Resultados y conclusiones: `docs/data-integrity-status.md`, "DI-A6: Checkpoint C". Los JSON
+  `results/a6c-*.json` no se versionan (política de `1972577`).

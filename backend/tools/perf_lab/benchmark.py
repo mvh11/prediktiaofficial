@@ -2,6 +2,7 @@
 
 import hashlib
 import math
+import os
 import platform
 import random
 import subprocess
@@ -166,6 +167,15 @@ def payload_groups(config: DatasetConfig, batch: int, mode: str, variant: int = 
     return dict(groups)
 
 
+def writer_takes_evidence() -> bool:
+    """El escritor de DI-A6 exige la evidencia de la respuesta; el anterior (0007) no la conoce."""
+    import inspect
+
+    from app.repositories.fixture_repository import upsert_fixtures
+
+    return "evidence" in inspect.signature(upsert_fixtures).parameters
+
+
 def repository_write(db: Session, groups: dict) -> int:
     from app.repositories.fixture_repository import ensure_teams, upsert_fixtures
 
@@ -173,8 +183,28 @@ def repository_write(db: Session, groups: dict) -> int:
     for season_id, fixtures in groups.items():
         teams = [f.home_team for f in fixtures] + [f.away_team for f in fixtures]
         ids = ensure_teams(db, teams, "api-football")
-        count += upsert_fixtures(db, season_id, fixtures, ids, "api-football").received
+        extra = ()
+        if writer_takes_evidence():
+            from app.schemas.fixture_evidence import FixtureEvidence
+
+            # Cada grupo de temporada es una respuesta lógica, recibida ahora
+            extra = (FixtureEvidence.received("sync", "api-football"),)
+        count += upsert_fixtures(db, season_id, fixtures, ids, "api-football", *extra).received
     return count
+
+
+def delete_lab_fixtures(conn, external_ids: list[int]) -> None:
+    """Limpieza del laboratorio (fuera del reloj). Con DI-A6 la evidencia es ON DELETE RESTRICT:
+    se borra explícitamente antes que sus fixtures; los mappings caen en CASCADE."""
+    from app.models import Fixture
+    from sqlalchemy import delete
+
+    if conn.execute(text("SELECT to_regclass('fixture_observations') IS NOT NULL")).scalar_one():
+        conn.execute(
+            text("DELETE FROM fixture_observations WHERE fixture_id IN (SELECT id FROM fixtures WHERE external_id = ANY(:e))"),
+            {"e": list(external_ids)},
+        )
+    conn.execute(delete(Fixture).where(Fixture.external_id.in_(external_ids)))
 
 
 def verify_write(engine: Engine, groups: dict) -> None:
@@ -197,9 +227,6 @@ def verify_write(engine: Engine, groups: dict) -> None:
 
 
 def measure_upserts(engine: Engine, config: DatasetConfig, samples: int, warmup: int) -> list[dict]:
-    from app.models import Fixture
-    from sqlalchemy import delete
-
     results = []
     with SQLMeter(engine) as meter:
         for batch in BATCHES:
@@ -245,7 +272,7 @@ def measure_upserts(engine: Engine, config: DatasetConfig, samples: int, warmup:
                             # El próximo intento vuelve a ser INSERT real. Limpieza fuera
                             # del reloj, CASCADE elimina mappings; conserva N fixtures.
                             with engine.begin() as cleanup:
-                                cleanup.execute(delete(Fixture).where(Fixture.external_id.in_(external_ids)))
+                                delete_lab_fixtures(cleanup, external_ids)
                 results.append({"operation": f"upsert_{mode}_{batch}", "status": "MEDIDO", "unit": "ms",
                                 "batch": batch, "season_groups": len(base), "mode": mode,
                                 **{f"{key}_ms": distribution(values) for key, values in raw.items()},
@@ -274,7 +301,12 @@ def environment(engine: Engine) -> dict:
             "SELECT tablename, indexname, indexdef FROM pg_indexes WHERE schemaname='public' ORDER BY tablename, indexname"
         )).mappings()]
     def git(*args):
-        return subprocess.check_output(["git", *args], cwd=BACKEND, text=True).strip()
+        # Un árbol exportado (p. ej. la línea base pre-A6 sacada con git archive) no es un repo:
+        # se identifica con PERF_LAB_CODE_LABEL y los hashes de las fuentes
+        try:
+            return subprocess.check_output(["git", *args], cwd=BACKEND, text=True, stderr=subprocess.DEVNULL).strip()
+        except (OSError, subprocess.CalledProcessError):
+            return f"NO GIT ({os.environ.get('PERF_LAB_CODE_LABEL', 'sin etiqueta')})"
 
     sources = {}
     for folder in (BACKEND / "app", BACKEND / "alembic", BACKEND / "tools" / "perf_lab"):

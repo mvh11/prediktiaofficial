@@ -14,7 +14,7 @@ from app.models import Fixture, Season, Team
 from app.repositories import fixture_repository
 from app.services import fixture_sync_service
 from app.services.polling_eligibility import polling_eligibility
-from tests.conftest import make_competition, make_fixture_data
+from tests.conftest import make_competition, make_evidence, make_fixture_data
 
 pytestmark = pytest.mark.db
 
@@ -94,12 +94,12 @@ def test_failure_in_one_competition_does_not_contaminate_the_next(db_session, mo
     real = fixture_repository.upsert_fixtures
     calls = {"n": 0}
 
-    def flaky(db, season_id, fixtures, team_ids, provider):
+    def flaky(db, season_id, fixtures, team_ids, provider, evidence):
         calls["n"] += 1
         if calls["n"] == 1:
-            real(db, season_id, fixtures, team_ids, provider)  # escribe y luego falla: debe deshacerse
+            real(db, season_id, fixtures, team_ids, provider, evidence)  # escribe y luego falla: debe deshacerse
             raise IntegrityError("INSERT fixtures", {}, Exception("simulado"))
-        return real(db, season_id, fixtures, team_ids, provider)
+        return real(db, season_id, fixtures, team_ids, provider, evidence)
 
     monkeypatch.setattr(fixture_sync_service.fixture_repository, "upsert_fixtures", flaky)
     audited = []
@@ -150,11 +150,11 @@ def test_repository_counters_ignore_duplicates_and_do_not_depend_on_updated_at(d
     _, sid = make_competition(db_session, 265)
     fixtures = [ft(1), ft(1), ft(2, home=3, away=4)]  # el 1 llega duplicado
     team_ids = fixture_repository.ensure_teams(db_session, [f.home_team for f in fixtures] + [f.away_team for f in fixtures], "api-football")
-    counts = fixture_repository.upsert_fixtures(db_session, sid, fixtures, team_ids, "api-football")
+    counts = fixture_repository.upsert_fixtures(db_session, sid, fixtures, team_ids, "api-football", make_evidence())
     assert (counts.received, counts.created, counts.updated, counts.unchanged) == (2, 2, 0, 0)
     # Mover updated_at a mano no cambia los contadores: no se usan
     db_session.execute(update(Fixture).values(updated_at=datetime(2000, 1, 1, tzinfo=timezone.utc)))
-    again = fixture_repository.upsert_fixtures(db_session, sid, fixtures, team_ids, "api-football")
+    again = fixture_repository.upsert_fixtures(db_session, sid, fixtures, team_ids, "api-football", make_evidence())
     assert (again.received, again.created, again.updated, again.unchanged) == (2, 0, 0, 2)
 
 
@@ -176,7 +176,7 @@ def test_dormant_current_season_is_skipped_without_calling_the_provider(db_sessi
     _, sid = make_competition(db_session, 4, name="Torneo cerrado", current_year=2024)
     _set_dates(db_session, sid, date(2024, 6, 14), date(2024, 7, 14))
     team_ids = fixture_repository.ensure_teams(db_session, [ft(1).home_team, ft(1).away_team], "api-football")
-    fixture_repository.upsert_fixtures(db_session, sid, [ft(1)], team_ids, "api-football")
+    fixture_repository.upsert_fixtures(db_session, sid, [ft(1)], team_ids, "api-football", make_evidence())
     provider = FakeProvider({4: [ft(1)]})
     comp = _sync(db_session, provider).competitions[0]
     assert provider.calls == [] and comp.skipped.startswith("dormant") and comp.error is None
@@ -202,5 +202,5 @@ def test_polling_eligibility_rule(db_session, start, end, fixtures, eligible):
     data = [make_fixture_data(i + 1, home=2 * i + 1, away=2 * i + 2, status=s) for i, s in enumerate(fixtures)]
     if data:
         team_ids = fixture_repository.ensure_teams(db_session, [f.home_team for f in data] + [f.away_team for f in data], "api-football")
-        fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, "api-football")
+        fixture_repository.upsert_fixtures(db_session, sid, data, team_ids, "api-football", make_evidence())
     assert polling_eligibility(db_session, sid, TODAY).eligible is eligible

@@ -1,6 +1,62 @@
 # Estado: desarrollo modular
 
-Rama actual `feature/modular-data-m43`, checkpoint conocido `6952425` (`6952425e0e84bf78d6bc414df85a4b3263d9ff89`). Ver [workstreams.md](workstreams.md) y [agent-rules.md](agent-rules.md), teniendo en cuenta la deuda documental de ownership registrada abajo.
+## Ciclo actual (desde el checkpoint conjunto DI-A6 + Modular)
+
+- **Baseline canónico:** `1c06ef9` (`origin/integration/di-a6-modular-final`), Alembic `0008` (cabeza única; `0009` reservada para DI-A5D). Rama de trabajo: `feature/modular-m57-stats-as-of`.
+- **M5.6** (reconciliador live + scheduler C6): implementado, publicado y verificado con smokes supervisados en producción. Pendiente de activación: piloto de 24 h, catch-up manual y alertas.
+- **M5.7A: lectura as-of de estadísticas** (`app/schemas/statistics_knowledge.py`, `app/repositories/statistics_knowledge_repository.py`, `app/services/statistics_as_of.py`). Solo lee; sin migración.
+  - **Selección:** por partido y proveedor, observaciones con `available_at <= T` (incluido); manda la más reciente por `(observed_at, id)`, el orden de versionado del esquema.
+  - **Reconstrucción:** los valores salen del raw de ESA observación con el normalizador vigente (parser del adapter). Nunca de `fixture_team_statistics` (estado actual fusionado) ni fusionando versiones.
+  - **Calidad:** se recalculan los checks de identidad y de valores del service; con algún BLOCKING el partido queda `BLOCKED`, sin valores. Si el hash del raw, la disponibilidad registrada o los BLOCKING que registró el run no se reproducen: `RECONSTRUCTION_MISMATCH`, sin valores y sin elegir ganador.
+  - **Estados:** `UNKNOWN_AT_T`, `AVAILABLE`, `PARTIAL`, `EMPTY` (evidencia válida, no ceros), `BLOCKED`, `RECONSTRUCTION_MISMATCH` e `IDENTITY_UNVERIFIED` (añadido en M5.7B).
+  - **Procedencia:** `HISTORICAL_SYNTHETIC` (`backfill`, `available_at = kickoff + 6 h`) u `OPERATIONAL` (`live`/`manual`, `available_at = observed_at`). `observed_after(T)` marca lo disponible por política pero recibido después de T.
+  - **Contexto prepartido** (`app/services/statistics_prematch.py`, capa pura aparte): corte = kickoff del objetivo; se excluyen el propio partido y los de kickoff igual o posterior.
+- **M5.7B: contrato temporal completo y `team_recent_form_v1`** (`app/schemas/prematch_features.py`, `app/services/prematch_features.py`). Solo lee; sin migración ni cambios en contratos de DI-A6 (solo los consume).
+  - **Dos instantes:** T (corte de disponibilidad) y H >= T (horizonte de conocimiento). Una observación de estadísticas cuenta si `available_at <= T` y `observed_at <= H`. `OPERATIONAL_STRICT` si H = T; `HISTORICAL_BACKTEST` si H > T: reproducible con H fijo (un refresh posterior a H no cambia nada), pero retrospectivo y así marcado (`observed_after(T)`, `fixture_retrospective(T)`).
+  - **Hechos de partidos** (kickoff, equipos, estado): solo de `STRICT_KNOWLEDGE(H)`. El estado actual de `fixtures` solo enumera candidatos. `RETROSPECTIVE_FINAL_RESULTS` no se usa para features. Con T anterior a la evidencia (p. ej. antes del bootstrap de `0008`) el régimen estricto no tiene datos: fail-closed, sin error.
+  - **Identidad** (fail-closed, `IDENTITY_UNVERIFIED` sin valores): home/away de la evidencia de DI-A6 en H (solo `KNOWN`); cada mapping de equipo activo y con `created_at <= observed_at` de la observación; BLOCKING recalculados = registrados por el run. Los mappings no tienen historia: una edición manual sin cambiar `created_at` no se detectaría.
+  - **`team_recent_form_v1`:** T lo fija el llamador y se valida contra el kickoff conocido en H (T > K, objetivo desconocido, ambiguo o sin el equipo → fail-closed). Ventana = últimos 5 partidos JUGADOS antes de T según la evidencia (FT/AET/PEN, kickoff < T), por (kickoff, id) descendente, sin el objetivo; empate de kickoff en la frontera → `AMBIGUOUS_ORDER`. AET/PEN se excluyen de las medias con su motivo; una muestra sin estadísticas cuenta en la ventana y no se salta a partidos más viejos. Métricas a favor/en contra (tiros, tiros a puerta, córners, posesión, xG): media de los valores no nulos, mínimo 3 por métrica; nunca ceros. `fingerprint()` resume el contenido sin ids de observación (no depende del orden de ingestión).
+  - **Pendiente:** disponibilidad sintética de RESULTADOS de fixtures para backtests históricos (semántica de DI: requiere revisión interdepartamental), historia de mappings, persistencia de features.
+- **M5.7C: validación empírica (VALIDATED).** Extracción única de solo lectura de la principal (una transacción `REPEATABLE READ READ ONLY`, snapshot 2026-10-08 02:12:59Z, 7 tablas con árbitro, sede y logos vaciados), restaurada en PostgreSQL 18.6 local desechable con `0008` aplicada SOLO en la copia (bootstrap local 02:13:31Z). Datos y contenedor borrados al terminar; 0 escrituras y 0 migraciones en producción. Medido en local (no es una cifra de producción):
+  - **Datos:** 18 671 fixtures; 12 064 observaciones de stats (backfill 11 723, manual 258, live 83), una versión por partido; 42 temporadas, 19 competiciones.
+  - **Muestra:** 840 partidos finales (20 por temporada con stats, orden md5(id)) × 2 equipos = 1680 features; T = kickoff − 1 h; H = bootstrap_at (`HISTORICAL_BACKTEST`).
+  - **Cobertura:** 1680 OK; ventana completa en el 89,5 %; métricas con ≥ 3 muestras: 72,7 % (córners 72,6 %, xG 47,1 %). 380 features sin muestras: 280 de temporadas en curso (stats operativas con `available_at` del 6–7 oct, posterior a T, correcto por contrato) y 100 de 1360 históricas (7,4 %).
+  - **Ventana (7842 partidos):** USED 6082, UNKNOWN_AT_T 1219, EMPTY 503, AET/PEN 37, BLOCKED 1. 0 `IDENTITY_UNVERIFIED`, 0 `RECONSTRUCTION_MISMATCH` (BLOCKING recalculados = registrados en todos).
+  - **Procedencia:** 100 % de las muestras `HISTORICAL_SYNTHETIC`, 100 % de las features retrospectivas.
+  - **Régimen estricto (H = T):** 100/100 `TARGET_UNKNOWN`, esperado: la evidencia de fixtures empieza en el bootstrap.
+  - **Rendimiento:** p50 24,5 ms, p95 41,5 ms, máx. 117 ms por feature; 3–7 SELECT constantes (igual con ventana 3/5/10), sin N+1.
+  - **Reproducibilidad y leakage:** 400 recálculos idénticos; un refresh tardío no cambia nada con H fijo (30/30) y sí al ampliar H (30/30); cambiar el marcador actual no altera nada; solo SELECT; 0 violaciones de leakage.
+
+- **M5.8B: primer experimento cuantitativo 1X2 a 90' (retrospectivo).** Código en `backend/research/m58/` (fuera del runtime: `app/` no lo importa; dependencias en `requirements-research.txt`, nunca en `requirements.lock`). Modelos probados en `backend/research/tests` con el venv de investigación; el resto en la suite normal.
+  - **Datos:** snapshot de solo lectura 2026-10-08 02:45:25Z, restaurado en local con `0008` (H = 02:45:56Z), borrado al terminar. 13 913 filas con etiqueta verificable desde `STRICT_KNOWLEDGE(H)` (excluidas: 656 no finalizadas, 23 AET/PEN cuyo 90' no era empate); 51 AET/PEN liquidados como X; 0 discrepancias con el estado actual; 0 violaciones de leakage; todo `HISTORICAL_BACKTEST`.
+  - **Splits** (embargo 7 días): train 7227 (2024-01 → 2025-06), validación 2908 (A/B cronológicas), test 3681 (2026-01 → 2026-10), purgadas 97. Filas informativas (ambos equipos con ≥ 1 muestra): 91,9 % / 94,4 % / 47,5 % (el test incluye temporadas en curso sin stats disponibles en T).
+  - **Selección en validación A/B:** alpha(B1) = 200, C(B2) = 0,01, temperatura = 1,0 (sin cambio). Test evaluado una sola vez con la configuración congelada.
+  - **Test (log loss, IC 95 % por semanas):** B0 1,0706 [1,061; 1,081], B1 1,0688 [1,059; 1,079], B2 1,0474 [1,035; 1,060]. B2 − B1 = −0,021 [−0,030; −0,013]; B2 − B0 = −0,023 [−0,033; −0,014]. Brier 0,647 / 0,646 / 0,631; RPS 0,225 / 0,225 / 0,217.
+  - **Calibración de B2:** ECE medio 0,015; pendientes H 0,85, A 0,90, **D 0,42** (fuera de [0,8; 1,2]).
+  - **Criterios de aceptación:** mejora de log loss con IC < 0 sí; leakage 0 sí; **calibración del empate no; cobertura informativa del test 47,5 % < 60 % no** → señal **no confirmada** (INCONCLUSIVE). No se ha vuelto a evaluar test.
+
+- **M5.8C (diagnóstico):** los 23 AET/PEN excluidos en M5.8B eran todos vueltas de eliminatorias a doble partido empatadas en el global tras los 90' (verificado con una lectura de solo lectura acotada): la regla "AET/PEN ⇒ X" de M5.8A era errónea; los datos y DI son correctos.
+- **M5.8D: experimento EXPLORATORIO (no confirma señal).** Protocolo registrado antes de extraer datos (`backend/research/m58d/PROTOCOL.md`). Etiqueta 1X2 = `fulltime` del propio partido también en AET/PEN. Solo kickoff < 2026-01-01: el test de M5.8B no se usa. Snapshot de solo lectura 2026-10-08 03:20:19Z, `0008` local (H = 03:20:41Z), borrado al terminar.
+  - **Datos:** 10 239 filas (H 45,7 / D 25,6 / A 28,7 %); 7 AET/PEN no empatados a los 90' ahora etiquetados; 0 avisos de coherencia goals/fulltime/extratime; 0 leakage.
+  - **Cobertura por causa (96 797 partidos de ventana, < 2026):** USED 93,4 %, EMPTY 6,3 % (casi todo "Primera División" con stats vacías), AET/PEN 0,3 %, calidad/identidad 10 casos, **nunca ingeridas 0 y no disponibles en T 0**. La cobertura pobre del test de M5.8B no aparece antes de 2026 (no se ha inspeccionado ese periodo). xG presente en el 54,8 % de las features.
+  - **Origen móvil (4 trimestres de 2025, 5927 partidos evaluados):** log loss B0 1,0666, B1 1,0638, B2* 1,0292 [1,020; 1,040], B2 calibrado por clase 1,0301, ordinal 1,0297. B2* − B1 = −0,035 [−0,042; −0,027]. La calibración por clase y el ordinal no mejoran a B2* (diferencias con IC que incluye 0). C entre 0,003 y 0,01 es lo mejor; más C da peor log loss y p(D) más dispersa.
+  - **Empate:** pendiente de calibración de D en B2* = 0,79 [0,52; 1,04] (el IC incluye 1), por clase 0,86 [0,48; 1,15] y ordinal 0,68 [0,40; 0,91]. El 0,42 de M5.8B no se reproduce antes de 2026.
+  - **Sensibilidad:** B2* mejora a B1 en 12 de 13 competiciones; empeora en Argentina.
+  - **Agrupación:** el informe agrupaba por NOMBRE de competición, y "Primera División" junta competiciones distintas (sus cifras de cobertura y sensibilidad son de ese conjunto). El código agrupa ya por `competition_id`; las métricas experimentales no cambian y no se ha reejecutado (los datos se borraron).
+- **Estado:** M5.8D cerrado como investigación exploratoria; señal predictiva NO confirmada.
+- **M5.9B: infraestructura local de predicción prospectiva** (`backend/research/m59/`, ver su README): manifiestos JSON sellados de B0/B1/B2 con inferencia en Python puro (equivalente a sklearn a < 1e-12), registro append-only con cadena de hashes, anclajes externos (RFC 3161, hora del servidor de GitHub o del hilo del proyecto; nunca un commit local), emisor con reloj inyectable (T = K − 1 h, H = emisión <= T, sin emisión tardía ni fallback, B2 nulo si no hay features) y contrato de evaluación con preregistro y evaluación única. Todo simulado: 0 predicciones reales. Cierre técnico: el registro distingue CHAIN_VALID / ANCHOR_VERIFIED / EVALUATION_ELIGIBLE (sin anclaje externo verificado no se evalúa) y la cobertura se separa en operativa (todos los elegibles) y evaluable (elegibles con etiqueta); el denominador del umbral confirmatorio queda para decisión gerencial antes del preregistro.
+
+**Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
+
+- **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
+- **Limitaciones aceptadas:** mappings sin historia; enumeración desde el estado actual de `fixtures` (los hechos salen de la evidencia); disponibilidad sintética del backfill (marcada como retrospectiva); exclusión de AET/PEN (0,5 %); xG con pocas muestras (tratarla como opcional).
+- **Bloqueo para modelar en régimen estricto:** el bootstrap de DI-A6 (todo lo anterior es `UNKNOWN_AT_T`).
+- **Corrección dentro de Modular, con autorización operativa:** catch-up de stats (temporadas previas y backlog actual) para subir la cobertura.
+- **Gates productivos pendientes (fuera de Modular):** aceptación de DI-A6 en producción y migración `0008` (producción sigue en `0007`); activación del scheduler C6 y piloto de 24 h; catch-up; DI-A5D/`0009`; integración en `main`.
+
+El resto de este documento conserva el estado anterior a este ciclo.
+
+Rama anterior `feature/modular-data-m43`, checkpoint conocido `6952425` (`6952425e0e84bf78d6bc414df85a4b3263d9ff89`). Ver [workstreams.md](workstreams.md) y [agent-rules.md](agent-rules.md), teniendo en cuenta la deuda documental de ownership registrada abajo.
 
 ## Estado actual
 
