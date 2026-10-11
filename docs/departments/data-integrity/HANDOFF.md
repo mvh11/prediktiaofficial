@@ -70,4 +70,11 @@ Esta sesión dispone de escritura GitHub pero no de un checkout/runner del repos
 
 ## Siguiente acción
 
-Ejecutar los tests dirigidos e integración DI en un worktree local aislado de `feature/data-integrity-a5e`. Si no hay fallos, actualizar este archivo con el HEAD validado y el resultado.
+En un worktree local aislado de `feature/data-integrity-a5e`, con PostgreSQL local desechable autorizado por el guard de `tests/conftest.py`:
+
+1. Targeted una vez:
+   `pytest -q tests/test_sync_recovery.py tests/test_migration_0009.py`
+2. Integración DI relevante una vez:
+   `pytest -q tests/test_fixture_sync_evidence.py tests/test_live_sync_fixtures.py tests/test_live_sync_job.py tests/test_provider_limits_sync.py tests/test_sync_failures.py tests/test_sync_idempotency.py tests/test_migration_0008.py`
+
+No ejecutar la suite completa. Si ambos grupos quedan verdes, actualizar HANDOFF/PROGRESS, hacer un commit de cierre y declarar `DI_A5E: PASS`.
