@@ -37,6 +37,7 @@ from app.integrations.request_stats import describe, stats_of
 from app.repositories import catalog_repository, fixture_repository
 from app.schemas.fixture import CompetitionFixtureSyncResult, FixtureSyncResult
 from app.schemas.fixture_evidence import FixtureEvidence
+from app.services import sync_recovery_service as recovery
 from app.services.polling_eligibility import polling_eligibility
 from app.services.provider_service import get_football_provider
 from app.services.sync_failures import (
@@ -48,6 +49,8 @@ from app.services.sync_failures import (
 )
 
 logger = logging.getLogger(__name__)
+
+_RECOVERY_UNIT_KIND = "fixtures_season"
 
 # Errores de BD al guardar UNA competición: se deshace esa competición y se decide con
 # classify_db_error (conexión perdida corta el run; el resto, como una consulta cancelada, solo
@@ -112,6 +115,7 @@ async def _sync_fixtures(
     stats_at_start = stats.snapshot() if stats else None
     today = today or datetime.now(timezone.utc).date()
     tracked = set(get_settings().tracked_league_ids)
+    recovery_enabled = date_from is None and date_to is None
     # Valores planos, no objetos ORM: la sesión se cierra (commit sin escrituras) antes de cada
     # HTTP y el rollback de una competición fallida expira los objetos de la sesión; releerlos
     # necesitaría la BD, que puede ser justo lo que se ha perdido
@@ -123,6 +127,7 @@ async def _sync_fixtures(
 
     results: list[CompetitionFixtureSyncResult] = []
     stopped: str | None = None  # motivo por el que ya no se llama al proveedor
+    stopped_incident_kind: str | None = None
     for comp in competitions:
         result = CompetitionFixtureSyncResult(competition_id=comp.id, name=comp.name)
         if comp.external_id not in tracked:
@@ -133,6 +138,10 @@ async def _sync_fixtures(
         results.append(result)
         if stopped:
             result.error = stopped
+            if recovery_enabled:
+                recovery.add_incident_affected_units_best_effort(
+                    db, provider.name, stopped_incident_kind, 1
+                )
             _report(db, on_competition, result)
             continue
 
@@ -149,12 +158,35 @@ async def _sync_fixtures(
             season_id, season_year = season.id, season.year
             result.season = season_year
             eligibility = polling_eligibility(db, season_id, today)
-            # Commit sin escrituras: termina la transacción de lectura (no deshace nada del llamador)
-            db.commit()
             if not eligibility.eligible:
+                # Solo había lecturas: se cierra antes de reportar el skip.
+                db.commit()
                 result.skipped = eligibility.reason
                 _report(db, on_competition, result)
                 continue
+
+            attempt_started_at = None
+            if recovery_enabled:
+                try:
+                    # A5E: el intento queda persistido justo antes del HTTP; si el proceso cae
+                    # durante la petición, last_attempt_started_at queda por delante del outcome.
+                    attempt_started_at = recovery.begin_attempt(
+                        db, _RECOVERY_UNIT_KIND, provider.name, season_id
+                    )
+                except _ISOLATED_DB_ERRORS as exc:
+                    kind = classify_db_error(exc)
+                    result.error = (
+                        f"Error de BD al registrar el intento ({exc.__class__.__name__}: {kind}); "
+                        "no se llamó al proveedor"
+                    )
+                    if db_failure_action(kind) is SyncAction.ABORT_PROVIDER_RUN:
+                        stopped = "No sincronizada: se detuvo la sync porque se perdió la conexión con la BD"
+                        stopped_incident_kind = None
+                    _report(db, on_competition, result)
+                    continue
+            else:
+                # Los syncs por rango no pertenecen a sync_unit_states.
+                db.commit()
 
             # 2. Proveedor, sin transacción de BD abierta
             try:
@@ -162,7 +194,22 @@ async def _sync_fixtures(
             except ProviderError as exc:
                 logger.warning("No se pudieron obtener los partidos de %s: %s", comp.name, exc)
                 result.error = exc.message
-                if provider_failure_action(exc) is SyncAction.ABORT_PROVIDER_RUN:
+                action = provider_failure_action(exc)
+                stopped_incident_kind = recovery.record_failure_best_effort(
+                    db,
+                    unit_kind=_RECOVERY_UNIT_KIND if recovery_enabled else None,
+                    provider=provider.name,
+                    season_id=season_id if recovery_enabled else None,
+                    attempt_started_at=attempt_started_at,
+                    error_scope="provider" if action is SyncAction.ABORT_PROVIDER_RUN else "unit",
+                    error_class=exc.__class__.__name__,
+                    error_status=exc.status_code,
+                    error_message=exc.message,
+                    provider_error=exc,
+                    endpoint="/fixtures",
+                    affected_units=1 if recovery_enabled else 0,
+                )
+                if action is SyncAction.ABORT_PROVIDER_RUN:
                     stopped = f"No sincronizada: {provider_abort_reason(exc)}"
                     logger.warning("%s: no se piden las competiciones restantes", exc.__class__.__name__)
                 _report(db, on_competition, result)
@@ -176,6 +223,10 @@ async def _sync_fixtures(
                 current = catalog_repository.get_season(db, comp.id, None)
                 if current is None or current.id != season_id:
                     db.rollback()
+                    if recovery_enabled and attempt_started_at is not None:
+                        recovery.record_skipped_best_effort(
+                            db, _RECOVERY_UNIT_KIND, provider.name, season_id, attempt_started_at
+                        )
                     result.skipped = f"season changed: la temporada {season_year} dejó de ser la actual durante la descarga"
                     _report(db, on_competition, result)
                     continue
@@ -188,17 +239,37 @@ async def _sync_fixtures(
                     counts.received, counts.created, counts.updated, counts.unchanged,
                 )
                 result.teams_created = len(team_external_ids) - existing_teams
+                if recovery_enabled and attempt_started_at is not None:
+                    # Mismo commit que teams/fixtures/fixture_observations/mappings.
+                    recovery.stage_success(
+                        db, _RECOVERY_UNIT_KIND, provider.name, season_id, attempt_started_at
+                    )
                 if on_competition is not None:
                     on_competition(db, result)
                 db.commit()
+                recovery.close_recovered_incidents_best_effort(
+                    db, provider.name, evidence.observed_at
+                )
             except _ISOLATED_DB_ERRORS as exc:
                 db.rollback()
                 kind = classify_db_error(exc)
                 logger.exception("Error de BD (%s) guardando los partidos de %s: se deshacen sus cambios", kind, result.name)
+                if recovery_enabled and attempt_started_at is not None:
+                    recovery.record_failure_best_effort(
+                        db,
+                        unit_kind=_RECOVERY_UNIT_KIND,
+                        provider=provider.name,
+                        season_id=season_id,
+                        attempt_started_at=attempt_started_at,
+                        error_scope="database",
+                        error_class=exc.__class__.__name__,
+                        error_message=str(kind),
+                    )
                 result.fixtures = result.created = result.updated = result.unchanged = result.teams_created = 0
                 result.error = f"Error de BD al guardar los partidos ({exc.__class__.__name__}: {kind}); cambios deshechos"
                 if db_failure_action(kind) is SyncAction.ABORT_PROVIDER_RUN:
                     stopped = "No sincronizada: se detuvo la sync porque se perdió la conexión con la BD"
+                    stopped_incident_kind = None
                     logger.warning("Conexión con la BD perdida: no se piden las competiciones restantes")
                 _report(db, on_competition, result)
                 continue

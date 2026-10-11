@@ -6,7 +6,9 @@ Con las 26 competiciones por defecto son 27 peticiones.
 
 import logging
 import time
+from datetime import datetime, timezone
 
+from sqlalchemy.exc import DataError, IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -15,10 +17,19 @@ from app.integrations.football.base import FootballDataProvider
 from app.integrations.request_stats import describe, stats_of
 from app.repositories import catalog_repository as repo
 from app.schemas.catalog import CatalogSyncResult, CompetitionSyncResult
+from app.services import sync_recovery_service as recovery
 from app.services.provider_service import get_football_provider
-from app.services.sync_failures import SyncAction, provider_abort_reason, provider_failure_action
+from app.services.sync_failures import (
+    SyncAction,
+    classify_db_error,
+    provider_abort_reason,
+    provider_failure_action,
+)
 
 logger = logging.getLogger(__name__)
+
+_RECOVERY_UNIT_KIND = "catalog_season_teams"
+_ISOLATED_DB_ERRORS = (IntegrityError, DataError, OperationalError)
 
 
 async def sync_catalog(db: Session, *, provider: FootballDataProvider | None = None) -> CatalogSyncResult:
@@ -53,7 +64,26 @@ async def _sync_catalog(db: Session, provider: FootballDataProvider) -> CatalogS
     stats_at_start = stats.snapshot() if stats else None
     tracked_ids = get_settings().tracked_league_ids
 
-    competitions = await provider.get_competitions(tracked_ids)
+    try:
+        competitions = await provider.get_competitions(tracked_ids)
+    except ProviderError as exc:
+        # /leagues no es una unidad recuperable, pero un fallo provider-wide sí es
+        # evidencia válida para provider_incidents. El error original se propaga.
+        recovery.record_failure_best_effort(
+            db,
+            unit_kind=None,
+            provider=provider.name,
+            season_id=None,
+            attempt_started_at=None,
+            error_scope="provider",
+            error_class=exc.__class__.__name__,
+            error_status=exc.status_code,
+            error_message=exc.message,
+            provider_error=exc,
+            endpoint="/leagues",
+            affected_units=0,
+        )
+        raise
     found_ids = {c.external_id for c in competitions}
     results = [
         CompetitionSyncResult(external_id=i, error="No existe en el proveedor")
@@ -62,6 +92,7 @@ async def _sync_catalog(db: Session, provider: FootballDataProvider) -> CatalogS
     ]
 
     stopped: str | None = None  # motivo por el que ya no se llama al proveedor
+    stopped_incident_kind: str | None = None
     for comp in competitions:
         result = CompetitionSyncResult(external_id=comp.external_id, name=comp.name)
         results.append(result)
@@ -82,24 +113,71 @@ async def _sync_catalog(db: Session, provider: FootballDataProvider) -> CatalogS
                 result.error = "El proveedor no indica temporada actual"
                 continue
             result.season = current.year
+            season_id = season_ids[current.year]
             if stopped:
                 result.error = stopped
+                recovery.add_incident_affected_units_best_effort(
+                    db, provider.name, stopped_incident_kind, 1
+                )
                 continue
 
+            # A5E: persistido justo antes de /teams. begin_attempt hace commit,
+            # por lo que no queda una transacción de BD abierta durante el HTTP.
+            attempt_started_at = recovery.begin_attempt(
+                db, _RECOVERY_UNIT_KIND, provider.name, season_id
+            )
             try:
                 teams = await provider.get_teams(comp.external_id, current.year)
+                response_received_at = datetime.now(timezone.utc)
             except ProviderError as exc:
                 logger.warning("No se pudieron obtener los equipos de %s: %s", comp.name, exc)
                 result.error = exc.message
-                if provider_failure_action(exc) is SyncAction.ABORT_PROVIDER_RUN:
+                action = provider_failure_action(exc)
+                stopped_incident_kind = recovery.record_failure_best_effort(
+                    db,
+                    unit_kind=_RECOVERY_UNIT_KIND,
+                    provider=provider.name,
+                    season_id=season_id,
+                    attempt_started_at=attempt_started_at,
+                    error_scope="provider" if action is SyncAction.ABORT_PROVIDER_RUN else "unit",
+                    error_class=exc.__class__.__name__,
+                    error_status=exc.status_code,
+                    error_message=exc.message,
+                    provider_error=exc,
+                    endpoint="/teams",
+                    affected_units=1,
+                )
+                if action is SyncAction.ABORT_PROVIDER_RUN:
                     stopped = f"Equipos no sincronizados: {provider_abort_reason(exc)}"
                     logger.warning("%s: no se piden los equipos de las competiciones restantes", exc.__class__.__name__)
                 continue
 
-            team_ids = repo.upsert_teams(db, teams, provider.name)
-            repo.link_teams_to_season(db, season_ids[current.year], team_ids)
-            db.commit()
+            try:
+                team_ids = repo.upsert_teams(db, teams, provider.name)
+                repo.link_teams_to_season(db, season_id, team_ids)
+                # El éxito de recovery comparte el commit de dominio.
+                recovery.stage_success(
+                    db, _RECOVERY_UNIT_KIND, provider.name, season_id, attempt_started_at
+                )
+                db.commit()
+            except _ISOLATED_DB_ERRORS as exc:
+                db.rollback()
+                kind = classify_db_error(exc)
+                recovery.record_failure_best_effort(
+                    db,
+                    unit_kind=_RECOVERY_UNIT_KIND,
+                    provider=provider.name,
+                    season_id=season_id,
+                    attempt_started_at=attempt_started_at,
+                    error_scope="database",
+                    error_class=exc.__class__.__name__,
+                    error_message=str(kind),
+                )
+                raise
             result.teams = len(teams)
+            recovery.close_recovered_incidents_best_effort(
+                db, provider.name, response_received_at
+            )
         except BaseException:
             crashed = True  # error no previsto: se propaga, pero el log no debe decir "ok"
             raise
