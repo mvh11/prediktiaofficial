@@ -97,15 +97,16 @@ def test_upgrade_downgrade_upgrade_0008(migrated_db):
         alembic_run("upgrade", "head")
 
 
-def test_alembic_graph_is_linear_with_head_0008():
+def test_alembic_graph_is_linear_through_0008():
+    # La cabeza actual la fija test_migration_0009 (DI-A5D)
     from alembic.script import ScriptDirectory
 
     from tests.conftest import _alembic_config
 
     script = ScriptDirectory.from_config(_alembic_config())
-    assert script.get_heads() == ["0008"]
+    assert len(script.get_heads()) == 1
     assert script.get_revision("0008").down_revision == "0007"
-    assert [r.revision for r in script.walk_revisions()] == ["0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
+    assert [r.revision for r in script.walk_revisions()][-8:] == ["0008", "0007", "0006", "0005", "0004", "0003", "0002", "0001"]
 
 
 def test_columns_types_and_nullability(migrated_db):
