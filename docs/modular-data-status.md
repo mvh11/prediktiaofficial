@@ -96,6 +96,19 @@
 - **Compatibilidad:** instantes equivalentes con zona generan el mismo `prediction_id` nuevo; las identidades UTC existentes y los hashes fijados se conservan; el comportamiento con fechas sin zona no cambia; sin reescritura de registros históricos ni recálculo de cadenas de hashes o anclajes. Los registros históricos externos siguen `UNVERIFIED`: hace falta una revisión de compatibilidad antes de cualquier activación real.
 - **Gobierno:** sin cambios de esquema ni migraciones; sin cambios en Data Integrity ni en contratos temporales compartidos; sin operaciones de base de datos ni peticiones a proveedores; sin push ni promoción a `main`; predicciones reales OFF; scheduler OFF.
 
+**Cierre de integración MOD-PAR-025 (2026-10-12; cierre documental MOD-PAR-026; `integration/a6-main-compat`, local; sin integrar en `main` ni desplegar):**
+
+- **Tareas:** MOD-PAR-022 (endurecimiento del contrato de errores de M5.9B), MOD-PAR-025 (integración local controlada) y MOD-PAR-026 (este cierre documental).
+- **Decisión departamental:** MOD-PAR-022 aceptada; integración local MOD-PAR-025 aceptada (MODULAR_PRINCIPAL). NO lista para producción.
+- **Coordinación:** resultado `CLEAR`, referencia `INTEG-MOD-M59B-022-001`, según lo comunicado por MODULAR_PRINCIPAL (sin registro previo en el repositorio).
+- **Base y HEAD:** base `d6e1c22a4d0169a012e101669bbb2763e2336845`; origen `6e635ce4fd7a510cee05ffe4a4fbe37e9f397369`, integrado como `03b582f3dbd7c5ba3cc8eb23d136633df494242d` (HEAD antes de esta entrada documental). Un cherry-pick, 0 conflictos.
+- **Archivos de implementación modificados:** `backend/research/m59/manifest.py`, `backend/research/m59/registry.py` y `backend/research/tests/test_m59_contracts.py`.
+- **Validación integrada (en `03b582f`):** `backend/research/tests` 370 passed; `backend/research/stat_quality_independent_tests` 57 passed; `backend/tests/test_research_m59.py` 23 passed y 1 skipped; en total 450 passed, 1 skipped, 0 failed (venv de investigación, `DATABASE_URL` ficticia e inalcanzable, sin conexión a BD). El test saltado es el que depende de la BD: `TEST_DATABASE_URL` estaba sin definir. Suite completa del backend: NO EJECUTADA.
+- **Cambios de contrato:** los manifiestos malformados lanzan `ManifestError` y los registros malformados lanzan `RegistryError` donde el contrato lo documenta; según los tests de regresión integrados, `evaluation.registry_status` trata esos casos de cadena no válida sin romperse y las entradas antes válidas se siguen aceptando. Las firmas públicas no cambian.
+- **Compatibilidad:** las huellas fijadas y los hashes canónicos se conservan; las identidades UTC de predicción existentes no cambian; sin reescritura de registros históricos ni recálculo de anclajes.
+- **Pendiente (diferido, NO resuelto):** tratamiento de excepciones en la validación de anclajes; validación de `scaler_scale` y de tipos de entrada en B2; endurecimiento de la validación de `prediction_id` en el registro; semántica de reintentos `LATE`; normalización del contrato de errores para fechas sin zona.
+- **Gobierno:** sin cambios en Data Integrity ni en el feed compartido de fixtures; sin esquemas ni migraciones; sin reescritura de registros históricos; sin push ni integración en `main`; sin activación de producción ni del scheduler; predicciones reales OFF; scheduler OFF.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
