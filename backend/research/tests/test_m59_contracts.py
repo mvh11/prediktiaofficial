@@ -757,6 +757,84 @@ def test_anchor_covers_records_up_to_its_sequence_only(chain):
     assert anchors.anchored_before(chain[2], chain, [late, broken, at_one, _anchor(chain)], K, ALWAYS)  # basta uno válido y a tiempo
 
 
+def _fails_closed(status, *, chain_valid):
+    """Estado documentado cuando la evidencia no vale: no verificado ni evaluable, con su problema anotado."""
+    return (status["CHAIN_VALID"], status["ANCHOR_VERIFIED"], status["EVALUATION_ELIGIBLE"]) == (chain_valid, False, False) and bool(status["problems"])
+
+
+def test_valid_anchor_on_a_valid_chain_is_still_verified_and_eligible(chain):
+    anchor = _anchor(chain[:2])
+    assert anchors.verify_anchor(chain, anchor, ALWAYS) == K - timedelta(days=1)
+    status = evaluation.registry_status(chain, [anchor, _anchor(chain)], ALWAYS)
+    assert status == {"CHAIN_VALID": True, "ANCHOR_VERIFIED": True, "EVALUATION_ELIGIBLE": True, "problems": [], "verified_anchors": 2}
+
+
+@pytest.mark.parametrize("authority", [["rfc3161"], {"rfc3161"}, {"rfc3161": True}, ("rfc3161",), 3161, True],
+                         ids=["list", "set", "mapping", "tuple", "number", "bool"])
+def test_anchor_authority_that_is_not_text_is_an_anchor_error(chain, authority):
+    anchor = _anchor(chain[:2], authority=authority)  # una lista o un conjunto no son hashables: antes escapaba TypeError
+    with pytest.raises(anchors.AnchorError, match="autoridad no aceptada"):
+        anchors.verify_anchor(chain, anchor, ALWAYS)
+    assert not anchors.anchored_before(chain[0], chain, [anchor], K, ALWAYS)
+    assert anchors.anchored_before(chain[0], chain, [anchor, _anchor(chain[:2])], K, ALWAYS)  # el siguiente anclaje válido sí cubre
+    status = evaluation.registry_status(chain, [anchor], ALWAYS)
+    assert _fails_closed(status, chain_valid=True) and "autoridad no aceptada" in status["problems"][0]
+
+
+@pytest.mark.parametrize("not_an_object", [None, [], "rfc3161", 7, [("authority", "rfc3161")]], ids=["null", "list", "text", "number", "pairs"])
+def test_anchor_that_is_not_an_object_is_an_anchor_error(chain, not_an_object):
+    with pytest.raises(anchors.AnchorError, match="el anclaje no es un objeto"):
+        anchors.verify_anchor(chain, not_an_object, ALWAYS)
+    assert not anchors.anchored_before(chain[0], chain, [not_an_object], K, ALWAYS)
+    status = evaluation.registry_status(chain, [not_an_object], ALWAYS)
+    assert _fails_closed(status, chain_valid=True) and status["problems"] == ["anclaje seq None: el anclaje no es un objeto"]
+    mixed = evaluation.registry_status(chain, [_anchor(chain), not_an_object], ALWAYS)  # uno válido no tapa al malformado
+    assert _fails_closed(mixed, chain_valid=True) and mixed["verified_anchors"] == 1
+
+
+def test_wrapped_valid_anchor_is_not_unwrapped(chain):
+    with pytest.raises(anchors.AnchorError, match="el anclaje no es un objeto"):
+        anchors.verify_anchor(chain, [_anchor(chain)], ALWAYS)
+
+
+DAMAGED_HEADS = {
+    "no-record-hash": lambda rec: {k: v for k, v in rec.items() if k != "record_hash"},
+    "null-record-hash": lambda rec: {**rec, "record_hash": None},
+    "numeric-record-hash": lambda rec: {**rec, "record_hash": float("inf")},
+    "record-is-text": lambda rec: "x",
+    "record-is-null": lambda rec: None,
+}
+
+
+@pytest.mark.parametrize("name", DAMAGED_HEADS)
+def test_anchor_on_a_record_without_record_hash_fails_closed(chain, name):
+    anchor = _anchor(chain[:2])  # declaración legítima sobre el registro 1, hecha antes del daño
+    damaged = [chain[0], DAMAGED_HEADS[name](chain[1]), chain[2]]
+    variants = [anchor, {k: v for k, v in anchor.items() if k != "head_hash"}, {**anchor, "head_hash": None}, {**anchor, "head_hash": float("inf")}]
+    for candidate in variants:  # tampoco "coincide" un anclaje sin huella con un registro sin huella
+        with pytest.raises(anchors.AnchorError, match="el registro anclado no tiene record_hash"):
+            anchors.verify_anchor(damaged, candidate, ALWAYS)
+        assert not anchors.anchored_before(chain[0], damaged, [candidate], K, ALWAYS)
+    status = evaluation.registry_status(damaged, [anchor], ALWAYS)
+    assert _fails_closed(status, chain_valid=False) and status["verified_anchors"] == 0
+    assert status["problems"][0].startswith("cadena: ") and status["problems"][1] == "anclaje seq 1: el registro anclado no tiene record_hash"
+    assert damaged[1] == DAMAGED_HEADS[name](chain[1])  # no se repara ni se le inventa una huella
+
+
+@pytest.mark.parametrize("name", MALFORMED_CHAINS)
+def test_registry_status_fails_closed_on_malformed_records_even_with_anchors(tmp_path, name):
+    original = _chain(tmp_path, 3).records()
+    damage, message = MALFORMED_CHAINS[name]
+    recs = damage(json.loads(json.dumps(original)))
+    with pytest.raises(RegistryError, match=message):
+        verify(recs)
+    presented = [_anchor(original[:1]), _anchor(original[:2]), _anchor(original), None]  # anclajes de la cadena original y uno malformado
+    status = evaluation.registry_status(recs, presented, ALWAYS)
+    assert _fails_closed(status, chain_valid=False) and status["problems"][0] == f"cadena: {message}"
+    assert status["problems"][-1] == "anclaje seq None: el anclaje no es un objeto"
+    assert not any(isinstance(r, dict) and anchors.anchored_before(r, recs, [None, {}], K, ALWAYS) for r in recs)
+
+
 # --- 6. Emisor simulado: orden temporal estricto y condiciones de no emisión ---------------------
 
 

@@ -33,10 +33,18 @@ def make_statement(records: list[dict]) -> dict:
 
 def verify_anchor(records: list[dict], anchor: dict, external_check: Callable[[dict], bool]) -> datetime:
     """Devuelve el instante externo verificado del anclaje, o AnchorError."""
-    if anchor.get("authority") not in ACCEPTED_AUTHORITIES:
-        raise AnchorError(f"autoridad no aceptada: {anchor.get('authority')!r} (un commit local no prueba anterioridad)")
+    if not isinstance(anchor, dict):
+        raise AnchorError("el anclaje no es un objeto")
+    authority = anchor.get("authority")
+    if not isinstance(authority, str) or authority not in ACCEPTED_AUTHORITIES:
+        raise AnchorError(f"autoridad no aceptada: {authority!r} (un commit local no prueba anterioridad)")
     seq = anchor.get("registry_seq")
-    if not isinstance(seq, int) or not 0 <= seq < len(records) or records[seq]["record_hash"] != anchor.get("head_hash"):
+    if not isinstance(seq, int) or not 0 <= seq < len(records):
+        raise AnchorError("el anclaje no corresponde a esta cadena")
+    head = records[seq].get("record_hash") if isinstance(records[seq], dict) else None
+    if not isinstance(head, str):  # registro malformado: no se le inventa una huella ni se da por anclado
+        raise AnchorError("el registro anclado no tiene record_hash")
+    if head != anchor.get("head_hash"):
         raise AnchorError("el anclaje no corresponde a esta cadena")
     if anchor.get("statement_sha256") != sha256_hex({"registry_seq": seq, "head_hash": anchor["head_hash"]}):
         raise AnchorError("declaración del anclaje alterada")

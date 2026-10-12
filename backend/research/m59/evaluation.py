@@ -68,7 +68,8 @@ def registry_status(records: list[dict], anchors: list[dict], external_check) ->
             status["verified_anchors"] += 1
         except AnchorError as exc:
             failures += 1
-            status["problems"].append(f"anclaje seq {anchor.get('registry_seq')}: {exc}")
+            seq = anchor.get("registry_seq") if isinstance(anchor, dict) else None
+            status["problems"].append(f"anclaje seq {seq}: {exc}")
     if not anchors:
         status["problems"].append("sin anclaje externo")
     status["ANCHOR_VERIFIED"] = status["CHAIN_VALID"] and status["verified_anchors"] > 0 and failures == 0
