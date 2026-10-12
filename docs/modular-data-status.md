@@ -82,6 +82,20 @@
 - **Límites operativos:** sin operaciones de base de datos, sin peticiones a proveedores, sin migraciones, sin activación en producción, sin push, sin promoción a `main`.
 - **Pendiente:** la corrección UTC de identidad sigue en `WAIT` y se sigue por separado; la suite completa del backend no se ha ejecutado todavía.
 
+**Cierre de integración MOD-PAR-020 (2026-10-12; cierre documental MOD-PAR-021; `integration/a6-main-compat`, local; sin integrar en `main` ni desplegar):**
+
+- **Tareas:** MOD-PAR-019 (endurecimiento de la identidad UTC del emisor de M5.9B), MOD-PAR-020 (integración local) y MOD-PAR-021 (este cierre documental).
+- **Decisión departamental:** MOD-PAR-019 aceptada; integración local MOD-PAR-020 aceptada (MODULAR_PRINCIPAL). NO lista para producción.
+- **Coordinación:** resultado `CLEAR`, referencia `INTEG-MOD-M59B-019-001`, según lo comunicado por MODULAR_PRINCIPAL (sin registro previo en el repositorio).
+- **Base y HEAD:** base `b56fa0302237166381a93d3756fdd907768b80d9`; origen `d05a15759eb94a2009015e8eefff53bb8d4bc48b`, integrado como `22bd128076f97d1976329414041c651c5fade6ab` (HEAD antes de esta entrada documental). Un cherry-pick, 0 conflictos.
+- **Archivos de implementación modificados:** `backend/research/m59/emitter.py` y `backend/research/tests/test_m59_contracts.py`.
+- **Validación integrada (en `22bd128`):** `backend/research/tests` 319 passed; `backend/research/stat_quality_independent_tests` 57 passed; en total 376 passed, 0 failed (venv de investigación, `DATABASE_URL` ficticia e inalcanzable, `TEST_DATABASE_URL` sin definir, sin conexión a BD). La selección centrada en UTC (17 passed) forma parte de `research/tests`; no es una suite adicional. Suite completa del backend: NO EJECUTADA.
+- **Validación aislada original (MOD-PAR-019, según su informe):** 399 passed, 1 skipped, 0 failed, sobre `research/tests`, `research/stat_quality_independent_tests` y `tests/test_research_m59.py`.
+- **Conciliación de totales:** las dos ejecuciones NO cubren las mismas suites. La aislada incluye además `backend/tests/test_research_m59.py`, que no formaba parte de la validación autorizada en MOD-PAR-020 y no se ha ejecutado en `22bd128`. Una recolección sin ejecución (`--collect-only`) en `22bd128`, cuyo árbol es idéntico al de `d05a157`, da 400 tests: 319 + 57 + 24. De esos 24, uno usa `db_session` y `tests/conftest.py` lo salta sin `TEST_DATABASE_URL`, lo que es coherente con 376 + 23 = 399 passed y 1 skipped.
+- **Limitación de la evidencia:** no se dispone del log original de MOD-PAR-019; sus cifras son las comunicadas, y qué test se saltó se deduce de la recolección y del conftest, no de ese log.
+- **Compatibilidad:** instantes equivalentes con zona generan el mismo `prediction_id` nuevo; las identidades UTC existentes y los hashes fijados se conservan; el comportamiento con fechas sin zona no cambia; sin reescritura de registros históricos ni recálculo de cadenas de hashes o anclajes. Los registros históricos externos siguen `UNVERIFIED`: hace falta una revisión de compatibilidad antes de cualquier activación real.
+- **Gobierno:** sin cambios de esquema ni migraciones; sin cambios en Data Integrity ni en contratos temporales compartidos; sin operaciones de base de datos ni peticiones a proveedores; sin push ni promoción a `main`; predicciones reales OFF; scheduler OFF.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
