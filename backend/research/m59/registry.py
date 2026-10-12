@@ -62,6 +62,8 @@ class Registry:
 def verify(records: list[dict]) -> list[dict]:
     """Cadena completa: seq contiguos desde 0, prev_hash enlazado, record_hash correcto y
     prediction_id únicos. Devuelve los registros si todo está bien; si no, RegistryError."""
+    if not isinstance(records, (list, tuple)):  # ni se convierte ni se recorre: un generador quedaría agotado
+        raise RegistryError("los registros no son una lista")
     prev, seen = GENESIS, set()
     for i, rec in enumerate(records):
         if not isinstance(rec, dict):

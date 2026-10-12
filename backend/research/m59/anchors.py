@@ -33,6 +33,8 @@ def make_statement(records: list[dict]) -> dict:
 
 def verify_anchor(records: list[dict], anchor: dict, external_check: Callable[[dict], bool]) -> datetime:
     """Devuelve el instante externo verificado del anclaje, o AnchorError."""
+    if not isinstance(records, (list, tuple)):  # antes de medirlos o indexarlos
+        raise AnchorError("los registros no son una lista")
     if not isinstance(anchor, dict):
         raise AnchorError("el anclaje no es un objeto")
     authority = anchor.get("authority")

@@ -61,6 +61,8 @@ def registry_status(records: list[dict], anchors: list[dict], external_check) ->
     except RegistryError as exc:
         status["CHAIN_VALID"] = False
         status["problems"].append(f"cadena: {exc}")
+        if not isinstance(records, (list, tuple)):  # sin contenedor de registros no hay nada contra lo que verificar anclajes
+            return status
     failures = 0
     for anchor in anchors:
         try:

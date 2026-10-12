@@ -908,6 +908,124 @@ def test_registry_status_fails_closed_on_malformed_records_even_with_anchors(tmp
     assert not any(isinstance(r, dict) and anchors.anchored_before(r, recs, [None, {}], K, ALWAYS) for r in recs)
 
 
+# El contenedor de registros es una lista o una tupla; cualquier otro se rechaza sin recorrerlo ni indexarlo.
+
+
+class _Tripwire:
+    """Iterable que delata cualquier intento de recorrerlo, medirlo o indexarlo."""
+
+    def _touched(self, *_args):
+        raise AssertionError("se consumió un contenedor de registros no admitido")
+
+    __iter__ = __len__ = __getitem__ = __bool__ = _touched
+
+
+BAD_CONTAINERS = {
+    "none": lambda r: None, "true": lambda r: True, "false": lambda r: False, "int": lambda r: 3, "float": lambda r: 1.5,
+    "dict": lambda r: dict(enumerate(r)), "empty-dict": lambda r: {}, "str": lambda r: "abc", "empty-str": lambda r: "", "bytes": lambda r: b"",
+    "generator": lambda r: (rec for rec in r), "iterator": lambda r: iter(r), "dict-values": lambda r: dict(enumerate(r)).values(),
+    "dict-keys": lambda r: dict(enumerate(r)).keys(), "map": lambda r: map(dict, r), "range": lambda r: range(len(r)),
+    "frozenset": lambda r: frozenset(), "tripwire": lambda r: _Tripwire(),
+}
+ONE_SHOT = ("generator", "iterator", "map")
+NOT_A_LIST_OF_RECORDS = "los registros no son una lista"
+
+
+def _never(_anchor_):
+    raise AssertionError("no se debe llegar a la verificación externa del anclaje")
+
+
+@pytest.mark.parametrize("name", BAD_CONTAINERS)
+def test_verify_rejects_a_records_container_that_is_not_a_list_or_tuple(chain, name):
+    container = BAD_CONTAINERS[name](chain)
+    with pytest.raises(RegistryError, match=NOT_A_LIST_OF_RECORDS):
+        verify(container)
+    if name in ONE_SHOT:  # rechazado antes de recorrerlo: sigue entero
+        assert [dict(rec) for rec in container] == chain
+
+
+@pytest.mark.parametrize("name", BAD_CONTAINERS)
+def test_verify_anchor_rejects_a_records_container_that_is_not_a_list_or_tuple(chain, name):
+    container, anchor = BAD_CONTAINERS[name](chain), _anchor(chain[:2])
+    with pytest.raises(anchors.AnchorError, match=NOT_A_LIST_OF_RECORDS):
+        anchors.verify_anchor(container, anchor, _never)
+    assert anchors.anchored_before(chain[0], container, [anchor], K, _never) is False
+    if name in ONE_SHOT:
+        assert [dict(rec) for rec in container] == chain
+
+
+@pytest.mark.parametrize("presented", [0, 2], ids=["no-anchors", "with-anchors"])
+@pytest.mark.parametrize("name", BAD_CONTAINERS)
+def test_registry_status_fails_closed_on_a_records_container_that_is_not_a_list_or_tuple(chain, name, presented):
+    container = BAD_CONTAINERS[name](chain)
+    status = evaluation.registry_status(container, [_anchor(chain[:2]), None][:presented], _never)  # no se llega a verificar anclajes
+    assert status == {"CHAIN_VALID": False, "ANCHOR_VERIFIED": False, "EVALUATION_ELIGIBLE": False,
+                      "problems": [f"cadena: {NOT_A_LIST_OF_RECORDS}"], "verified_anchors": 0}
+    if name in ONE_SHOT:
+        assert [dict(rec) for rec in container] == chain
+
+
+@pytest.mark.parametrize("name", BAD_CONTAINERS)
+def test_classify_rejects_a_records_container_that_is_not_a_list_or_tuple(chain, name):
+    container = BAD_CONTAINERS[name](chain)
+    universe = [{"fixture_id": 0, "competition_id": 1, "final_kickoff": K}]
+    with pytest.raises(RegistryError, match=NOT_A_LIST_OF_RECORDS):  # antes, un generador se agotaba y todo salía NO_RECORD
+        evaluation.classify(universe, container, [_anchor(chain)], {0: "H"}, _never)
+    if name in ONE_SHOT:
+        assert [dict(rec) for rec in container] == chain
+
+
+def test_lists_and_tuples_of_records_are_equivalent_valid_containers(chain):
+    as_tuple, anchors_ = tuple(chain), [_anchor(chain[:2]), _anchor(chain)]
+    assert verify(chain) is chain and verify(as_tuple) is as_tuple  # se devuelve el mismo contenedor, sin convertirlo
+    assert anchors.verify_anchor(chain, anchors_[0], ALWAYS) == anchors.verify_anchor(as_tuple, anchors_[0], ALWAYS) == K - timedelta(days=1)
+    assert [anchors.anchored_before(r, as_tuple, anchors_[:1], K, ALWAYS) for r in as_tuple] == [True, True, False]
+    expected = {"CHAIN_VALID": True, "ANCHOR_VERIFIED": True, "EVALUATION_ELIGIBLE": True, "problems": [], "verified_anchors": 2}
+    assert evaluation.registry_status(chain, anchors_, ALWAYS) == evaluation.registry_status(as_tuple, anchors_, ALWAYS) == expected
+    assert anchors.make_statement(chain) == anchors.make_statement(as_tuple)
+    universe = [{"fixture_id": 77, "competition_id": 1, "final_kickoff": K}]
+    no_record = [{"fixture_id": 77, "competition_id": 1, "label": None, "class": "NO_RECORD"}]
+    assert evaluation.classify(universe, chain, anchors_, {}, ALWAYS) == evaluation.classify(universe, as_tuple, anchors_, {}, ALWAYS) == no_record
+
+
+@pytest.mark.parametrize("empty", [[], ()], ids=["list", "tuple"])
+def test_empty_list_and_empty_tuple_are_valid_and_equivalent(chain, empty):
+    assert verify(empty) is empty
+    assert evaluation.registry_status(empty, [], ALWAYS) == {"CHAIN_VALID": True, "ANCHOR_VERIFIED": False, "EVALUATION_ELIGIBLE": False,
+                                                             "problems": ["sin anclaje externo"], "verified_anchors": 0}
+    with pytest.raises(anchors.AnchorError, match="no corresponde a esta cadena"):
+        anchors.verify_anchor(empty, _anchor(chain), ALWAYS)
+    stale = evaluation.registry_status(empty, [_anchor(chain)], ALWAYS)  # un anclaje sobre registros que ya no están: cadena truncada
+    assert stale["problems"] == ["anclaje seq 2: el anclaje no corresponde a esta cadena"] and _fails_closed(stale, chain_valid=True)
+    universe = [{"fixture_id": 0, "competition_id": 1, "final_kickoff": K}]
+    assert evaluation.classify(universe, empty, [], {}, ALWAYS) == [{"fixture_id": 0, "competition_id": 1, "label": None, "class": "NO_RECORD"}]
+
+
+@pytest.mark.parametrize("container", [list, tuple], ids=["list", "tuple"])
+def test_malformed_chain_in_a_valid_container_keeps_its_diagnostics(chain, container):
+    # el contenedor vale; lo que falla es su contenido: se conservan los problemas y el recuento de anclajes verificados
+    original_anchors = [_anchor(chain[:1]), _anchor(chain)]
+    tampered = json.loads(json.dumps(chain))
+    tampered[1]["fixture_id"] = 7  # contenido alterado sin recalcular su huella
+    recs = container(tampered)
+    with pytest.raises(RegistryError, match="seq 1: registro modificado"):
+        verify(recs)
+    assert evaluation.registry_status(recs, original_anchors, ALWAYS) == {
+        "CHAIN_VALID": False, "ANCHOR_VERIFIED": False, "EVALUATION_ELIGIBLE": False,
+        "problems": ["cadena: seq 1: registro modificado"], "verified_anchors": 2}  # los anclajes se siguen verificando
+    truncated = container(chain[:2])
+    assert evaluation.registry_status(truncated, original_anchors, ALWAYS) == {
+        "CHAIN_VALID": True, "ANCHOR_VERIFIED": False, "EVALUATION_ELIGIBLE": False,
+        "problems": ["anclaje seq 2: el anclaje no corresponde a esta cadena"], "verified_anchors": 1}
+    not_objects = container([chain[0], "x", None])
+    status = evaluation.registry_status(not_objects, [_anchor(chain[:2]), None], ALWAYS)
+    assert status == {"CHAIN_VALID": False, "ANCHOR_VERIFIED": False, "EVALUATION_ELIGIBLE": False, "verified_anchors": 0, "problems": [
+        "cadena: posición 1: el registro no es un objeto", "anclaje seq 1: el registro anclado no tiene record_hash",
+        "anclaje seq None: el anclaje no es un objeto"]}
+    with pytest.raises(RegistryError, match="posición 1: el registro no es un objeto"):
+        evaluation.classify([], not_objects, [], {}, ALWAYS)
+
+
 # --- 6. Emisor simulado: orden temporal estricto y condiciones de no emisión ---------------------
 
 
