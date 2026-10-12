@@ -39,7 +39,7 @@ def _num(x, what):
 
 
 def _probs(p, what):
-    if not isinstance(p, list) or len(p) != 3 or abs(sum(_num(v, what) for v in p) - 1) > 1e-9:
+    if not isinstance(p, list) or len(p) != 3 or abs(sum(_num(v, what) for v in p) - 1) > 1e-9 or not all(0 <= v <= 1 for v in p):
         raise ManifestError(f"{what}: vector de probabilidades no válido")
     return [float(v) for v in p]
 

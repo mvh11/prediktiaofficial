@@ -256,6 +256,64 @@ def test_probability_vectors_within_tolerance_are_accepted():
         validate(_resealed("B0", _set(("params", "probs"), probs)))
 
 
+PROB_PATHS = [("B0", ("params", "probs")), ("B1", ("params", "base")), ("B1", ("params", "by_competition", "1"))]
+PROB_PATH_IDS = ["B0", "B1-base", "B1-competition"]
+# cada componente debe estar en [0, 1]: todos estos suman 1 (dentro de la tolerancia) y aun así no son probabilidades
+OUT_OF_RANGE_PROBS = [[1.5, -0.25, -0.25], [2, -1, 0], [-0.5, 0.75, 0.75], [0.5, 0.5 + 1e-12, -1e-12], [1 + 5e-10, 0, 0], [1 + 5e-10, -5e-10, 0]]
+OUT_OF_RANGE_IDS = ["above-and-negative", "integers", "negative", "tiny-negative", "above-one-within-sum-tolerance", "both-within-sum-tolerance"]
+
+
+@pytest.mark.parametrize("probs", OUT_OF_RANGE_PROBS, ids=OUT_OF_RANGE_IDS)
+@pytest.mark.parametrize("kind, path", PROB_PATHS, ids=PROB_PATH_IDS)
+def test_validate_rejects_probability_components_outside_the_unit_interval(kind, path, probs):
+    bad = _resealed(kind, _set(path, probs))
+    verify_manifest(bad)  # la huella es correcta: lo que falla es el vector
+    with pytest.raises(ManifestError, match="vector de probabilidades"):
+        validate(bad)
+    with pytest.raises(ManifestError, match="vector de probabilidades"):
+        FrozenModel(bad)
+    with pytest.raises(ManifestError, match="vector de probabilidades"):
+        load(canonical_json(bad))
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"])
+@pytest.mark.parametrize("kind, path", PROB_PATHS, ids=PROB_PATH_IDS)
+def test_non_finite_probability_components_are_never_sealed_nor_accepted(kind, path, bad):
+    body = _body(manifests()[kind])
+    _set(path, [bad, 0.5, 0.5])(body)
+    with pytest.raises(ValueError):  # no tienen forma canónica: ni siquiera se pueden sellar
+        seal(body)
+    unsealed = {**body, "manifest_sha256": manifests()[kind]["manifest_sha256"]}
+    with pytest.raises(ValueError):
+        validate(unsealed)
+    with pytest.raises(ValueError):
+        FrozenModel(unsealed)
+
+
+@pytest.mark.parametrize("probs", [[1, 0, 0], [0, 1, 0], [0.0, 0.0, 1.0], [0.5, 0.5, 0], [0.2, 0.3, 0.5], [1 - 5e-10, 0, 0], [0.5, 0.25, 0.25 - 5e-10]],
+                         ids=["one-first", "one-middle", "one-last-float", "zero-component", "interior", "sum-low-in-tolerance", "interior-low-in-tolerance"])
+@pytest.mark.parametrize("kind, path", PROB_PATHS, ids=PROB_PATH_IDS)
+def test_valid_probability_vectors_are_served_unchanged(kind, path, probs):
+    ok = _resealed(kind, _set(path, probs))
+    validate(ok)
+    assert load(canonical_json(ok)) == ok
+    served = FrozenModel(ok).predict({"competition_id": 1 if "by_competition" in path else 99})
+    assert served == probs and [type(v) for v in served] == [type(v) for v in probs]  # sin normalizar ni convertir
+
+
+def test_valid_manifest_fingerprints_and_canonical_hashes_are_unchanged():
+    # huellas fijadas antes de endurecer la validación: los manifiestos válidos conservan su identidad
+    assert {k: m["manifest_sha256"] for k, m in manifests().items()} == {
+        "B0": "251e6232cd15ca6f0641681f9920a2d5c7da340e1753f9dac58e31272ecef48d",
+        "B1": "ade1fc7678a23e348952b40eef3362d0325e18f855e41a9713ac7f8c8a24082a",
+        "B2": "91f7d1cbbe962d5fa469641e356e42345b7f1dba7a2e492d1162207870be57a2"}
+    assert sha256_hex([0.45, 0.26, 0.29]) == "d2086057c6bc760bb8acb7ad6a4a4447e91c89356b09c901fdbf893c1476d3c6"
+    assert sha256_hex([1, 0, 0]) == "7ff52993d5d3cb149089942de7fc7a6511db2671cf2125976c081ad6fff89772"
+    assert sha256_hex([0.0, 0.0, 1.0]) == "e4aea449125555e5faa564f372700a986bbcdaa343ca808bd9166d50fa51c2bb"
+    for m in manifests().values():
+        validate(m)
+
+
 @pytest.mark.parametrize("change, message", [
     (_set(("params", "coef"), [[0.0] * 5] * 2), "coeficientes"), (_set(("params", "coef", 1), [0.0] * 4), "coeficientes"),
     (_set(("params", "coef", 1), [0.0] * 6), "coeficientes"), (_set(("params", "intercept"), [0.1, 0.2]), "coeficientes"),
