@@ -135,6 +135,20 @@
 - **Pendiente (diferido, NO resuelto):** excepciones de `make_statement` ante entradas malformadas; entradas de verificación del registro que no son listas; validación de B2; endurecimiento de la identidad en el registro; los riesgos previos a la activación de M5.9B ya documentados arriba.
 - **Gobierno:** sin reescritura de registros históricos ni de hashes; sin cambios en Data Integrity ni de esquema; sin push ni promoción a `main`; sin activación de producción ni del scheduler.
 
+**Cierre de integración MOD-PAR-040 (2026-10-12; cierre documental MOD-PAR-041; `integration/a6-main-compat`, local; sin integrar en `main` ni desplegar):**
+
+- **Tareas:** MOD-PAR-037 (validación del manifiesto B2 de M5.9B, implementación aislada), MOD-PAR-040 (integración local) y MOD-PAR-041 (este cierre, solo documental: ni implementación ni integración).
+- **Decisión departamental:** MOD-PAR-037 aceptada a nivel departamental; MOD-PAR-040 aceptada como integración local (MODULAR_PRINCIPAL). La aceptación de la integración local NO es que esté lista para producción.
+- **Coordinación:** resultado `CLEAR`, referencia `INTEG-MOD-M59B-B2-037-001`, según lo comunicado por MODULAR_PRINCIPAL (sin registro previo en el repositorio).
+- **Trazabilidad:** base `a594ed47730b4eb459086a9f79a683d5b01497aa`; origen (MOD-PAR-037) `fbf84f932a94716775ac7adabdea164ca86f9051`, integrado (MOD-PAR-040) como `a71ec50297847a52bf0310561524086919789c18` (HEAD antes de esta entrada documental). Un cherry-pick, 0 conflictos.
+- **Archivos modificados:** `backend/research/m59/manifest.py` y `backend/research/tests/test_m59_contracts.py`.
+- **Validación de la integración MOD-PAR-040 (en `a71ec50`; no se ha vuelto a ejecutar en MOD-PAR-041):** `backend/research/tests` 475 passed; `backend/research/stat_quality_independent_tests` 57 passed; `backend/tests/test_research_m59.py` 23 passed y 1 skipped; en total 555 passed, 1 skipped, 0 failed, sobre tres rutas distintas. Los tests centrados en B2 forman parte de `research/tests` y no se cuentan dos veces. Motivo del skip: «BD de pruebas no autorizada: Falta TEST_DATABASE_URL». Suite completa del backend: NO EJECUTADA.
+- **Contrato B2 aceptado, `scaler_scale`:** la validación rechaza una escala nula, incluido `-0.0`; los valores no finitos se siguen rechazando con `ManifestError`; los valores finitos, no nulos y negativos se siguen permitiendo.
+- **Contrato B2 aceptado, contenedores:** `numeric_columns`, `flag_columns` y `competitions` tienen que ser listas de verdad; para esos tres campos se rechazan texto, tuplas y diccionarios. No se añade ninguna validación del tipo de los elementos de esas listas, y la semántica de las listas vacías no cambia.
+- **Compatibilidad:** los manifiestos válidos ya aceptados siguen siendo válidos; `freeze_b2` no cambia; las huellas fijadas de B0, B1 y B2, los hashes canónicos y las identidades de predicción no cambian.
+- **Pendiente (diferido, NO resuelto):** validación de contenedores del registro (MOD-PAR-038/039); comportamiento de `make_statement` ante una cabeza malformada; endurecimiento de la identidad en el registro; consistencia de los metadatos históricos; idempotencia con varios escritores; artefactos históricos externos y sus consumidores; cobertura de la suite completa del backend. Siguen vigentes las demás limitaciones previas a la activación de M5.9B ya documentadas arriba.
+- **Gobierno:** sin reescritura de manifiestos históricos; sin cambios en Data Integrity; sin esquemas ni migraciones; sin push ni promoción a `main`; sin activación de producción, de predicciones ni del scheduler.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
