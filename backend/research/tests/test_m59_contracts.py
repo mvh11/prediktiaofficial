@@ -347,6 +347,81 @@ def test_load_rejects_malformed_or_non_finite_text(text):
         load(text)
 
 
+def _unsealed(kind, change):
+    """Manifiesto alterado SIN recalcular la huella (un valor sin forma canónica no se puede sellar)."""
+    body = _body(manifests()[kind])
+    change(body)
+    return {**body, "manifest_sha256": manifests()[kind]["manifest_sha256"]}
+
+
+@pytest.mark.parametrize("not_an_object", [[], None, "{}", 1, [manifests()["B0"]]], ids=["list", "null", "text", "number", "wrapped"])
+def test_a_manifest_that_is_not_an_object_is_a_manifest_error(not_an_object):
+    for check in (verify_manifest, validate, FrozenModel):
+        with pytest.raises(ManifestError, match="no es un objeto"):
+            check(not_an_object)
+    with pytest.raises(ManifestError, match="no es un objeto"):
+        load(json.dumps(not_an_object))
+
+
+@pytest.mark.parametrize("change, message", [
+    (_set(("params", "probs"), [float("nan"), 0.5, 0.5]), "float no finito"), (_set(("params", "probs"), [float("inf"), 0, 0]), "float no finito"),
+    (_set(("params", "probs"), [float("-inf"), 1, 1]), "float no finito"), (_set(("hyperparameters", "x"), float("nan")), "float no finito"),
+    (_set(("frozen_at",), datetime(2027, 1, 1)), "instante sin zona horaria"), (_set(("dependencies",), {1, 2}), "forma canónica"),
+], ids=["nan", "inf", "-inf", "nan-outside-params", "naive-instant", "unsupported-type"])
+def test_manifest_content_without_canonical_form_is_a_manifest_error(change, message):
+    bad = _unsealed("B0", change)
+    for check in (verify_manifest, validate, FrozenModel):
+        with pytest.raises(ManifestError, match=message) as caught:
+            check(bad)
+        assert "forma canónica" in str(caught.value)
+
+
+@pytest.mark.parametrize("text", ['{"params": {"probs": [NaN, 0.5, 0.5]}}', '{"x": Infinity}', '{"x": -Infinity}'], ids=["nan", "infinity", "-infinity"])
+def test_load_reports_non_finite_text_as_a_manifest_error(text):
+    with pytest.raises(ManifestError, match="float no finito"):
+        load(text)
+
+
+B2_PARAMS = ["numeric_columns", "flag_columns", "competitions", "imputer_medians", "scaler_mean", "scaler_scale", "model_classes", "coef", "intercept"]
+
+
+@pytest.mark.parametrize("kind, key", [("B0", "probs"), ("B1", "base"), ("B1", "by_competition"), *(("B2", key) for key in B2_PARAMS)],
+                         ids=lambda v: v)
+def test_validate_reports_each_missing_parameter(kind, key):
+    incomplete = _resealed(kind, lambda m: m["params"].pop(key))
+    verify_manifest(incomplete)  # la huella es correcta: lo que falta es el parámetro
+    with pytest.raises(ManifestError, match=f"falta params.{key}$"):
+        validate(incomplete)
+    with pytest.raises(ManifestError, match=f"falta params.{key}$"):
+        load(canonical_json(incomplete))
+
+
+@pytest.mark.parametrize("kind, change, message", [
+    ("B0", _set(("params",), []), "params: se esperaba un objeto"), ("B1", _set(("params",), None), "params: se esperaba un objeto"),
+    ("B2", _set(("params",), "coef"), "params: se esperaba un objeto"),
+    ("B1", _set(("params", "by_competition"), [[0.5, 0.25, 0.25]]), "by_competition: se esperaba un objeto"),
+    ("B1", _set(("params", "by_competition"), None), "by_competition: se esperaba un objeto"),
+    ("B1", _set(("params", "by_competition", "abc"), [0.5, 0.25, 0.25]), "competición no válida"),
+    ("B1", _set(("params", "by_competition", "1.5"), [0.5, 0.25, 0.25]), "competición no válida"),
+    ("B2", _set(("params", "numeric_columns"), 2), "numeric_columns: se esperaba una lista"),
+    ("B2", _set(("params", "flag_columns"), None), "flag_columns: se esperaba una lista"),
+    ("B2", _set(("params", "competitions"), None), "competitions: se esperaba una lista"),
+    ("B2", _set(("params", "imputer_medians"), None), "imputer_medians: se esperaba una lista"),
+    ("B2", _set(("params", "scaler_mean"), 10.0), "scaler_mean: se esperaba una lista"),
+    ("B2", _set(("params", "scaler_scale"), None), "scaler_scale: se esperaba una lista"),
+    ("B2", _set(("params", "coef"), None), "coef: se esperaba una lista"), ("B2", _set(("params", "coef", 1), None), "coef: se esperaba una lista"),
+    ("B2", _set(("params", "coef", 1), 5), "coef: se esperaba una lista"), ("B2", _set(("params", "intercept"), None), "intercept: se esperaba una lista"),
+], ids=["params-list", "params-null", "params-text", "by-competition-list", "by-competition-null", "competition-text", "competition-decimal",
+        "numeric-number", "flags-null", "competitions-null", "medians-null", "mean-number", "scale-null", "coef-null", "coef-row-null",
+        "coef-row-number", "intercept-null"])
+def test_validate_reports_malformed_parameter_structures(kind, change, message):
+    bad = _resealed(kind, change)
+    with pytest.raises(ManifestError, match=message):
+        validate(bad)
+    with pytest.raises(ManifestError, match=message):
+        FrozenModel(bad)
+
+
 def test_frozen_model_predictions_are_deterministic_copies():
     ms = models()
     row = {"competition_id": 1, "home_shots_total_for": 14.0, "away_shots_total_for": 9.0,
@@ -541,6 +616,46 @@ def test_registry_with_an_unreadable_line_cannot_be_read_or_extended(tmp_path, t
     with pytest.raises(ValueError):  # json.JSONDecodeError: la línea rota no se ignora
         reg.records()
     with pytest.raises(ValueError):
+        reg.append(_rec(50))
+    assert reg.path.read_bytes() == damaged
+
+
+def _rechained(records, change):
+    """Copia de la cadena con un cambio en el registro 1 y todos los hashes recalculados."""
+    copy = json.loads(json.dumps(records))
+    change(copy[1])
+    return _rechain(copy)
+
+
+MALFORMED_CHAINS = {
+    "record-is-text": (lambda r: r[:1] + ["x"] + r[2:], "posición 1: el registro no es un objeto"),
+    "record-is-null": (lambda r: [None], "posición 0: el registro no es un objeto"),
+    "record-is-list": (lambda r: r[:2] + [list(r[2].items())], "posición 2: el registro no es un objeto"),
+    "no-prediction-id": (lambda r: _rechained(r, lambda rec: rec.pop("prediction_id")), "seq 1: registro sin prediction_id"),
+    "unhashable-prediction-id": (lambda r: _rechained(r, lambda rec: rec.update(prediction_id=["p1"])), "seq 1: prediction_id no válido"),
+    "non-finite-value": (lambda r: r[:1] + [{**r[1], "x": float("nan")}] + r[2:], "seq 1: registro modificado"),
+    "non-finite-value-without-hash": (lambda r: r[:1] + [{k: v for k, v in {**r[1], "x": float("inf")}.items() if k != "record_hash"}], "seq 1: registro modificado"),
+}
+
+
+@pytest.mark.parametrize("name", MALFORMED_CHAINS)
+def test_verify_reports_malformed_records_as_registry_errors(tmp_path, name):
+    damage, message = MALFORMED_CHAINS[name]
+    recs = damage(_chain(tmp_path, 3).records())
+    with pytest.raises(RegistryError, match=message):
+        verify(recs)
+    # y la evaluación falla cerrada en vez de romperse: una cadena malformada no es válida ni evaluable
+    status = evaluation.registry_status(recs, [], ALWAYS)
+    assert (status["CHAIN_VALID"], status["EVALUATION_ELIGIBLE"]) == (False, False) and message in status["problems"][0]
+    with pytest.raises(RegistryError, match=message):
+        evaluation.classify([], recs, [], {}, ALWAYS)
+
+
+def test_registry_file_with_a_non_finite_value_cannot_be_extended(tmp_path):
+    reg = _chain(tmp_path, 2)
+    damaged = reg.path.read_bytes() + b'{"kind":"prediction","prediction_id":"p9","prev_hash":"x","seq":2,"x":NaN}\n'  # json.loads lo admite
+    reg.path.write_bytes(damaged)
+    with pytest.raises(RegistryError, match="seq 2: prev_hash no enlaza"):
         reg.append(_rec(50))
     assert reg.path.read_bytes() == damaged
 

@@ -27,8 +27,14 @@ def seal(manifest: dict) -> dict:
 
 
 def verify(manifest: dict) -> None:
+    if not isinstance(manifest, dict):
+        raise ManifestError("el manifiesto no es un objeto")
     body = {k: v for k, v in manifest.items() if k != "manifest_sha256"}
-    if manifest.get("manifest_sha256") != sha256_hex(body):
+    try:
+        expected = sha256_hex(body)
+    except (TypeError, ValueError) as exc:  # float no finito, instante sin zona o tipo sin forma canónica
+        raise ManifestError(f"el manifiesto no tiene forma canónica: {exc}") from exc
+    if manifest.get("manifest_sha256") != expected:
         raise ManifestError("la huella del manifiesto no coincide")
 
 
@@ -44,6 +50,19 @@ def _probs(p, what):
     return [float(v) for v in p]
 
 
+def _param(p, key):
+    if key not in p:
+        raise ManifestError(f"falta params.{key}")
+    return p[key]
+
+
+def _len(v, what):
+    try:
+        return len(v)
+    except TypeError:
+        raise ManifestError(f"{what}: se esperaba una lista") from None
+
+
 def validate(manifest: dict) -> None:
     """Forma completa (tipos, longitudes, clases) y huella. Lanza ManifestError."""
     verify(manifest)
@@ -56,22 +75,32 @@ def validate(manifest: dict) -> None:
     if manifest["feature_contract"] != FEATURE_CONTRACT or manifest["classes"] != list(CLASSES):
         raise ManifestError("contrato de features o clases inesperados")
     p = manifest["params"]
+    if not isinstance(p, dict):
+        raise ManifestError("params: se esperaba un objeto")
     kind = manifest["model_kind"]
     if kind == "B0":
-        _probs(p["probs"], "B0")
+        _probs(_param(p, "probs"), "B0")
     elif kind == "B1":
-        _probs(p["base"], "B1 base")
-        for comp, probs in p["by_competition"].items():
-            int(comp)
+        _probs(_param(p, "base"), "B1 base")
+        by_competition = _param(p, "by_competition")
+        if not isinstance(by_competition, dict):
+            raise ManifestError("B1 by_competition: se esperaba un objeto")
+        for comp, probs in by_competition.items():
+            try:
+                int(comp)
+            except (TypeError, ValueError):
+                raise ManifestError(f"B1 {comp!r}: competición no válida") from None
             _probs(probs, f"B1 {comp}")
     else:
-        numeric, flags, comps = p["numeric_columns"], p["flag_columns"], p["competitions"]
-        if len(p["imputer_medians"]) != len(numeric) or len(p["scaler_mean"]) != len(numeric) or len(p["scaler_scale"]) != len(numeric):
+        numeric, flags, comps, medians, mean, scale, model_classes, coef, intercept = (_param(p, key) for key in (
+            "numeric_columns", "flag_columns", "competitions", "imputer_medians", "scaler_mean", "scaler_scale", "model_classes", "coef", "intercept"))
+        n = _len(numeric, "numeric_columns")
+        if _len(medians, "imputer_medians") != n or _len(mean, "scaler_mean") != n or _len(scale, "scaler_scale") != n:
             raise ManifestError("imputador o escalador no cuadran con las columnas")
-        width = len(numeric) + len(flags) + len(comps)
-        if p["model_classes"] != sorted(CLASSES) or len(p["coef"]) != 3 or any(len(row) != width for row in p["coef"]) or len(p["intercept"]) != 3:
+        width = n + _len(flags, "flag_columns") + _len(comps, "competitions")
+        if model_classes != sorted(CLASSES) or _len(coef, "coef") != 3 or any(_len(row, "coef") != width for row in coef) or _len(intercept, "intercept") != 3:
             raise ManifestError("coeficientes con forma inesperada")
-        for v in (*p["imputer_medians"], *p["scaler_mean"], *p["scaler_scale"], *p["intercept"], *(c for row in p["coef"] for c in row)):
+        for v in (*medians, *mean, *scale, *intercept, *(c for row in coef for c in row)):
             _num(v, "parámetro")
 
 

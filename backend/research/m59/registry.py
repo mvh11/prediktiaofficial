@@ -64,14 +64,26 @@ def verify(records: list[dict]) -> list[dict]:
     prediction_id únicos. Devuelve los registros si todo está bien; si no, RegistryError."""
     prev, seen = GENESIS, set()
     for i, rec in enumerate(records):
+        if not isinstance(rec, dict):
+            raise RegistryError(f"posición {i}: el registro no es un objeto")
         if rec.get("seq") != i:
             raise RegistryError(f"seq {rec.get('seq')} en la posición {i}: eliminado o reordenado")
         if rec.get("prev_hash") != prev:
             raise RegistryError(f"seq {i}: prev_hash no enlaza")
         body = {k: v for k, v in rec.items() if k != "record_hash"}
-        if rec.get("record_hash") != sha256_hex(body):
+        try:
+            expected = sha256_hex(body)
+        except (TypeError, ValueError):  # contenido sin forma canónica: no lo escribió append
+            raise RegistryError(f"seq {i}: registro modificado") from None
+        if rec.get("record_hash") != expected:
             raise RegistryError(f"seq {i}: registro modificado")
-        if rec["prediction_id"] in seen:
+        if "prediction_id" not in rec:
+            raise RegistryError(f"seq {i}: registro sin prediction_id")
+        try:
+            duplicate = rec["prediction_id"] in seen
+        except TypeError:
+            raise RegistryError(f"seq {i}: prediction_id no válido") from None
+        if duplicate:
             raise RegistryError(f"seq {i}: prediction_id duplicado")
         seen.add(rec["prediction_id"])
         prev = rec["record_hash"]
