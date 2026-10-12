@@ -61,6 +61,15 @@
 - **Contrato A6:** `app/`, `alembic/`, `tests/`, `tools/` y los workflows `ops-*` sin archivos modificados ni borrados respecto de `1c06ef9`. `upsert_fixtures` exige `FixtureEvidence` y solo lo llaman `fixture_sync_service` y `history_backfill_service`.
 - **Tests:** suite completa 1472 passed, 0 skipped (PostgreSQL local desechable); research 13 passed.
 
+**Cierre de integración MOD-PAR-010 (2026-10-11; `integration/a6-main-compat`, local; sin integrar en `main` ni desplegar):**
+
+- **HEAD final:** `46bd881b36201146a5f67fb6c438caf5214989e4`. Dos cherry-picks sobre `d3f2bec`, 0 conflictos; solo archivos nuevos bajo `backend/research/` (5 archivos, +996).
+- **Paquete de SECONDARY_MODULAR:** origen `37911f402f01e4d61d315b8b21d36f8e54112555`, integrado como `bc4f0f0`. Diagnósticos agregados de disponibilidad (`backend/research/stat_quality_independent/` y sus tests).
+- **Paquete de PRIMARY_MODULAR:** origen `abb2fdb78120251cd3a7f6a23d48cc6eb5b7bd05`, integrado como `46bd881`. Tests de regresión de contratos de M5.9B (`backend/research/tests/test_m59_contracts.py`).
+- **Validación (en `46bd881`):** `backend/research/stat_quality_independent_tests` 24 passed; `backend/research/tests` 254 passed (venv de investigación, `DATABASE_URL` ficticia e inalcanzable, sin conexión a BD). La suite completa no se ha reejecutado en este HEAD.
+- **Límites operativos:** sin cambios de esquema, sin migraciones, sin peticiones a proveedores, sin operaciones de base de datos, sin activación en producción.
+- **Seguimientos pendientes de revisión:** normalización UTC de identidad; validación de probabilidades; contrato de errores; semántica de reintentos tardíos; aislamiento del entorno de tests de research.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
