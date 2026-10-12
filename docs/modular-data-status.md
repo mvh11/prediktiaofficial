@@ -165,6 +165,20 @@
 - **Pendiente (diferido, NO resuelto):** comportamiento de `make_statement` ante una cabeza malformada; endurecimiento de la identidad en el registro; consistencia de los metadatos históricos; límites de concurrencia e idempotencia con varios escritores; artefactos históricos externos y sus consumidores; cobertura de la suite completa del backend; los riesgos previos a la activación de M5.9B ya documentados arriba.
 - **Gobierno:** sin cambios en Data Integrity; sin esquemas ni migraciones; sin push ni promoción a `main`; sin activación de producción ni del scheduler.
 
+**Cierre de integración M5.10A-INTEGRATION-001 (2026-10-12; cierre documental M5.10A-DOC-CLOSURE-001; `integration/a6-main-compat`, local; sin integrar en `main` ni desplegar):**
+
+- **Alcance:** integración local de M5.10A, la base SINTÉTICA de replicación offline de B0/B1/B2.
+- **Tareas:** MOD-PAR-048 (implementación sintética completada), MOD-PAR-051 (verificación focalizada completada), M5.10A-INTEGRATION-001 (integración local completada) y M5.10A-DOC-CLOSURE-001 (este cierre, solo documental: ni implementación ni integración).
+- **Decisión departamental:** integración local aceptada (MODULAR_PRINCIPAL). La aceptación de la integración local NO es que esté lista para producción.
+- **Coordinación:** referencia `INTEG-MOD-M510A-CLEAR-CONDITIONAL` para la integración, según lo comunicado por MODULAR_PRINCIPAL (sin registro previo en el repositorio; sus condiciones no constan aquí).
+- **Trazabilidad:** base `fedb1f420fe540b98526f0f38b899607b491a294`; origen (implementación) `2fe013e0a4fca59862905d6f212c620a58d12d40`, integrado como `3dfb6902ae994a3a82c321bd93bee6160a268440` (HEAD antes de esta entrada documental). Un cherry-pick, 0 conflictos.
+- **Archivos añadidos (ninguno existente modificado):** `backend/research/m510a/__init__.py`, `rows.py`, `config.py`, `evaluate.py` y `report.py`; `backend/research/tests/test_m510a_replication.py` y `backend/research/tests/test_m510a_fitted_models.py`.
+- **Evidencia (MOD-PAR-051; mismos resultados en la integración sobre `3dfb690`; no se ha vuelto a ejecutar en este cierre):** `test_m510a_replication.py` 130 passed; `test_m510a_fitted_models.py` 2 passed; en total 132 passed, 0 failed, 0 skipped. Solo esos dos archivos: el resto de `research/tests` y la suite completa del backend NO se han ejecutado sobre este commit.
+- **Qué aporta M5.10A:** una base de replicación offline solo sintética; identidad determinista del dataset; identidad determinista de la configuración; evaluación desde manifiestos congelados, sin ajustar nada; generación reproducible del informe comparativo; carga útil idéntica byte a byte entre ejecuciones, verificada en el entorno probado (no se afirma equivalencia entre plataformas); huella del informe sin autorreferencia; separación entre la carga útil que se huella y los metadatos operativos.
+- **M5.10A NO DEMUESTRA:** rendimiento predictivo real; ausencia de fuga de información histórica; ventaja en apuestas; que esté listo para producción.
+- **Pendiente (NO resuelto):** la evaluación histórica; la integración de un dataset histórico real; los contratos con Data Integrity. No ha habido activación de producción.
+- **Gobierno:** cierre solo documental; no está listo para producción; sin cambios en Data Integrity; sin esquemas ni migraciones; sin activación de producción ni del scheduler; sin promoción a `main`; sin push.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
