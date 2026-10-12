@@ -14,7 +14,7 @@ Contrato temporal (M5.9A):
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from app.schemas.prematch_features import FeatureStatus, SampleStatus, TeamRecentForm
 from app.services.prematch_features import fingerprint
@@ -41,6 +41,12 @@ class FixtureFact:
     home_team_id: int | None = None
     away_team_id: int | None = None
     competition_id: int | None = None
+
+
+def _cutoff_iso(cutoff: datetime) -> str:
+    """T en ISO-8601 UTC para la identidad: el mismo instante da el mismo prediction_id sea cual sea
+    su desplazamiento. Un instante sin zona se deja tal cual: nunca se le supone la hora local."""
+    return (cutoff if cutoff.utcoffset() is None else cutoff.astimezone(timezone.utc)).isoformat()
 
 
 class Emitter:
@@ -77,7 +83,7 @@ class Emitter:
             return self._no_emission(fixture_id, LATE, now, cutoff, fact)
         if None in (fact.home_team_id, fact.away_team_id, fact.competition_id):
             return self._no_emission(fixture_id, IDENTITY_INVALID, now, cutoff, fact)
-        pid = prediction_id(self.model_set_sha, fixture_id, cutoff.isoformat())
+        pid = prediction_id(self.model_set_sha, fixture_id, _cutoff_iso(cutoff))
         for rec in self.registry.records():  # reinicio / duplicado: la primera emisión manda
             if rec["prediction_id"] == pid:
                 return rec

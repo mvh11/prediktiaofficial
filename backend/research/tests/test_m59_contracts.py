@@ -21,6 +21,7 @@ from sqlalchemy import event  # noqa: E402
 from app.schemas.prematch_features import FORM_METRICS, FeatureStatus, MetricSide, MetricValue, SampleStatus, TeamRecentForm, WindowMatch  # noqa: E402
 from app.schemas.statistics_knowledge import KnowledgeRegime, StatisticsProvenance  # noqa: E402
 from research.m59 import anchors, evaluation  # noqa: E402
+from research.m59 import emitter as emitter_module  # noqa: E402
 from research.m59.canonical import canonical_json, sha256_hex  # noqa: E402
 from research.m59.emitter import (AMBIGUOUS_TEAM_HISTORY, FIXTURE_AMBIGUOUS, FIXTURE_UNKNOWN, IDENTITY_INVALID, LATE, Emitter,  # noqa: E402
                                   FixtureFact)
@@ -837,3 +838,71 @@ def test_changed_kickoff_is_a_new_identity_and_the_first_emission_stays_binding(
     universe = [{"fixture_id": 1, "competition_id": 1, "final_kickoff": K + timedelta(days=1)}]
     entry = evaluation.classify(universe, records, [anchor], {1: "H"}, ALWAYS)[0]
     assert entry["prediction"] == first and entry["postponed"] and entry["class"] == "INFORMATIVE"
+
+
+# --- 7. Identidad de predicción: T en UTC sea cual sea el desplazamiento del kickoff --------------
+
+# valores fijados con el kickoff en UTC antes de normalizar: las identidades UTC existentes no cambian
+PINNED_MODEL_SET = "70e0b727f10eb2542114c259073ac58b3f351771a708e854bbd15300ebb1c858"
+PINNED_PREDICTION_ID = "a29dcfc2542979a191847bb3f6e214bd8ca7166d60fefef2b26e3e8ac6fc8ece"
+PINNED_RECORD_HASH = "ddbb63c9d46faa901a96e41580560ca51c6536c260869a6d2ae24778a1cd68a1"
+PINNED_STATEMENT = "22d07d4e1da4f500b9c6f5d31f821a56fa9093f0d82f1371f27390cf2c9cd146"
+OFFSETS = [UTC, timezone(timedelta(hours=2)), timezone(timedelta(hours=-5)), timezone(timedelta(hours=5, minutes=30)), timezone(timedelta(hours=14))]
+OFFSET_IDS = ["utc", "+02:00", "-05:00", "+05:30", "+14:00-next-day"]
+
+
+def _world_with_kickoff(kickoff_at):
+    w = World()
+    w.know(1, K - timedelta(days=30), kickoff_at=kickoff_at, home_team_id=10, away_team_id=20, competition_id=1)
+    return w
+
+
+@pytest.mark.parametrize("tz", OFFSETS, ids=OFFSET_IDS)
+def test_prediction_identity_does_not_depend_on_the_kickoff_offset(reg, tz):
+    emitter = _world_with_kickoff(K.astimezone(tz)).emitter(reg)
+    rec = emitter.emit(1)
+    assert emitter.model_set_sha == PINNED_MODEL_SET
+    assert rec["prediction_id"] == PINNED_PREDICTION_ID == prediction_id(PINNED_MODEL_SET, 1, "2027-03-06T17:00:00+00:00")
+    assert (rec["T"], rec["kickoff_known"]) == (T.isoformat(), K.isoformat())
+    # el mismo instante da el mismo registro, la misma cadena y la misma declaración que con el kickoff en UTC
+    assert rec["record_hash"] == PINNED_RECORD_HASH and verify(reg.records()) == [rec]
+    assert anchors.make_statement(reg.records())["statement_sha256"] == PINNED_STATEMENT
+
+
+@pytest.mark.parametrize("tz", OFFSETS[1:], ids=OFFSET_IDS[1:])
+def test_restating_the_same_kickoff_in_another_offset_is_the_same_prediction(reg, world, tz):
+    first = world.emitter(reg).emit(1)
+    before = reg.path.read_bytes()
+    calls = len(world.form_calls)
+    world.know(1, K - timedelta(hours=2, minutes=45), kickoff_at=K.astimezone(tz), home_team_id=10, away_team_id=20, competition_id=1)
+    world.now += timedelta(minutes=30)  # el mismo K, reexpresado: no es una identidad nueva
+    assert world.emitter(reg).emit(1) == first and reg.path.read_bytes() == before and len(world.form_calls) == calls
+
+
+def test_different_instants_keep_different_identities_whatever_their_offset(tmp_path):
+    same_wall_clock = K.replace(tzinfo=timezone(timedelta(hours=2)))  # 18:00+02:00 = 16:00 UTC: otro instante
+    rec = _world_with_kickoff(same_wall_clock).emitter(Registry(tmp_path / "r.jsonl")).emit(1)
+    assert rec["prediction_id"] == prediction_id(PINNED_MODEL_SET, 1, "2027-03-06T15:00:00+00:00") != PINNED_PREDICTION_ID
+    assert rec["T"] == "2027-03-06T15:00:00+00:00"
+
+
+def test_naive_kickoff_is_still_refused_and_never_read_as_local_time(reg):
+    w = _world_with_kickoff(datetime(2027, 3, 6, 18, 0))
+    with pytest.raises(TypeError):  # como antes: un instante sin zona no se puede comparar con el reloj
+        w.emitter(reg).emit(1)
+    assert reg.records() == [] and w.form_calls == []
+    # y la identidad no le supone zona alguna: ni la local de la máquina ni UTC
+    assert emitter_module._cutoff_iso(datetime(2027, 3, 6, 17, 0)) == "2027-03-06T17:00:00"
+
+
+@pytest.mark.parametrize("tz", OFFSETS, ids=OFFSET_IDS)
+def test_no_emission_records_do_not_depend_on_the_kickoff_offset(reg, tz):
+    w = _world_with_kickoff(K.astimezone(tz))
+    w.now = K - timedelta(minutes=30)
+    late = w.emitter(reg).emit(1)
+    assert (late["kind"], late["reason"], late["T"], late["kickoff_known"]) == ("no_emission", LATE, T.isoformat(), K.isoformat())
+    assert late["prediction_id"] == "ed917567d9dc080b7b7fd30fb7f25cd126728bf610c59b08cbb88a7eab7e0dd4"
+    assert late["record_hash"] == "b77467d8e9f72329403104be33faacf17cc6cf4fe081f0dcc91a26105a559a26"
+    unknown = w.emitter(reg).emit(2)
+    assert (unknown["reason"], unknown["T"], unknown["prev_hash"]) == (FIXTURE_UNKNOWN, None, late["record_hash"])
+    assert verify(reg.records()) == [late, unknown]
