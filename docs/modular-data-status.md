@@ -70,6 +70,18 @@
 - **Límites operativos:** sin cambios de esquema, sin migraciones, sin peticiones a proveedores, sin operaciones de base de datos, sin activación en producción.
 - **Seguimientos pendientes de revisión:** normalización UTC de identidad; validación de probabilidades; contrato de errores; semántica de reintentos tardíos; aislamiento del entorno de tests de research.
 
+**Cierre de integración MOD-PAR-015 (2026-10-12; cierre documental MOD-PAR-017; `integration/a6-main-compat`, local; sin integrar en `main` ni desplegar):**
+
+- **Decisión departamental:** `MOD-PAR-015 ACCEPTED` (MODULAR_PRINCIPAL). Integración aceptada en local; NO lista para producción.
+- **Coordinación:** resultado `CLEAR`, referencia `INTEG-MOD-M59B-013-014-001`.
+- **Evidencia de gobierno:** la resolución de coordinación en Slack asociada a esa referencia y la autorización y aceptación explícitas de MODULAR_PRINCIPAL. Ninguna de las dos constaba en el repositorio antes de la ejecución. Enlace o identificador del mensaje de Slack: pendiente de verificación (no disponible ni verificado al redactar esta entrada).
+- **Base y HEAD:** base `cd80fcf064fe424266d480ab3b6e7bb7c3a0bcf0`; HEAD antes de esta entrada documental `c833af9ea00a233be8a293b7e35e6caaf8d69663`. Dos cherry-picks en orden, 0 conflictos; 4 archivos bajo `backend/research/` (+311/−1).
+- **MOD-PAR-014, diagnósticos de disponibilidad agrupados:** origen `5686617a6556a970c905eb4ee8e6c9fdffa6cc79`, integrado como `ea42e95ab1fb993df07469406e58dd79c56ac907`. Archivos nuevos `backend/research/stat_quality_independent/grouped_availability.py` y su test.
+- **MOD-PAR-013, endurecimiento de la validación de probabilidades de M5.9B:** origen `36459cf93688f92b17a97baa6525167180c33e85`, integrado como `c833af9ea00a233be8a293b7e35e6caaf8d69663`. Modifica `backend/research/m59/manifest.py` y `backend/research/tests/test_m59_contracts.py`.
+- **Validación (en `c833af9`):** `backend/research/tests` 303 passed; `backend/research/stat_quality_independent_tests` 57 passed; en total 360 passed (venv de investigación, `DATABASE_URL` ficticia e inalcanzable, `TEST_DATABASE_URL` sin definir, sin conexión a BD). Suite completa del backend: NO EJECUTADA.
+- **Límites operativos:** sin operaciones de base de datos, sin peticiones a proveedores, sin migraciones, sin activación en producción, sin push, sin promoción a `main`.
+- **Pendiente:** la corrección UTC de identidad sigue en `WAIT` y se sigue por separado; la suite completa del backend no se ha ejecutado todavía.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
