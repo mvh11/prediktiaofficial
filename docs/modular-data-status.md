@@ -122,6 +122,19 @@
 - **Riesgos no resueltos:** (1) las contradicciones entre los metadatos históricos y actuales de equipos y competición no se pueden detectar del todo; (2) reutilizar solo por clave lógica cuando los metadatos se contradicen es el comportamiento de compatibilidad existente, NO una prueba de corrección semántica; (3) no hay garantía atómica con varios escritores concurrentes; (4) al reutilizar una decisión terminal no se hace ninguna verificación adicional de la cadena de hashes; (5) los registros históricos externos y sus consumidores siguen `UNVERIFIED`; (6) la suite completa del backend sigue pendiente.
 - **Gobierno:** sin cambios de esquema ni migraciones; sin cambios en Data Integrity ni en el feed compartido; sin activación de producción ni del scheduler; sin push ni promoción a `main`.
 
+**Cierre de integración MOD-PAR-035 (2026-10-12; cierre documental MOD-PAR-036; `integration/a6-main-compat`, local; sin integrar en `main` ni desplegar):**
+
+- **Tareas:** MOD-PAR-032 (endurecimiento de errores de anclajes de M5.9B), MOD-PAR-034 (verificación estructural independiente, de solo lectura), MOD-PAR-035 (integración local) y MOD-PAR-036 (este cierre, solo documental).
+- **Decisión departamental:** MOD-PAR-032 aceptada; MOD-PAR-034 aceptada; MOD-PAR-035 aceptada como integración local (MODULAR_PRINCIPAL). NO lista para producción.
+- **Coordinación:** resultado `CLEAR`, referencia `INTEG-MOD-M59B-ANCHOR-032-001`, según lo comunicado por MODULAR_PRINCIPAL (sin registro previo en el repositorio).
+- **Trazabilidad:** base `51c1ba58140d8ec9a83410434fafe0f45d553307`; origen (MOD-PAR-032) `26d2239787da84e26cf7d265e4535aeedb63eb3d`, integrado (MOD-PAR-035) como `621224b5bc0b1881add1c8a1dd1c71808c78107a` (HEAD antes de esta entrada documental). Un cherry-pick, 0 conflictos.
+- **Archivos modificados:** `backend/research/m59/anchors.py`, `backend/research/m59/evaluation.py` y `backend/research/tests/test_m59_contracts.py`.
+- **Validación integrada (en `621224b`):** `backend/research/tests` 448 passed; `backend/research/stat_quality_independent_tests` 57 passed; `backend/tests/test_research_m59.py` 23 passed y 1 skipped; en total 528 passed, 1 skipped, 0 failed, sobre tres rutas distintas (venv de investigación, `DATABASE_URL` ficticia e inalcanzable, sin conexión a BD). El test saltado es el que depende de la BD: `TEST_DATABASE_URL` estaba sin definir. Suite completa del backend: NO EJECUTADA.
+- **Correcciones aceptadas:** una autoridad de anclaje malformada lanza `AnchorError`; un anclaje que no es un objeto lanza `AnchorError`; un `record_hash` referenciado no válido falla cerrado; `evaluation.registry_status` trata esa evidencia malformada sin romperse. Se conserva la compatibilidad de `RegistryError`, y los anclajes válidos existentes y los hashes fijados no cambian.
+- **Gobierno del proceso:** el incumplimiento original del STOP de preflight en MOD-PAR-032 sigue registrado, según lo comunicado por MODULAR_PRINCIPAL. MOD-PAR-034 verificó de forma independiente la estructura del commit, no los tests. El preflight de la integración MOD-PAR-035 se informó como PASS.
+- **Pendiente (diferido, NO resuelto):** excepciones de `make_statement` ante entradas malformadas; entradas de verificación del registro que no son listas; validación de B2; endurecimiento de la identidad en el registro; los riesgos previos a la activación de M5.9B ya documentados arriba.
+- **Gobierno:** sin reescritura de registros históricos ni de hashes; sin cambios en Data Integrity ni de esquema; sin push ni promoción a `main`; sin activación de producción ni del scheduler.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
