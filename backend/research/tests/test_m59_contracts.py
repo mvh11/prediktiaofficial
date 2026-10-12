@@ -1021,3 +1021,151 @@ def test_no_emission_records_do_not_depend_on_the_kickoff_offset(reg, tz):
     unknown = w.emitter(reg).emit(2)
     assert (unknown["reason"], unknown["T"], unknown["prev_hash"]) == (FIXTURE_UNKNOWN, None, late["record_hash"])
     assert verify(reg.records()) == [late, unknown]
+
+
+# --- 8. Decisiones terminales de (modelos, partido, T): reintentos secuenciales de un solo escritor -
+
+PINNED_LATE_ID = "ed917567d9dc080b7b7fd30fb7f25cd126728bf610c59b08cbb88a7eab7e0dd4"  # LATE en K − 30 min (sección 7)
+AFTER_T = [T + MICRO, K - timedelta(minutes=30), K, K + timedelta(days=2)]
+BEFORE_T = [K - timedelta(days=7), K - timedelta(hours=2), T]
+
+
+def _retry(world, registry, at):
+    """Reintento en `at`: devuelve el registro y comprueba que el archivo no cambia ni se recalcula nada."""
+    before, calls = registry.path.read_bytes(), len(world.form_calls)
+    world.now = at
+    rec = world.emitter(registry).emit(1)
+    assert registry.path.read_bytes() == before and len(world.form_calls) == calls
+    return rec
+
+
+def _body_of(record):
+    """Lo que se le pasó a append: el registro sin los campos de la cadena."""
+    return {k: v for k, v in record.items() if k not in ("seq", "prev_hash", "record_hash")}
+
+
+def test_s1_prediction_is_reused_after_the_cutoff(reg, world):
+    first = world.emitter(reg).emit(1)
+    assert first["prediction_id"] == PINNED_PREDICTION_ID and first["record_hash"] == PINNED_RECORD_HASH
+    for at in AFTER_T:  # antes de este cambio, cada reintento tardío añadía un LATE
+        assert _retry(world, reg, at) == first
+    assert verify(reg.records()) == [first]
+
+
+def test_s3_repeated_late_retries_reuse_the_first_late_decision(reg, world):
+    world.now = K - timedelta(minutes=30)
+    late = world.emitter(reg).emit(1)
+    assert (late["kind"], late["reason"], late["T"], late["emitted_at"]) == ("no_emission", LATE, T.isoformat(), world.now.isoformat())
+    assert late["prediction_id"] == PINNED_LATE_ID  # el formato de identidad de la no emisión no cambia
+    for at in (K - timedelta(minutes=20), K - timedelta(minutes=30), *AFTER_T):
+        assert _retry(world, reg, at) == late
+    assert verify(reg.records()) == [late] and world.form_calls == []
+
+
+def test_s5_prediction_is_reused_before_and_after_the_cutoff(reg, world):
+    first = world.emitter(reg).emit(1)
+    for at in (*BEFORE_T, *AFTER_T, K - timedelta(hours=2)):  # antes, después y de vuelta antes de T
+        assert _retry(world, reg, at) == first
+    assert verify(reg.records()) == [first]
+
+
+def test_s9_late_decision_survives_a_clock_rewind(reg, world):
+    world.now = K - timedelta(minutes=30)
+    late = world.emitter(reg).emit(1)
+    for at in BEFORE_T:  # el reloj retrocede a antes de T: ya no se emite una predicción
+        assert _retry(world, reg, at) == late
+    assert [r["kind"] for r in verify(reg.records())] == ["no_emission"] and world.form_calls == []
+
+
+def test_late_from_a_computation_that_crossed_t_is_terminal_too(reg, world):
+    ticks = iter([T - timedelta(seconds=1), T + timedelta(seconds=1)])
+    late = world.emitter(reg, clock=lambda: next(ticks)).emit(1)
+    assert (late["reason"], late["emitted_at"]) == (LATE, (T + timedelta(seconds=1)).isoformat())
+    calls = len(world.form_calls)
+    world.now = K - timedelta(hours=2)
+    assert world.emitter(reg).emit(1) == late and reg.records() == [late] and len(world.form_calls) == calls
+
+
+@pytest.mark.parametrize("order", ["late-first", "prediction-first"])
+def test_prediction_takes_precedence_over_a_late_decision_for_the_same_key(tmp_path, reg, world, order):
+    # registro sintético con ambas decisiones (un registro anterior a este cambio podía contenerlas): se añaden, no se reescribe nada
+    prediction = _world_with_kickoff(K).emitter(Registry(tmp_path / "p.jsonl")).emit(1)
+    late_world = _world_with_kickoff(K)
+    late_world.now = K - timedelta(minutes=30)
+    late = late_world.emitter(Registry(tmp_path / "l.jsonl")).emit(1)
+    stored = [reg.append(_body_of(r)) for r in ((late, prediction) if order == "late-first" else (prediction, late))]
+    expected = next(r for r in stored if r["kind"] == "prediction")
+    for at in (*BEFORE_T, *AFTER_T):
+        assert _retry(world, reg, at) == expected
+    assert verify(reg.records()) == stored and expected["prediction_id"] == PINNED_PREDICTION_ID
+
+
+def test_non_late_refusals_stay_retryable(reg, world):
+    world.know(5, K - timedelta(days=2), kickoff_at=K, home_team_id=10, away_team_id=None, competition_id=1)
+    emitter = world.emitter(reg)
+    refused = emitter.emit(5)
+    assert (refused["reason"], refused["T"]) == (IDENTITY_INVALID, T.isoformat())  # tiene T, pero no es terminal
+    world.now += timedelta(minutes=10)
+    again = emitter.emit(5)
+    assert again["reason"] == IDENTITY_INVALID and again["prediction_id"] != refused["prediction_id"]
+    world.form_status = FeatureStatus.TARGET_UNKNOWN
+    world.now += timedelta(minutes=10)
+    world.know(5, world.now, kickoff_at=K, home_team_id=10, away_team_id=20, competition_id=1)
+    target = emitter.emit(5)
+    assert (target["reason"], target["seq"]) == (IDENTITY_INVALID, 2)
+    world.form_status = FeatureStatus.OK
+    world.now += timedelta(minutes=10)
+    rec = emitter.emit(5)  # corregida la identidad, se emite
+    assert rec["kind"] == "prediction" and [r["kind"] for r in verify(reg.records())] == ["no_emission"] * 3 + ["prediction"]
+
+
+@pytest.mark.parametrize("terminal_at", [K - timedelta(hours=3), K - timedelta(minutes=30)], ids=["prediction", "late"])
+def test_validation_still_runs_before_a_terminal_decision_is_reused(reg, world, terminal_at):
+    world.now = terminal_at
+    terminal = world.emitter(reg).emit(1)
+    before = reg.path.read_bytes()
+    with pytest.raises(ValueError, match="reloj sin zona horaria"):
+        world.emitter(reg, clock=lambda: datetime(2027, 3, 6, 15, 0)).emit(1)
+    for bad_kickoff in (datetime(2027, 3, 6, 18, 0), None):  # T no se puede reconstruir: ni se adivina ni se busca
+        world.facts[1].append((world.now, FixtureFact(status="KNOWN", known_at=world.now, kickoff_at=bad_kickoff, home_team_id=10, away_team_id=20, competition_id=1)))
+        with pytest.raises(TypeError):
+            world.emitter(reg).emit(1)
+        world.facts[1].pop()
+    assert reg.path.read_bytes() == before
+    for status, reason in (("UNKNOWN_AT_T", FIXTURE_UNKNOWN), ("TEMPORAL_AMBIGUITY", FIXTURE_AMBIGUOUS)):
+        world.now += timedelta(minutes=1)
+        world.facts[1].append((world.now, FixtureFact(status=status, kickoff_at=K)))
+        refused = world.emitter(reg).emit(1)  # sin conocimiento estricto no hay T: no se devuelve la decisión anterior
+        assert (refused["kind"], refused["reason"], refused["T"]) == ("no_emission", reason, None) and refused != terminal
+        world.facts[1].pop()
+    assert verify(reg.records())[0] == terminal and len(reg.records()) == 3
+    assert _retry(world, reg, world.now) == terminal  # de nuevo conocido: vuelve la decisión terminal
+
+
+def test_a_late_decision_binds_only_its_own_key(reg, world):
+    world.know(2, K - timedelta(days=30), kickoff_at=K, home_team_id=30, away_team_id=40, competition_id=1)
+    world.now = K - timedelta(minutes=30)
+    late = world.emitter(reg).emit(1)
+    other_fixture = world.emitter(reg).emit(2)  # otro partido, mismo T: su propia decisión
+    assert other_fixture["reason"] == LATE and other_fixture["prediction_id"] != late["prediction_id"]
+    world.now = K - timedelta(hours=2)
+    world.models = {**models(), "B0": FrozenModel(seal({**_meta("B0"), "hyperparameters": {}, "params": {"probs": [0.44, 0.27, 0.29]}}))}
+    other_models = world.emitter(reg).emit(1)  # otros modelos congelados: otra clave
+    assert other_models["kind"] == "prediction" and other_models["model_set_sha"] != late["model_set_sha"]
+    world.models = models()
+    world.know(1, world.now, kickoff_at=K + timedelta(days=1), home_team_id=10, away_team_id=20, competition_id=1)
+    postponed = world.emitter(reg).emit(1)  # otro kickoff -> otro T: otra clave
+    assert postponed["kind"] == "prediction" and postponed["T"] == (T + timedelta(days=1)).isoformat()
+    assert verify(reg.records()) == [late, other_fixture, other_models, postponed]
+
+
+@pytest.mark.parametrize("tz", OFFSETS[1:], ids=OFFSET_IDS[1:])
+@pytest.mark.parametrize("terminal_at", [K - timedelta(hours=3), K - timedelta(minutes=30)], ids=["prediction", "late"])
+def test_terminal_decisions_match_the_same_cutoff_in_any_offset(reg, world, terminal_at, tz):
+    world.now = terminal_at
+    terminal = world.emitter(reg).emit(1)
+    assert terminal["prediction_id"] in (PINNED_PREDICTION_ID, PINNED_LATE_ID)
+    world.know(1, terminal_at, kickoff_at=K.astimezone(tz), home_team_id=10, away_team_id=20, competition_id=1)  # el mismo K, reexpresado
+    for at in (K - timedelta(hours=2), K - timedelta(minutes=10)):
+        assert _retry(world, reg, at) == terminal
+    assert verify(reg.records()) == [terminal]

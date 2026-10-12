@@ -10,6 +10,9 @@ Contrato temporal (M5.9A):
   evidencia) -> no se emite. Ventanas sin muestras o historia ambigua -> se emiten B0/B1 marcados
   como DEGRADED y B2 queda en null (no se inventa).
 - Idempotente: si el prediction_id (modelos + partido + T) ya está registrado, no se recalcula.
+  Una predicción registrada se devuelve también pasado T; sin ella, el primer LATE de esos mismos
+  (modelos, partido, T) es definitivo y se reutiliza. Los demás motivos se pueden reintentar.
+  Solo para un único escritor secuencial: no hay exclusión entre procesos concurrentes.
 """
 
 from collections.abc import Callable
@@ -79,14 +82,22 @@ class Emitter:
         if fact.status == AMBIGUOUS:
             return self._no_emission(fixture_id, FIXTURE_AMBIGUOUS, now)
         cutoff = fact.kickoff_at - CUTOFF_BEFORE_KICKOFF
-        if now > cutoff:
+        late = now > cutoff  # un kickoff sin zona falla aquí: T no se adivina ni se busca en el registro
+        cutoff_iso = _cutoff_iso(cutoff)
+        pid = prediction_id(self.model_set_sha, fixture_id, cutoff_iso)
+        # Decisiones terminales de (modelos, partido, T), antes de mirar el reloj: no se repiten ni se duplican.
+        records = self.registry.records()
+        for rec in records:  # reinicio / duplicado: la primera emisión manda, también pasado T
+            if rec.get("kind") == "prediction" and rec["prediction_id"] == pid:
+                return rec
+        for rec in records:  # sin emisión previa, el primer LATE es definitivo aunque el reloj retroceda
+            if (rec.get("kind") == "no_emission" and rec.get("reason") == LATE and rec.get("model_set_sha") == self.model_set_sha
+                    and rec.get("fixture_id") == fixture_id and rec.get("T") == cutoff_iso):
+                return rec
+        if late:
             return self._no_emission(fixture_id, LATE, now, cutoff, fact)
         if None in (fact.home_team_id, fact.away_team_id, fact.competition_id):
             return self._no_emission(fixture_id, IDENTITY_INVALID, now, cutoff, fact)
-        pid = prediction_id(self.model_set_sha, fixture_id, _cutoff_iso(cutoff))
-        for rec in self.registry.records():  # reinicio / duplicado: la primera emisión manda
-            if rec["prediction_id"] == pid:
-                return rec
 
         forms = {side: self.form(team, fixture_id, horizon, horizon) for side, team in zip(SIDES, (fact.home_team_id, fact.away_team_id))}
         if any(f.status in _TARGET_FAILURES for f in forms.values()):
