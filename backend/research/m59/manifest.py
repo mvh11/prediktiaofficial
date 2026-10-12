@@ -94,6 +94,9 @@ def validate(manifest: dict) -> None:
     else:
         numeric, flags, comps, medians, mean, scale, model_classes, coef, intercept = (_param(p, key) for key in (
             "numeric_columns", "flag_columns", "competitions", "imputer_medians", "scaler_mean", "scaler_scale", "model_classes", "coef", "intercept"))
+        for name, value in (("numeric_columns", numeric), ("flag_columns", flags), ("competitions", comps)):
+            if not isinstance(value, list):  # ni texto, ni tupla, ni objeto: predict las recorre como listas
+                raise ManifestError(f"{name}: se esperaba una lista")
         n = _len(numeric, "numeric_columns")
         if _len(medians, "imputer_medians") != n or _len(mean, "scaler_mean") != n or _len(scale, "scaler_scale") != n:
             raise ManifestError("imputador o escalador no cuadran con las columnas")
@@ -102,6 +105,8 @@ def validate(manifest: dict) -> None:
             raise ManifestError("coeficientes con forma inesperada")
         for v in (*medians, *mean, *scale, *intercept, *(c for row in coef for c in row)):
             _num(v, "parámetro")
+        if any(v == 0 for v in scale):  # predict divide por la escala; el signo no se restringe
+            raise ManifestError("scaler_scale: escala nula")
 
 
 def load(text: str) -> dict:

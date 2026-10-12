@@ -422,6 +422,79 @@ def test_validate_reports_malformed_parameter_structures(kind, change, message):
         FrozenModel(bad)
 
 
+B2_ROW = {"competition_id": 1, "home_shots_total_for": 14.0, "away_shots_total_for": 9.0,
+          "home_shots_total_for_missing": False, "away_shots_total_for_missing": False}
+
+
+@pytest.mark.parametrize("zero", [0, 0.0, -0.0], ids=["int-zero", "zero", "negative-zero"])
+@pytest.mark.parametrize("position", [0, 1])
+def test_validate_rejects_a_zero_scaler_scale(position, zero):
+    bad = _resealed("B2", _set(("params", "scaler_scale", position), zero))
+    verify_manifest(bad)  # la huella es correcta: lo que no vale es la escala (predict dividiría por ella)
+    for check in (validate, FrozenModel, lambda m: load(canonical_json(m))):
+        with pytest.raises(ManifestError, match="scaler_scale: escala nula"):
+            check(bad)
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")], ids=["nan", "inf", "-inf"])
+@pytest.mark.parametrize("position", [0, 1])
+def test_validate_rejects_a_non_finite_scaler_scale(position, bad_value):
+    bad = _unsealed("B2", _set(("params", "scaler_scale", position), bad_value))  # sin forma canónica: no se puede sellar
+    for check in (validate, FrozenModel):
+        with pytest.raises(ManifestError, match="float no finito"):
+            check(bad)
+    with pytest.raises(ManifestError, match="float no finito"):
+        load(json.dumps(bad))  # json.dumps escribe NaN/Infinity y json.loads los admite: los detiene la validación
+
+
+@pytest.mark.parametrize("scale", [[3.0, 3.0], [3.0, -2.5], [-3.0, -3.0], [1e-300, 1e300], [1, -1]],
+                         ids=["positive", "mixed-sign", "negative", "extreme-magnitudes", "integers"])
+def test_finite_nonzero_scaler_scale_of_either_sign_stays_valid(scale):
+    ok = _resealed("B2", _set(("params", "scaler_scale"), scale))
+    validate(ok)
+    assert load(canonical_json(ok)) == ok
+    probs = FrozenModel(ok).predict(B2_ROW)
+    assert len(probs) == 3 and all(math.isfinite(p) and 0 <= p <= 1 for p in probs) and sum(probs) == pytest.approx(1)
+
+
+NOT_A_LIST = {
+    "numeric_columns": ["ab", ("home_shots_total_for", "away_shots_total_for"), {"home_shots_total_for": 0, "away_shots_total_for": 1}],
+    "flag_columns": ["ab", ("home_shots_total_for_missing", "away_shots_total_for_missing"), {"home_shots_total_for_missing": 0, "away_shots_total_for_missing": 1}],
+    "competitions": ["1", (1,), {"1": 0}],
+}  # todos con la longitud que cuadra con el resto del manifiesto: antes pasaban la validación
+
+
+@pytest.mark.parametrize("kind_of_container", [0, 1, 2], ids=["text", "tuple", "mapping"])
+@pytest.mark.parametrize("field", sorted(NOT_A_LIST))
+def test_validate_requires_list_containers_in_b2(field, kind_of_container):
+    value = NOT_A_LIST[field][kind_of_container]
+    bad = _resealed("B2", _set(("params", field), value))
+    verify_manifest(bad)
+    assert type(bad["params"][field]) is type(value)  # no se convierte a lista por el camino
+    for check in (validate, FrozenModel):
+        with pytest.raises(ManifestError, match=f"{field}: se esperaba una lista"):
+            check(bad)
+    if not isinstance(value, tuple):  # una tupla no existe en JSON: como texto ya es una lista
+        with pytest.raises(ManifestError, match=f"{field}: se esperaba una lista"):
+            load(canonical_json(bad))
+
+
+def test_valid_b2_lists_including_empty_ones_stay_accepted():
+    original = manifests()["B2"]
+    validate(original)
+    assert original["manifest_sha256"] == "91f7d1cbbe962d5fa469641e356e42345b7f1dba7a2e492d1162207870be57a2"  # huella fijada: no cambia
+    assert FrozenModel(original).predict(B2_ROW) == FrozenModel(load(canonical_json(original))).predict(B2_ROW)
+    no_flags = _resealed("B2", lambda m: m["params"].update(flag_columns=[], coef=[row[:2] + row[4:] for row in m["params"]["coef"]]))
+    no_competitions = _resealed("B2", lambda m: m["params"].update(competitions=[], coef=[row[:4] for row in m["params"]["coef"]]))
+    nothing = _resealed("B2", lambda m: m["params"].update(numeric_columns=[], flag_columns=[], competitions=[], imputer_medians=[],
+                                                          scaler_mean=[], scaler_scale=[], coef=[[], [], []]))
+    for ok in (no_flags, no_competitions, nothing):  # las listas vacías siguen valiendo lo mismo que antes
+        validate(ok)
+        assert load(canonical_json(ok)) == ok
+        probs = FrozenModel(ok).predict(B2_ROW)
+        assert len(probs) == 3 and sum(probs) == pytest.approx(1)
+
+
 def test_frozen_model_predictions_are_deterministic_copies():
     ms = models()
     row = {"competition_id": 1, "home_shots_total_for": 14.0, "away_shots_total_for": 9.0,
