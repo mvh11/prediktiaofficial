@@ -23,11 +23,21 @@ class AnchorError(ValueError):
 
 
 def make_statement(records: list[dict]) -> dict:
-    """Lo que se publica: seq y hash de cabeza (más su propia huella)."""
+    """Lo que se publica: seq y hash de cabeza (más su propia huella). Una cabeza malformada lanza
+    AnchorError: no se publica una declaración que verify_anchor no podría verificar."""
+    if not isinstance(records, (list, tuple)):  # antes de medirlos o indexarlos, como verify_anchor
+        raise AnchorError("los registros no son una lista")
     if not records:
         raise AnchorError("registro vacío")
     head = records[-1]
-    statement = {"registry_seq": head["seq"], "head_hash": head["record_hash"]}
+    if not isinstance(head, dict):
+        raise AnchorError("la cabeza del registro no es un objeto")
+    seq = head.get("seq")
+    if type(seq) is not int or seq != len(records) - 1:  # bool no es un seq; debe ser su posición
+        raise AnchorError("la cabeza del registro no tiene un seq válido")
+    if not isinstance(head.get("record_hash"), str):
+        raise AnchorError("la cabeza del registro no tiene record_hash")
+    statement = {"registry_seq": seq, "head_hash": head["record_hash"]}
     return {**statement, "statement_sha256": sha256_hex(statement)}
 
 

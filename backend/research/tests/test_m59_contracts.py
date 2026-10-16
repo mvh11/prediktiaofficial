@@ -769,6 +769,57 @@ def test_statement_binds_sequence_and_head_hash(chain):
         anchors.make_statement([])
 
 
+def _head(chain, **changes):
+    """Copia de la cadena con la cabeza alterada (_DROP elimina la clave)."""
+    head = {k: v for k, v in {**chain[-1], **changes}.items() if v is not _DROP}
+    return [*chain[:-1], head]
+
+
+BAD_STATEMENT_INPUTS = {
+    "container-dict": (lambda c: {"0": c[0]}, "no son una lista"),
+    "container-text": (lambda c: "registro", "no son una lista"),
+    "container-none": (lambda c: None, "no son una lista"),
+    "head-text": (lambda c: [*c[:-1], "cabeza"], "no es un objeto"),
+    "head-none": (lambda c: [*c[:-1], None], "no es un objeto"),
+    "head-list": (lambda c: [*c[:-1], list(c[-1].items())], "no es un objeto"),
+    "no-seq": (lambda c: _head(c, seq=_DROP), "seq válido"),
+    "seq-text": (lambda c: _head(c, seq="2"), "seq válido"),
+    "seq-float": (lambda c: _head(c, seq=2.0), "seq válido"),
+    "seq-negative": (lambda c: _head(c, seq=-1), "seq válido"),
+    "seq-not-its-position": (lambda c: _head(c, seq=5), "seq válido"),
+    "seq-bool": (lambda c: [{**c[0], "seq": False}], "seq válido"),
+    "first-record-dropped": (lambda c: c[1:], "seq válido"),
+    "no-record-hash": (lambda c: _head(c, record_hash=_DROP), "no tiene record_hash"),
+    "record-hash-null": (lambda c: _head(c, record_hash=None), "no tiene record_hash"),
+    "record-hash-number": (lambda c: _head(c, record_hash=7), "no tiene record_hash"),
+}
+
+
+@pytest.mark.parametrize("build,message", list(BAD_STATEMENT_INPUTS.values()), ids=list(BAD_STATEMENT_INPUTS))
+def test_statement_of_a_malformed_head_fails_closed(chain, build, message):
+    """Una cabeza malformada lanza AnchorError (nunca KeyError/TypeError ni una declaración que
+    verify_anchor no podría verificar), sin alterar la cadena recibida."""
+    records = build(chain)
+    snapshot = json.loads(json.dumps(records))
+    with pytest.raises(anchors.AnchorError, match=message):
+        anchors.make_statement(records)
+    assert json.loads(json.dumps(records)) == snapshot
+
+
+def test_statement_does_not_consume_a_one_shot_iterable(chain):
+    one_shot = iter(chain)
+    with pytest.raises(anchors.AnchorError, match="no son una lista"):
+        anchors.make_statement(one_shot)
+    assert list(one_shot) == chain  # se rechaza antes de recorrerlo
+
+
+def test_every_statement_of_a_valid_chain_still_verifies(chain):
+    for n in (1, 2, 3):
+        for container in (chain[:n], tuple(chain[:n])):
+            anchor = {**anchors.make_statement(container), "authority": "project_thread", "external_time": K - timedelta(days=1)}
+            assert anchors.verify_anchor(chain, anchor, ALWAYS) == K - timedelta(days=1)
+
+
 @pytest.mark.parametrize("authority", sorted(anchors.ACCEPTED_AUTHORITIES))
 def test_each_accepted_authority_returns_its_external_instant(chain, authority):
     seen = []
