@@ -9,12 +9,14 @@ probabilidad), una por celda de la partición cerrada 8x8. Categorías de cada e
 celda aparece exactamente una vez, también las de probabilidad 0; nada se rellena, se funde ni se
 descarta. Probabilidad: int o float (no bool), finita y en [0, 1]. La masa total M (math.fsum en
 orden canónico: local 0..6, "7+" y, dentro, visitante en el mismo orden) tiene que cumplir
-|M − 1| <= 1e-9; no se renormaliza. Cualquier entrada no válida: ValueError.
+1 − 1e-9 <= M <= 1 (MOD-DEV-072-R2: ningún exceso sobre 1, por pequeño que sea); no se renormaliza.
+Cualquier entrada no válida: ValueError.
 
 Salida: probabilidades incondicionales. Over/Under para cada una de las 13 líneas aprobadas (PUSH
 aparte: positivo solo en líneas enteras, nunca repartido) y BTTS YES/NO. Una celda con "7+" suma 7
 goles o más: es OVER en todas las líneas aprobadas (todas < 7) y no da un marcador exacto. Cada
-partición suma 1 y reconstruye M, ambas dentro de 1e-9. Solo sirve para estas líneas y BTTS.
+probabilidad derivada está en [0, 1] (si no, ValueError; nunca se recorta) y cada partición suma 1 y
+reconstruye M, ambas dentro de 1e-9. Solo sirve para estas líneas y BTTS.
 """
 
 import math
@@ -60,8 +62,8 @@ def validated_cells(distribution) -> tuple[tuple[tuple, float], ...]:
         raise ValueError(f"faltan {len(missing)} celdas de las 64, p. ej. {missing[0]}")
     ordered = tuple((cell, seen[cell]) for cell in CELLS)
     mass = math.fsum(p for _, p in ordered)
-    if not abs(mass - 1.0) <= TOLERANCE:
-        raise ValueError(f"masa total {mass!r} fuera de 1 ± {TOLERANCE}")
+    if not 1.0 - TOLERANCE <= mass <= 1.0:  # MOD-DEV-072-R2: déficit hasta TOLERANCE, exceso ninguno
+        raise ValueError(f"masa total {mass!r} fuera de [1 − {TOLERANCE}, 1]")
     return ordered
 
 
@@ -75,8 +77,11 @@ def _over_under_outcome(home, away, line: Decimal) -> str:
 
 
 def _partition(ordered, outcome_of, outcomes) -> dict[str, float]:
-    """Suma incondicional por resultado (math.fsum, orden canónico) y conservación dentro de TOLERANCE."""
+    """Suma incondicional por resultado (math.fsum, orden canónico), cada una en [0, 1], y conservación dentro de TOLERANCE."""
     probs = {name: math.fsum(p for cell, p in ordered if outcome_of(*cell) == name) for name in outcomes}
+    for name, p in probs.items():
+        if not 0.0 <= p <= 1.0:  # límite físico estricto: ni recorte ni tolerancia
+            raise ValueError(f"probabilidad proyectada {name} fuera de [0, 1]: {p!r}")
     total, mass = math.fsum(probs.values()), math.fsum(p for _, p in ordered)
     if not (abs(total - 1.0) <= TOLERANCE and abs(total - mass) <= TOLERANCE):
         raise ValueError(f"la partición no conserva la masa: {total!r} frente a {mass!r}")

@@ -105,10 +105,10 @@ def test_integer_probabilities_are_accepted():
     assert goals_market_probabilities(dist({(2, 1): 1}))["btts"] == {BTTS_YES: 1.0, BTTS_NO: 0.0}
 
 
-@pytest.mark.parametrize("second, accepted", [(0.5 + 5e-10, True), (0.5 - 5e-10, True), (0.5 + 2e-9, False), (0.5 - 2e-9, False),
+@pytest.mark.parametrize("second, accepted", [(0.5 + 5e-10, False), (0.5 - 5e-10, True), (0.5 + 2e-9, False), (0.5 - 2e-9, False),
                                               (0.4, False), (0.25, False)], ids=["over-inside", "under-inside", "over-outside",
                                                                                  "under-outside", "under-normalized", "far-under"])
-def test_mass_tolerance_without_renormalization(second, accepted):
+def test_mass_tolerance_without_renormalization(second, accepted):  # MOD-DEV-072-R2: un exceso, aun dentro de 1e-9, se rechaza
     entries = dist({(0, 0): 0.5, (1, 1): second})
     if not accepted:
         with pytest.raises(ValueError, match="masa total"):
@@ -123,6 +123,74 @@ def test_mass_tolerance_without_renormalization(second, accepted):
 def test_over_normalized_mass_is_rejected():
     with pytest.raises(ValueError, match="masa total"):
         goals_market_probabilities(dist({(0, 0): 0.75, (1, 1): 0.75}))
+
+
+# --- MOD-DEV-072-R2. Masa de entrada en [1 − 1e-9, 1] y salidas en [0, 1] ---------------------------
+
+ULP = 2.0 ** -52  # math.nextafter(1.0, math.inf) − 1, exacto
+ENTRY_POINTS = [validated_cells, btts_probabilities, goals_market_probabilities] + [
+    lambda e, line=line: over_under_probabilities(e, line) for line in SUPPORTED_LINE_TEXTS]
+
+
+def test_f1_counterexample_is_rejected_by_every_entry_point():
+    entries = dist({(0, 0): 1.0, (1, 1): 5e-10})  # cada celda en [0, 1]
+    mass = math.fsum(p for _, _, p in entries)
+    assert mass == 1.0000000005 and abs(mass - 1.0) <= TOLERANCE  # la regla simétrica anterior la aceptaba (MOD-QA-071/F1)
+    for call in ENTRY_POINTS:
+        with pytest.raises(ValueError, match="masa total"):
+            call(entries)
+
+
+# (celda (0, 0), celda (1, 1), masa exacta esperada escrita a mano, aceptada)
+MASS_BOUNDARIES = {
+    "unit": (0.5, 0.5, 1.0, True),
+    "one-ulp-above": (1.0, ULP, math.nextafter(1.0, math.inf), False),
+    "two-ulps-above": (1.0, 2 * ULP, math.nextafter(math.nextafter(1.0, math.inf), math.inf), False),
+    "lower-bound": (1.0 - TOLERANCE, 0.0, 1.0 - TOLERANCE, True),
+    "below-lower-bound": (math.nextafter(1.0 - TOLERANCE, -math.inf), 0.0, math.nextafter(1.0 - TOLERANCE, -math.inf), False),
+    "small-deficit": (0.5, 0.5 - 2.0 ** -40, 1.0 - 2.0 ** -40, True),
+}
+
+
+@pytest.mark.parametrize("name", MASS_BOUNDARIES)
+def test_exact_binary64_mass_boundaries(name):
+    nil, one_one, expected_mass, accepted = MASS_BOUNDARIES[name]
+    entries = dist({(0, 0): nil, (1, 1): one_one})
+    assert math.fsum(p for _, _, p in entries) == expected_mass  # la masa real del fixture, no un literal supuesto
+    if not accepted:
+        for call in ENTRY_POINTS:
+            with pytest.raises(ValueError, match="masa total"):
+                call(entries)
+        return
+    result = goals_market_probabilities(entries)
+    assert result["mass"] == expected_mass
+    assert result["btts"] == {BTTS_YES: one_one, BTTS_NO: nil}  # sin renormalizar
+    assert ou(result, "2.0") == {OVER: 0.0, UNDER: nil, PUSH: one_one} and ou(result, "1.5") == {OVER: one_one, UNDER: nil, PUSH: 0.0}
+
+
+@pytest.mark.parametrize("cell", [("7+", "7+"), (1, 1), (0, 0)])
+def test_a_subunit_mass_in_a_single_outcome_is_not_renormalized(cell):
+    mass = 1.0 - 2.0 ** -40
+    result = goals_market_probabilities(dist({cell: mass}))
+    for line in SUPPORTED_LINE_TEXTS:
+        probs = ou(result, line)
+        assert sorted(probs.values()) == [0.0, 0.0, mass] and all(0.0 <= p <= 1.0 for p in probs.values())
+    assert result["btts"] == ({BTTS_YES: mass, BTTS_NO: 0.0} if 0 not in cell else {BTTS_YES: 0.0, BTTS_NO: mass})
+
+
+BTTS_OF = (lambda h, a: BTTS_YES if h != 0 and a != 0 else BTTS_NO, (BTTS_YES, BTTS_NO))
+OVER_05_OF = (lambda h, a: OVER if TAIL in (h, a) or h + a > 0 else UNDER, (OVER, UNDER, PUSH))
+
+
+@pytest.mark.parametrize("ordered, partition, bad", [
+    ((((1, 0), 1.0), ((0, 1), ULP)), BTTS_OF, BTTS_NO),  # NO = 1 + 2^−52, conserva dentro de 1e-9
+    ((((1, 0), 1.0), ((0, 1), ULP)), OVER_05_OF, OVER),
+    ((((0, 0), 1.25), ((1, 1), -0.25)), BTTS_OF, BTTS_YES),
+], ids=["btts-above-one", "over-above-one", "negative"])
+def test_a_projected_probability_outside_0_1_fails_closed_past_input_validation(ordered, partition, bad):
+    from research.m58 import goal_projection  # etapa de salida aislada: la entrada ya no podría llegar aquí
+    with pytest.raises(ValueError, match=f"proyectada {bad} fuera de \\[0, 1\\]"):
+        goal_projection._partition(ordered, *partition)
 
 
 # --- C/D. Toda la masa en una celda ---------------------------------------------------------------
