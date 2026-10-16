@@ -1491,6 +1491,53 @@ def test_terminal_decisions_match_the_same_cutoff_in_any_offset(reg, world, term
     assert verify(reg.records()) == [terminal]
 
 
+# MOD-DEV-055-R1: un registro con el prediction_id canónico solo se reutiliza si sus datos de identidad
+# (model_set_sha, fixture_id, T) son los que dan ese id. El registro genérico sigue admitiendo ids opacos.
+
+def _canonical_record(**changes):
+    rec = {"kind": "prediction", "prediction_id": PINNED_PREDICTION_ID, "fixture_id": 1, "T": T, "model_set_sha": PINNED_MODEL_SET, **changes}
+    return {k: v for k, v in rec.items() if v is not _DROP}
+
+
+INCONSISTENT_IDENTITIES = {
+    "other-fixture": {"fixture_id": 99},
+    "fixture-as-text": {"fixture_id": "1"},
+    "other-cutoff": {"T": T + timedelta(days=1)},
+    "other-model-set": {"model_set_sha": "b" * 64},
+    "no-model-set": {"model_set_sha": _DROP},
+    "no-fixture": {"fixture_id": _DROP},
+    "no-cutoff": {"T": _DROP},
+}
+
+
+@pytest.mark.parametrize("now", [K - timedelta(hours=3), K - timedelta(minutes=30)], ids=["before-T", "after-T"])
+@pytest.mark.parametrize("changes", list(INCONSISTENT_IDENTITIES.values()), ids=list(INCONSISTENT_IDENTITIES))
+def test_canonical_id_with_other_identity_inputs_fails_closed_before_writing(reg, world, changes, now):
+    assert world.emitter(reg).model_set_sha == PINNED_MODEL_SET
+    reg.append(_canonical_record(**changes))  # el registro genérico lo admite (ids opacos)
+    before = reg.path.read_bytes()
+    world.now = now
+    with pytest.raises(RegistryError, match="otros modelos, partido o T"):
+        world.emitter(reg).emit(1)  # antes: devolvía ese registro como la emisión del partido 1
+    assert reg.path.read_bytes() == before and world.form_calls == []
+
+
+def test_a_consistent_record_with_the_canonical_id_is_still_reused(reg, world):
+    stored = reg.append(_canonical_record())
+    before = reg.path.read_bytes()
+    assert world.emitter(reg).emit(1) == stored and reg.path.read_bytes() == before and world.form_calls == []
+
+
+@pytest.mark.parametrize("foreign_id", [prediction_id(PINNED_MODEL_SET, 1, T.astimezone(OFFSETS[1]).isoformat()), "p1"],
+                         ids=["pre-mod-par-019-offset-id", "opaque-id"])
+def test_ids_that_are_not_the_canonical_one_are_neither_reused_nor_rejected(reg, world, foreign_id):
+    legacy = reg.append(_canonical_record(prediction_id=foreign_id))  # p. ej. identidad anterior a MOD-PAR-019
+    assert foreign_id != PINNED_PREDICTION_ID
+    rec = world.emitter(reg).emit(1)
+    assert rec["kind"] == "prediction" and rec["prediction_id"] == PINNED_PREDICTION_ID
+    assert verify(reg.records()) == [legacy, rec]  # el registro previo se conserva tal cual
+
+
 # --- 9. MOD-PAR-029: escenarios S2, S4, S7, S10, S11, S12 y reutilización con metadatos incompletos ---
 
 FULL_IDENTITY = {"home_team_id": 10, "away_team_id": 20, "competition_id": 1}

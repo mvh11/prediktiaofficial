@@ -24,7 +24,7 @@ from app.services.prematch_features import fingerprint
 from research.m58.dataset import SIDES, _side_columns
 from research.m59.canonical import sha256_hex
 from research.m59.manifest import FrozenModel
-from research.m59.registry import Registry, prediction_id
+from research.m59.registry import Registry, RegistryError, prediction_id
 
 CUTOFF_BEFORE_KICKOFF = timedelta(hours=1)
 REGISTRY_VERSION = 1
@@ -89,6 +89,9 @@ class Emitter:
         records = self.registry.records()
         for rec in records:  # reinicio / duplicado: la primera emisión manda, también pasado T
             if rec.get("kind") == "prediction" and rec["prediction_id"] == pid:
+                # solo es esta emisión si sus datos de identidad son los que dan pid (antes de escribir nada)
+                if (rec.get("model_set_sha"), rec.get("fixture_id"), rec.get("T")) != (self.model_set_sha, fixture_id, cutoff_iso):
+                    raise RegistryError("prediction_id ya registrado con otros modelos, partido o T")
                 return rec
         for rec in records:  # sin emisión previa, el primer LATE es definitivo aunque el reloj retroceda
             if (rec.get("kind") == "no_emission" and rec.get("reason") == LATE and rec.get("model_set_sha") == self.model_set_sha
