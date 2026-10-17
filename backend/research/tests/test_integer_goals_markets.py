@@ -221,7 +221,7 @@ def test_missing_probabilities_on_any_settled_outcome_fail_closed(home, away, ou
 # --- U, V, W: 90', pureza y recuento --------------------------------------------------------------------
 
 def test_ft_aet_pen_use_only_the_90_minute_score():
-    rows = [obs("AET", 1, 1, P_C, goals_home=3, goals_away=1), obs("PEN", 0, 0, P_B, penalty_home=5, penalty_away=4),
+    rows = [obs("AET", 1, 1, P_C, home_goals=3, away_goals=1), obs("PEN", 0, 0, P_B, penalty_home=5, penalty_away=4),
             obs("FT", 2, 1, P_A)]
     r = evaluate_integer_over_under(rows, "2.0")
     assert (r.settlement_over, r.settlement_under, r.settlement_push) == (1, 1, 1)

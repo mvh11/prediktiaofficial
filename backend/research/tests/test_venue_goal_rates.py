@@ -115,9 +115,9 @@ def test_a_meeting_of_the_two_target_teams_counts_for_each_with_its_own_goals():
 
 def test_ft_aet_and_pen_use_only_the_90_minute_score():
     home = [match(1, HOME_TEAM, 501, T - timedelta(days=1), 2, 0),
-            match(2, HOME_TEAM, 502, T - timedelta(days=2), 1, 1, "AET", goals_home=3, goals_away=1, extratime_home=2, extratime_away=0),
+            match(2, HOME_TEAM, 502, T - timedelta(days=2), 1, 1, "AET", home_goals=3, away_goals=1, extratime_home=2, extratime_away=0),
             match(3, HOME_TEAM, 503, T - timedelta(days=3), 0, 0, "PEN", penalty_home=4, penalty_away=3)] + home_games([1] * 5, first_id=4, first_day=4)
-    away = [match(101, 601, AWAY_TEAM, T - timedelta(days=1, hours=3), 1, 2, "AET", goals_home=1, goals_away=4)] + away_games([0] * 7, first_id=102, first_day=2)
+    away = [match(101, 601, AWAY_TEAM, T - timedelta(days=1, hours=3), 1, 2, "AET", home_goals=1, away_goals=4)] + away_games([0] * 7, first_id=102, first_day=2)
     result = run(home + away)
     assert result.lambda_home == 1.0 and result.lambda_away == 0.25  # (2 + 1 + 0 + 5) / 8 y 2 / 8
 

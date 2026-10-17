@@ -189,7 +189,7 @@ def test_repeated_calls_are_identical_and_inputs_unchanged():
 
 def test_ft_aet_pen_use_only_the_90_minute_score():
     # AET 1-1 a los 90' (3-1 tras la prórroga) y PEN 0-0: los campos extra no cuentan
-    rows = [obs("AET", 1, 1, (0.5, 0.5), goals_home=3, goals_away=1), obs("PEN", 0, 0, (0.5, 0.5), penalty_home=4, penalty_away=3),
+    rows = [obs("AET", 1, 1, (0.5, 0.5), home_goals=3, away_goals=1), obs("PEN", 0, 0, (0.5, 0.5), penalty_home=4, penalty_away=3),
             obs("FT", 2, 1, (0.5, 0.5))]
     assert dict(evaluate_over_under(rows, "2.5").outcome_counts) == {"OVER": 1, "UNDER": 2}
     assert dict(evaluate_btts(rows).outcome_counts) == {"YES": 2, "NO": 1}
