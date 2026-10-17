@@ -17,6 +17,7 @@ A6 STRICT_KNOWLEDGE (t* = max(observed_at <= T); estados distintos en t* = TEMPO
 contrastado con código y documentación ya integrados (app/schemas/fixture_knowledge.py, docs/data-integrity-status.md).
 """
 
+import copy
 import dataclasses
 import inspect
 from datetime import datetime, timedelta, timezone
@@ -331,11 +332,13 @@ def test_v7e_twenty_supplied_candidates_do_not_prove_the_fixture_universe_comple
 def test_only_the_90_minute_fulltime_pair_is_used_never_extra_time_goals():
     aet_kickoff, pen_kickoff = T - timedelta(days=1), T - timedelta(days=2)
     rows = [fixture(8001, HOME_TEAM, 5801, aet_kickoff, 1, 1, status="AET", observed=aet_kickoff + timedelta(hours=3),
-                    goals_home=4, goals_away=2, extratime_home=3, extratime_away=1),
+                    home_goals=4, away_goals=2, extratime_home=3, extratime_away=1),
             fixture(8002, HOME_TEAM, 5802, pen_kickoff, 0, 0, status="PEN", observed=pen_kickoff + timedelta(hours=3),
-                    goals_home=0, goals_away=0, penalty_home=5, penalty_away=4)]
+                    home_goals=0, away_goals=0, penalty_home=5, penalty_away=4)]
+    before = copy.deepcopy(rows)
     result = run(rows + home_block([2] * 6, 8010, first_day=3) + away_block([1] * 8, 8030))
-    assert result.lambda_home == (1 + 0 + 12) / 8  # nunca 4 (con prórroga) ni penaltis
+    assert result.lambda_home == (1 + 0 + 12) / 8  # nunca 4 (home_goals operativo, con prórroga) ni penaltis
+    assert rows == before
 
 
 @pytest.mark.parametrize("status, fulltime_home, fulltime_away, reason", [
@@ -346,9 +349,11 @@ def test_only_the_90_minute_fulltime_pair_is_used_never_extra_time_goals():
 def test_missing_or_invalid_90_minute_score_is_excluded_with_its_canonical_reason(status, fulltime_home, fulltime_away, reason):
     kickoff = T - timedelta(hours=30)
     bad = fixture(8101, HOME_TEAM, 5901, kickoff, fulltime_home, fulltime_away, status=status, observed=kickoff + timedelta(hours=2),
-                  goals_home=5, goals_away=0)
+                  home_goals=5, away_goals=0)  # marcador operativo válido: nunca sustituye al par fulltime
+    before = copy.deepcopy(bad)
     result = run([bad] + home_block([1] * 8, 8110, first_day=2) + away_block([1] * 8, 8130))
-    assert dict(result.home.excluded_by_reason) == {reason: 1} and result.lambda_home == 1.0  # nunca goals_home como sustituto
+    assert dict(result.home.excluded_by_reason) == {reason: 1} and result.lambda_home == 1.0  # nunca home_goals como sustituto
+    assert 8101 not in result.home.selected_fixture_ids and result.home.eligible == 8 and bad == before
 
 
 def test_identity_is_local_integer_equality_only():
