@@ -10,8 +10,8 @@ ValueError antes de mirar las observaciones, también con la lista vacía.
 Observaciones: la misma forma que en evaluation (lista o tupla de Mappings con status_short,
 fulltime_home y fulltime_away; ObservationError si no). Probabilidades en el campo probabilities: un
 Mapping con exactamente las claves OVER, UNDER y PUSH (sin orden posicional); cada valor int o float
-finito (bool no) en [0, 1]; |p_OVER + p_UNDER + p_PUSH - 1| <= 1e-9 (SUM_TOLERANCE, sumado en ese
-orden). No se recorta, renormaliza ni imputa. Se exigen en toda observación liquidada, PUSH incluido;
+finito (bool no) en [0, 1]; |p_OVER + p_UNDER + p_PUSH - 1| <= 1e-9 (SUM_TOLERANCE; suma con math.fsum,
+MOD-DEV-079). No se recorta, renormaliza ni imputa. Se exigen en toda observación liquidada, PUSH incluido;
 si faltan o no son válidas: ProbabilityEvidenceError y ningún resultado parcial. En las filas
 excluidas no se leen.
 
@@ -72,7 +72,7 @@ def validate_integer_probabilities(probabilities) -> Mapping[str, float]:
         p = probabilities[k]
         if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p) or not 0 <= p <= 1:
             raise ProbabilityEvidenceError(f"probabilidad {k} no válida: {p!r}")
-    if abs(sum(probabilities[k] for k in INTEGER_OUTCOMES) - 1) > SUM_TOLERANCE:
+    if abs(math.fsum(probabilities[k] for k in INTEGER_OUTCOMES) - 1) > SUM_TOLERANCE:
         raise ProbabilityEvidenceError(f"las probabilidades no suman 1 (tolerancia {SUM_TOLERANCE}): {dict(probabilities)!r}")
     return MappingProxyType({k: probabilities[k] for k in INTEGER_OUTCOMES})
 

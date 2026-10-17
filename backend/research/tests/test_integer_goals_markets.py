@@ -148,6 +148,67 @@ def test_sum_within_tolerance_is_used_without_renormalization():
     assert r.brier == 0.4 ** 2 + 0.35 ** 2 + (0.2500000005 - 1) ** 2 and r.log_loss == -math.log(0.2500000005)
 
 
+# --- MOD-DEV-079: masa total con math.fsum y sus dos fronteras (SUM_TOLERANCE = 1e-9, simétrica) ----------
+
+LOW_OVER, LOW_UNDER, LOW_PUSH = 0.5, 2 ** -54 - 2 ** -70, float.fromhex("0x1.ffffffeed1f41p-2")
+HIGH_PUSH = float.fromhex("0x1.12e0bcp-30")  # 0.5 + 0.5 + HIGH_PUSH: el mayor total representable aceptado
+ABOVE_PUSH = float.fromhex("0x1.12e0cp-30")  # 0.5 + 0.5 + ABOVE_PUSH: el total representable siguiente
+
+
+def assert_rejected(probabilities):
+    result = sentinel = object()
+    with pytest.raises(ProbabilityEvidenceError):
+        result = validate_integer_probabilities(probabilities)
+    assert result is sentinel  # sin resultado parcial
+    with pytest.raises(ProbabilityEvidenceError, match="observación 0"):
+        result = evaluate_integer_over_under([obs("FT", 1, 1, probabilities)], "2.0")
+    assert result is sentinel
+
+
+def test_lower_boundary_exact_is_accepted_with_fsum_and_values_unchanged():
+    p = {"OVER": LOW_OVER, "UNDER": LOW_UNDER, "PUSH": LOW_PUSH}
+    assert math.fsum((LOW_OVER, LOW_UNDER, LOW_PUSH)) == 1.0 - 1e-9
+    assert abs((LOW_OVER + LOW_UNDER) + LOW_PUSH - 1) > 1e-9  # la suma estricta de izquierda a derecha queda por debajo
+    before = dict(p)
+    got = validate_integer_probabilities(p)
+    assert [got[k].hex() for k in INTEGER_OUTCOMES] == [LOW_OVER.hex(), LOW_UNDER.hex(), LOW_PUSH.hex()] and p == before
+    r = evaluate_integer_over_under([obs("FT", 1, 1, p)], "2.0")  # PUSH: puntúa con p_PUSH sin renormalizar
+    assert r.probability_scored == r.betting_void == 1 and r.log_loss == -math.log(LOW_PUSH)
+
+
+def test_lower_boundary_minus_one_step_is_rejected():
+    push = math.nextafter(LOW_PUSH, 0.0)
+    assert math.fsum((LOW_OVER, LOW_UNDER, push)) < 1.0 - 1e-9
+    assert_rejected({"OVER": LOW_OVER, "UNDER": LOW_UNDER, "PUSH": push})
+
+
+def test_upper_boundary_exact_and_exceeded():
+    assert math.fsum((0.5, 0.5, HIGH_PUSH)) - 1 <= 1e-9
+    assert validate_integer_probabilities({"OVER": 0.5, "UNDER": 0.5, "PUSH": HIGH_PUSH})["PUSH"].hex() == HIGH_PUSH.hex()
+    assert math.fsum((0.5, 0.5, ABOVE_PUSH)) == math.nextafter(math.fsum((0.5, 0.5, HIGH_PUSH)), 2.0)  # un paso de total por encima
+    assert math.fsum((0.5, 0.5, ABOVE_PUSH)) - 1 > 1e-9
+    assert_rejected({"OVER": 0.5, "UNDER": 0.5, "PUSH": ABOVE_PUSH})
+    # 1 + 2**-52 está dentro de la tolerancia simétrica vigente: se acepta tal cual
+    assert dict(validate_integer_probabilities({"OVER": 1.0, "UNDER": 2 ** -52, "PUSH": 0.0})) == {"OVER": 1.0, "UNDER": 2 ** -52, "PUSH": 0.0}
+
+
+def test_exact_unit_mass_and_ordinary_triple_are_accepted():
+    assert dict(validate_integer_probabilities({"PUSH": 0.25, "OVER": 0.5, "UNDER": 0.25})) == {"OVER": 0.5, "UNDER": 0.25, "PUSH": 0.25}
+    assert dict(validate_integer_probabilities(P_C)) == P_C
+
+
+@pytest.mark.parametrize("probabilities", [
+    {"OVER": 0.4, "UNDER": 0.35, "PUSH": 0.250000002}, {"OVER": 0.4, "UNDER": 0.35, "PUSH": 0.249999998},
+    {"OVER": 1.0 + 2 ** -52, "UNDER": 0.0, "PUSH": 0.0}, {"OVER": -0.0 - 2 ** -60, "UNDER": 0.5, "PUSH": 0.5},
+    {"OVER": math.nan, "UNDER": 0.5, "PUSH": 0.5}, {"OVER": 0.5, "UNDER": math.inf, "PUSH": 0.5}, {"OVER": True, "UNDER": 0, "PUSH": 0},
+    {"OVER": 0.5, "UNDER": 0.5}, {"OVER": 0.5, "UNDER": 0.25, "PUSH": 0.25, "VOID": 0.0},
+], ids=repr)
+def test_malformed_mass_and_values_fail_closed(probabilities):
+    before = copy.deepcopy(probabilities)
+    assert_rejected(probabilities)
+    assert probabilities == before  # sin mutación (deepcopy conserva el mismo objeto NaN: la comparación es por identidad)
+
+
 # --- S, T: evidencia obligatoria ------------------------------------------------------------------------
 
 @pytest.mark.parametrize("home, away, outcome", [(1, 1, "PUSH"), (3, 0, "OVER"), (0, 1, "UNDER")])
