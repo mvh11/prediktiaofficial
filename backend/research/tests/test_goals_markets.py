@@ -196,6 +196,53 @@ def test_ft_aet_pen_use_only_the_90_minute_score():
     assert dict(evaluate_over_under([obs("AET", 1, 1)], "2.0").outcome_counts) == {"OVER": 0, "UNDER": 0, "PUSH": 1}
 
 
+# --- MOD-DEV-098: un par fulltime ausente, incompleto o no válido nunca se completa con home_goals/away_goals ---
+
+DECOY_P = (0.9, 0.1)  # si un señuelo se puntuara, Brier y log_loss dejarían de ser 0.5 y ln 2
+INVALID_FULLTIME = (-1, True, 1.5, 1.0, "1")
+
+
+def assert_operational_decoys_excluded(decoys, excluded_by_reason):
+    # controles FT 1-1 (YES, UNDER 2.5, PUSH 2.0) y FT 2-0 (NO, UNDER 2.5, PUSH 2.0): ningún OVER válido, así que
+    # un señuelo liquidado con su marcador operativo (3-1: YES, OVER) cambia los recuentos o las métricas
+    rows = [obs("FT", 1, 1, (0.5, 0.5)), obs("FT", 2, 0, (0.5, 0.5))] + decoys
+    before = copy.deepcopy(rows)
+    n = sum(excluded_by_reason.values())
+    btts, half, integer = evaluate_btts(rows), evaluate_over_under(rows, "2.5"), evaluate_over_under(rows, "2.0")
+    for result in (btts, half):
+        assert counts(result) == (2 + n, 2, 2, 0, n) and dict(result.excluded_by_reason) == excluded_by_reason
+        assert result.brier == pytest.approx(0.5, abs=APPROX) and result.log_loss == pytest.approx(0.6931471805599453, abs=APPROX)
+    assert dict(btts.outcome_counts) == {"YES": 1, "NO": 1} and dict(half.outcome_counts) == {"OVER": 0, "UNDER": 2}
+    assert counts(integer) == (2 + n, 2, 0, 2, n) and dict(integer.excluded_by_reason) == excluded_by_reason
+    assert dict(integer.outcome_counts) == {"OVER": 0, "UNDER": 0, "PUSH": 2}
+    assert rows == before
+
+
+def test_missing_fulltime_pair_is_not_rebuilt_from_operational_goals():
+    assert_operational_decoys_excluded([obs("FT", None, None, DECOY_P, home_goals=3, away_goals=1)], {FULLTIME_INCOMPLETE: 1})
+
+
+@pytest.mark.parametrize("home, away", [(1, None), (None, 1)], ids=["away_missing", "home_missing"])
+def test_incomplete_fulltime_pair_is_not_completed_from_operational_goals(home, away):
+    # completar solo el lado que falta daría 1-1 (YES, UNDER 2.5, PUSH 2.0) o 3-1 (YES, OVER)
+    assert_operational_decoys_excluded([obs("FT", home, away, DECOY_P, home_goals=3, away_goals=1)], {FULLTIME_INCOMPLETE: 1})
+
+
+@pytest.mark.parametrize("side", ["home", "away"])
+@pytest.mark.parametrize("bad", INVALID_FULLTIME, ids=repr)
+def test_invalid_fulltime_is_not_replaced_by_operational_goals(bad, side):
+    home, away = (bad, 1) if side == "home" else (1, bad)
+    assert_operational_decoys_excluded([obs("FT", home, away, DECOY_P, home_goals=3, away_goals=1)], {FULLTIME_INVALID: 1})
+
+
+def test_aet_pen_without_valid_fulltime_stay_excluded_despite_operational_and_penalty_scores():
+    decoys = [obs("AET", None, None, DECOY_P, home_goals=3, away_goals=1),
+              obs("PEN", None, 1, DECOY_P, home_goals=2, away_goals=2, penalty_home=4, penalty_away=3),
+              obs("AET", -1, 1, DECOY_P, home_goals=3, away_goals=1),
+              obs("PEN", "1", "1", DECOY_P, home_goals=1, away_goals=1, penalty_home=5, penalty_away=4)]
+    assert_operational_decoys_excluded(decoys, {FULLTIME_INCOMPLETE: 2, FULLTIME_INVALID: 2})
+
+
 def test_malformed_collections_and_observations_are_rejected():
     for bad in ((obs("FT", 1, 1, (0.5, 0.5)) for _ in range(1)), None, obs("FT", 1, 1, (0.5, 0.5)), "rows"):
         with pytest.raises(ObservationError):

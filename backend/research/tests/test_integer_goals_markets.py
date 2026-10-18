@@ -227,6 +227,49 @@ def test_ft_aet_pen_use_only_the_90_minute_score():
     assert (r.settlement_over, r.settlement_under, r.settlement_push) == (1, 1, 1)
 
 
+# --- MOD-DEV-098: un par fulltime ausente, incompleto o no válido nunca se completa con home_goals/away_goals ---
+
+INVALID_FULLTIME = (-1, True, 1.5, 1.0, "1")
+
+
+def assert_operational_decoys_excluded(decoys, excluded_by_reason):
+    # controles FT 1-0 (UNDER, P_B) y FT 1-1 (PUSH, P_C: puntuado y anulado para apuestas); los señuelos llevan P_A,
+    # así que liquidarlos (3-1: OVER; 1-1: PUSH) cambia los recuentos, betting_void o las métricas. Excluido no es PUSH.
+    rows = [obs("FT", 1, 0, P_B), obs("FT", 1, 1, P_C)] + decoys
+    before = copy.deepcopy(rows)
+    n = sum(excluded_by_reason.values())
+    r = evaluate_integer_over_under(rows, "2.0")
+    assert counts(r) == (2 + n, 2, 2, 0, 1, 1, 1, n) and dict(r.excluded_by_reason) == excluded_by_reason
+    assert r.brier == pytest.approx((0.14 + 0.845) / 2, abs=APPROX)  # 0.4925
+    assert r.log_loss == pytest.approx((0.35667494393873245 + 1.3862943611198906) / 2, abs=APPROX)
+    assert rows == before
+
+
+def test_missing_fulltime_pair_is_not_rebuilt_from_operational_goals():
+    assert_operational_decoys_excluded([obs("FT", None, None, dict(P_A), home_goals=3, away_goals=1)], {FULLTIME_INCOMPLETE: 1})
+
+
+@pytest.mark.parametrize("home, away", [(1, None), (None, 1)], ids=["away_missing", "home_missing"])
+def test_incomplete_fulltime_pair_is_not_completed_from_operational_goals(home, away):
+    # completar solo el lado que falta daría 1-1 (PUSH: puntuado y anulado) o 3-1 (OVER)
+    assert_operational_decoys_excluded([obs("FT", home, away, dict(P_A), home_goals=3, away_goals=1)], {FULLTIME_INCOMPLETE: 1})
+
+
+@pytest.mark.parametrize("side", ["home", "away"])
+@pytest.mark.parametrize("bad", INVALID_FULLTIME, ids=repr)
+def test_invalid_fulltime_is_not_replaced_by_operational_goals(bad, side):
+    home, away = (bad, 1) if side == "home" else (1, bad)
+    assert_operational_decoys_excluded([obs("FT", home, away, dict(P_A), home_goals=3, away_goals=1)], {FULLTIME_INVALID: 1})
+
+
+def test_aet_pen_without_valid_fulltime_stay_excluded_despite_operational_and_penalty_scores():
+    decoys = [obs("AET", None, None, dict(P_A), home_goals=3, away_goals=1),
+              obs("PEN", None, 1, dict(P_A), home_goals=2, away_goals=2, penalty_home=4, penalty_away=3),
+              obs("AET", -1, 1, dict(P_A), home_goals=3, away_goals=1),
+              obs("PEN", "1", "1", dict(P_C), home_goals=1, away_goals=1, penalty_home=5, penalty_away=4)]
+    assert_operational_decoys_excluded(decoys, {FULLTIME_INCOMPLETE: 2, FULLTIME_INVALID: 2})
+
+
 def test_inputs_unchanged_results_repeatable_and_immutable():
     rows = [obs("FT", 2, 1, dict(P_A)), obs("FT", 1, 1, dict(P_C)), obs("NS", None, None)]
     before = copy.deepcopy(rows)
