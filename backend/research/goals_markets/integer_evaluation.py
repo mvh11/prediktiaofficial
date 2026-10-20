@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from research.goals_markets.evaluation import (INTEGER_LINE, OVER_UNDER, PROBABILITIES, SUM_TOLERANCE, ProbabilityEvidenceError,
-                                               _observations)
+                                               _evidence_repr, _observations)
 from research.m58.goal_labels import OVER, PUSH, SUPPORTED_LINE_TEXTS, SUPPORTED_LINES, UNDER, label_over_under, over_under_line
 from research.m58.metrics import EPS
 
@@ -67,12 +67,12 @@ def validate_integer_probabilities(probabilities) -> Mapping[str, float]:
     if not isinstance(probabilities, Mapping):
         raise ProbabilityEvidenceError(f"se espera un Mapping con las claves {INTEGER_OUTCOMES}, no {type(probabilities).__name__}")
     if len(probabilities) != len(INTEGER_OUTCOMES) or any(k not in probabilities for k in INTEGER_OUTCOMES):
-        raise ProbabilityEvidenceError(f"se esperan exactamente las claves {INTEGER_OUTCOMES}: {sorted(map(repr, probabilities))}")
+        raise ProbabilityEvidenceError(f"se esperan exactamente las claves {INTEGER_OUTCOMES}: {sorted(map(_evidence_repr, probabilities))}")
     for k in INTEGER_OUTCOMES:
         p = probabilities[k]
         # el rango antes que la finitud: math.isfinite(10**400) desborda (OverflowError) (MOD-DEV-101)
         if isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1 or not math.isfinite(p):
-            raise ProbabilityEvidenceError(f"probabilidad {k} no válida: {p!r}")
+            raise ProbabilityEvidenceError(f"probabilidad {k} no válida: {_evidence_repr(p)}")
     if abs(math.fsum(probabilities[k] for k in INTEGER_OUTCOMES) - 1) > SUM_TOLERANCE:
         raise ProbabilityEvidenceError(f"las probabilidades no suman 1 (tolerancia {SUM_TOLERANCE}): {dict(probabilities)!r}")
     return MappingProxyType({k: probabilities[k] for k in INTEGER_OUTCOMES})

@@ -153,6 +153,33 @@ def test_huge_integer_probabilities_are_probability_evidence_errors_not_overflow
     assert dict(validate_integer_probabilities({"OVER": 1, "UNDER": 0, "PUSH": 0})) == {"OVER": 1, "UNDER": 0, "PUSH": 0}
 
 
+@pytest.mark.parametrize("huge", [10 ** 5000, -(10 ** 5000)], ids=["+10**5000", "-10**5000"])
+def test_integers_beyond_the_str_digit_limit_are_described_not_converted(huge):
+    # MOD-DEV-101-R1: repr de un int de más de 4300 dígitos lanza ValueError en CPython; el mensaje lo describe por bits
+    bits = f"<int {'negativo ' if huge < 0 else ''}de 16610 bits>"
+    for k in INTEGER_OUTCOMES:
+        probabilities = {**P_A, k: huge}
+        with pytest.raises(ProbabilityEvidenceError) as info:
+            validate_integer_probabilities(probabilities)
+        assert type(info.value) is ProbabilityEvidenceError and str(info.value) == f"probabilidad {k} no válida: {bits}"
+        with pytest.raises(ProbabilityEvidenceError, match="observación 0"):
+            evaluate_integer_over_under([obs("FT", 1, 1, probabilities)], "2.0")
+    with pytest.raises(ProbabilityEvidenceError) as info:
+        validate_integer_probabilities({huge: 0.5, "UNDER": 0.3, "PUSH": 0.2})  # también como clave
+    assert type(info.value) is ProbabilityEvidenceError and bits in str(info.value)
+
+
+def test_ordinary_invalid_integer_probability_messages_are_unchanged():
+    for probabilities, message in (({"OVER": -0.1, "UNDER": 0.6, "PUSH": 0.5}, "probabilidad OVER no válida: -0.1"),
+                                   ({**P_A, "UNDER": -(10 ** 400)}, f"probabilidad UNDER no válida: {-(10 ** 400)}"),
+                                   ({"OVER": 0.5, "UNDER": 0.5}, "se esperan exactamente las claves ('OVER', 'UNDER', 'PUSH'): [\"'OVER'\", \"'UNDER'\"]"),
+                                   ({"OVER": 0.4, "UNDER": 0.4, "PUSH": 0.4},
+                                    "las probabilidades no suman 1 (tolerancia 1e-09): {'OVER': 0.4, 'UNDER': 0.4, 'PUSH': 0.4}")):
+        with pytest.raises(ProbabilityEvidenceError) as info:
+            validate_integer_probabilities(probabilities)
+        assert str(info.value) == message
+
+
 def test_sum_within_tolerance_is_used_without_renormalization():
     p = {"PUSH": 0.2500000005, "UNDER": 0.35, "OVER": 0.4}  # |suma - 1| = 5.0e-10; el orden de las claves no importa
     assert dict(validate_integer_probabilities(p)) == {"OVER": 0.4, "UNDER": 0.35, "PUSH": 0.2500000005}

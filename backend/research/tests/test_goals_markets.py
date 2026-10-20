@@ -161,6 +161,32 @@ def test_huge_integer_probabilities_are_probability_evidence_errors_not_overflow
     assert validate_binary_probabilities((0, 1)) == (0, 1) and validate_binary_probabilities([1.0, 0.0]) == (1.0, 0.0)
 
 
+@pytest.mark.parametrize("huge", [10 ** 5000, -(10 ** 5000)], ids=["+10**5000", "-10**5000"])
+def test_integers_beyond_the_str_digit_limit_are_described_not_converted(huge):
+    # MOD-DEV-101-R1: repr de un int de más de 4300 dígitos lanza ValueError en CPython; el mensaje lo describe por bits
+    bits = f"<int {'negativo ' if huge < 0 else ''}de 16610 bits>"
+    for probabilities, message in (((huge, 0.5), f"probabilidad no válida: ({bits}, 0.5)"),
+                                   ([0.5, huge], f"probabilidad no válida: [0.5, {bits}]"),
+                                   ((huge,), f"se esperan dos probabilidades en una lista o tupla: ({bits},)"),
+                                   (huge, f"se esperan dos probabilidades en una lista o tupla: {bits}")):
+        with pytest.raises(ProbabilityEvidenceError) as info:
+            validate_binary_probabilities(probabilities)
+        assert type(info.value) is ProbabilityEvidenceError and str(info.value) == message
+        with pytest.raises(ProbabilityEvidenceError, match="observación 0"):
+            evaluate_btts([obs("FT", 1, 1, probabilities)])
+
+
+def test_ordinary_invalid_probability_messages_are_unchanged():
+    for probabilities, message in (((-0.1, 1.1), "probabilidad no válida: (-0.1, 1.1)"),
+                                   ((math.nan, 0.5), "probabilidad no válida: (nan, 0.5)"),
+                                   ((10 ** 400, 0.5), f"probabilidad no válida: ({10 ** 400}, 0.5)"),
+                                   ([0.5], "se esperan dos probabilidades en una lista o tupla: [0.5]"),
+                                   ((0.4, 0.4), "las probabilidades no suman 1 (tolerancia 1e-09): (0.4, 0.4)")):
+        with pytest.raises(ProbabilityEvidenceError) as info:
+            validate_binary_probabilities(probabilities)
+        assert str(info.value) == message
+
+
 def test_missing_probability_evidence_fails_closed_and_is_never_an_exclusion():
     for row in (obs("FT", 1, 0), obs("FT", 1, 0, None) | {"probabilities": None}):
         with pytest.raises(ProbabilityEvidenceError, match="observación 1"):

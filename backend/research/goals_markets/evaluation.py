@@ -74,14 +74,28 @@ class MarketEvaluation:
     log_loss: float | None
 
 
+def _evidence_repr(value) -> str:
+    """repr para los mensajes de error. Un int con más dígitos que el límite de CPython
+    (sys.get_int_max_str_digits) no se pasa a decimal: se describe por su número de bits (MOD-DEV-101-R1)."""
+    try:
+        return repr(value)
+    except ValueError:
+        if isinstance(value, int):
+            return f"<int {'negativo ' if value < 0 else ''}de {value.bit_length()} bits>"
+        if isinstance(value, (list, tuple)):
+            items = ", ".join(map(_evidence_repr, value)) + ("," if isinstance(value, tuple) and len(value) == 1 else "")
+            return f"[{items}]" if isinstance(value, list) else f"({items})"
+        return f"<{type(value).__name__} no representable>"
+
+
 def validate_binary_probabilities(probabilities) -> tuple[float, float]:
     """Las mismas dos probabilidades, en el mismo orden, o ProbabilityEvidenceError (D1, D4)."""
     if not isinstance(probabilities, (list, tuple)) or len(probabilities) != 2:
-        raise ProbabilityEvidenceError(f"se esperan dos probabilidades en una lista o tupla: {probabilities!r}")
+        raise ProbabilityEvidenceError(f"se esperan dos probabilidades en una lista o tupla: {_evidence_repr(probabilities)}")
     for p in probabilities:
         # el rango antes que la finitud: math.isfinite(10**400) desborda (OverflowError) (MOD-DEV-101)
         if isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1 or not math.isfinite(p):
-            raise ProbabilityEvidenceError(f"probabilidad no válida: {probabilities!r}")
+            raise ProbabilityEvidenceError(f"probabilidad no válida: {_evidence_repr(probabilities)}")
     if abs(probabilities[0] + probabilities[1] - 1) > SUM_TOLERANCE:
         raise ProbabilityEvidenceError(f"las probabilidades no suman 1 (tolerancia {SUM_TOLERANCE}): {probabilities!r}")
     return probabilities[0], probabilities[1]
