@@ -221,6 +221,69 @@ def test_huge_integers_raise_documented_errors_not_overflow():
             push(0.4, 0.4, 0.2, odds)
 
 
+HUGE = 10 ** 5000  # 5001 dígitos: más que sys.get_int_max_str_digits() (4300 por defecto en CPython)
+
+
+@pytest.mark.parametrize("huge", [HUGE, -HUGE], ids=["positive", "negative"])
+def test_integers_beyond_the_str_digit_limit_are_described_not_converted(huge):
+    limit = sys.get_int_max_str_digits()
+    assert 0 < limit < 5001  # precondición: repr(HUGE) lanzaría ValueError
+    bits = f"<int {'negativo ' if huge < 0 else ''}de 16610 bits>"  # (10**5000).bit_length() == 16610
+    with pytest.raises(ProbabilityError) as exc:
+        binary(huge, 2.0)
+    assert type(exc.value) is ProbabilityError and str(exc.value) == f"p_win fuera de [0, 1] o no finita: {bits}"
+    for name, masses in (("p_win", (huge, 0.3, 0.2)), ("p_lose", (0.5, huge, 0.2)), ("p_push", (0.5, 0.3, huge))):
+        with pytest.raises(ProbabilityError) as exc:
+            push(*masses, 2.0)
+        assert type(exc.value) is ProbabilityError and str(exc.value) == f"{name} fuera de [0, 1] o no finita: {bits}"
+    # +HUGE pasa "> 1" y desborda en float(); -HUGE no pasa "> 1"
+    odds_message = f"decimal_odds no es representable como double finito: {bits}" if huge > 0 else f"decimal_odds debe ser > 1: {bits}"
+    for call in (lambda: binary(0.5, huge), lambda: push(0.4, 0.4, 0.2, huge)):
+        with pytest.raises(OddsError) as exc:
+            call()
+        assert type(exc.value) is OddsError and str(exc.value) == odds_message
+    assert sys.get_int_max_str_digits() == limit  # el límite global no se toca
+
+
+def test_str_digit_limit_boundary_and_valid_integer_controls():
+    limit = sys.get_int_max_str_digits()
+    assert limit > 0
+    edge, beyond = 10 ** (limit - 1), 10 ** limit  # limit dígitos (convertible) y limit + 1 (no convertible)
+    with pytest.raises(ProbabilityError, match=r"^p_lose fuera de \[0, 1\] o no finita: 10{%d}$" % (limit - 1)):
+        push(0.5, edge, 0.2, 2.0)
+    with pytest.raises(ProbabilityError) as exc:
+        push(0.5, beyond, 0.2, 2.0)
+    assert str(exc.value) == f"p_lose fuera de [0, 1] o no finita: <int de {beyond.bit_length()} bits>"
+    with pytest.raises(OddsError) as exc:
+        binary(0.5, -beyond)
+    assert str(exc.value) == f"decimal_odds debe ser > 1: <int negativo de {beyond.bit_length()} bits>"
+    # enteros válidos: se evalúan igual que antes
+    assert (binary(1, 3).expected_net_return, binary(0.5, 3).fair_odds) == (2.0, 2.0)
+    assert (push(0, 0, 1, 10 ** 300).fair_odds_status, push(0.4, 0.4, 0.2, 2).fair_odds) == (NON_UNIQUE_ALWAYS_PUSH, 2.0)
+
+
+def test_ordinary_invalid_input_messages_are_unchanged():
+    cases = [
+        (ProbabilityError, lambda: binary(-0.1, 2.0), "p_win fuera de [0, 1] o no finita: -0.1"),
+        (ProbabilityError, lambda: binary(math.nan, 2.0), "p_win fuera de [0, 1] o no finita: nan"),
+        (ProbabilityError, lambda: push(0.5, 0.5, 2, 2.0), "p_push fuera de [0, 1] o no finita: 2"),
+        (ProbabilityError, lambda: binary(10 ** 400, 2.0), f"p_win fuera de [0, 1] o no finita: {10 ** 400}"),
+        (ProbabilityError, lambda: binary("0.5", 2.0), "p_win debe ser int o float, no str: '0.5'"),
+        (ProbabilityError, lambda: binary(True, 2.0), "p_win debe ser int o float, no bool: True"),
+        (ProbabilityError, lambda: push(0.4, 0.4, 0.1, 2.0), "p_win + p_lose + p_push no suman 1 (tolerancia 1e-09): (0.4, 0.4, 0.1)"),
+        (OddsError, lambda: binary(0.5, 1.0), "decimal_odds debe ser > 1: 1.0"),
+        (OddsError, lambda: binary(0.5, math.nan), "decimal_odds debe ser > 1: nan"),
+        (OddsError, lambda: binary(0.5, math.inf), "decimal_odds no finita: inf"),
+        (OddsError, lambda: binary(0.5, Decimal("2.0")), "decimal_odds debe ser int o float, no Decimal: Decimal('2.0')"),
+        (OddsError, lambda: push(0.4, 0.4, 0.2, 10 ** 400), f"decimal_odds no es representable como double finito: {10 ** 400}"),
+        (OddsError, lambda: binary(0.5, -(10 ** 400)), f"decimal_odds debe ser > 1: {-(10 ** 400)}"),
+    ]
+    for error, call, message in cases:
+        with pytest.raises(error) as exc:
+            call()
+        assert type(exc.value) is error and str(exc.value) == message
+
+
 def test_largest_finite_odds_give_finite_ev():
     r = binary(0.5, MAX)
     assert (r.fair_odds, r.expected_net_return) == (2.0, 0.5 * MAX - 1) and math.isfinite(r.expected_net_return)

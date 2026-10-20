@@ -35,6 +35,8 @@ Validación (sin recorte, normalización, imputación ni conversión de valores 
   Probabilidades: int o float (bool no; str, Decimal, Fraction u otro tipo tampoco), finitas, en [0, 1].
     El rango se comprueba antes que la finitud: un int enorme (10**400) es ProbabilityError y no
     OverflowError. Se informan como double (int 0/1 -> 0.0/1.0; -0.0 -> 0.0).
+    En los mensajes de error, un int con más dígitos que sys.get_int_max_str_digits() no se pasa a
+    decimal: se describe por su signo y su número de bits (MOD-DEV-100-D1).
   PUSH: |math.fsum(p_win, p_lose, p_push) - 1| <= SUM_TOLERANCE (1e-9, la de research.m510a.evaluate y
     research.goals_markets). Las masas no se reescalan: el EV usa las suministradas.
   decimal_odds: int o float (bool no), > 1 y representable como double finito (NaN, +-inf o un int fuera
@@ -102,25 +104,35 @@ class ValueEvaluation:
     limitations: tuple[str, ...]
 
 
+def _input_repr(value) -> str:
+    """repr para los mensajes de error; un int más allá del límite de CPython se describe por sus bits (MOD-DEV-100-D1)."""
+    try:
+        return repr(value)
+    except ValueError:  # int -> str: "Exceeds the limit (4300 digits)"
+        if isinstance(value, int):
+            return f"<int {'negativo ' if value < 0 else ''}de {value.bit_length()} bits>"
+        raise
+
+
 def _probability(value, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ProbabilityError(f"{name} debe ser int o float, no {type(value).__name__}: {value!r}")
+        raise ProbabilityError(f"{name} debe ser int o float, no {type(value).__name__}: {_input_repr(value)}")
     if not 0 <= value <= 1 or not math.isfinite(value):  # el rango primero: math.isfinite(10**400) desborda
-        raise ProbabilityError(f"{name} fuera de [0, 1] o no finita: {value!r}")
+        raise ProbabilityError(f"{name} fuera de [0, 1] o no finita: {_input_repr(value)}")
     return float(value) + 0.0  # -0.0 -> 0.0
 
 
 def _decimal_odds(value) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise OddsError(f"decimal_odds debe ser int o float, no {type(value).__name__}: {value!r}")
+        raise OddsError(f"decimal_odds debe ser int o float, no {type(value).__name__}: {_input_repr(value)}")
     if not value > 1:  # también NaN
-        raise OddsError(f"decimal_odds debe ser > 1: {value!r}")
+        raise OddsError(f"decimal_odds debe ser > 1: {_input_repr(value)}")
     try:
         odds = float(value)
     except OverflowError:
-        raise OddsError(f"decimal_odds no es representable como double finito: {value!r}") from None
+        raise OddsError(f"decimal_odds no es representable como double finito: {_input_repr(value)}") from None
     if not math.isfinite(odds):
-        raise OddsError(f"decimal_odds no finita: {value!r}")
+        raise OddsError(f"decimal_odds no finita: {_input_repr(value)}")
     return odds
 
 
