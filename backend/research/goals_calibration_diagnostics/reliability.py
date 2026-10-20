@@ -27,8 +27,8 @@ los dos resultados del mercado (YES | NO, OVER | UNDER; PUSH, minúsculas, bool 
 liquida nada desde marcadores ni se aplica ninguna política FT/AET/PEN: la exactitud histórica y de
 origen del resultado queda fuera de la autoridad de este diagnóstico. observed = 1 si result == event.
 
-Tiempo (TemporalError): las tres marcas son datetime con utcoffset (no date, no naive) y
-predicted_at < kickoff_at < observed_at, estrictamente. Una predicción emitida en el saque o después,
+Tiempo (TemporalError): las tres marcas son datetime con utcoffset (no date, no naive), representables
+en UTC, y predicted_at < kickoff_at < observed_at, estrictamente. Una predicción emitida en el saque o después,
 o un resultado observado antes del partido, se rechazan. Las marcas no se autentican: que una predicción
 sea anterior al partido según el llamador no la convierte en PIT histórico verificado (TRUE_PIT).
 
@@ -170,7 +170,7 @@ def _target(market, line, event) -> tuple[str, str | None, str]:
 def _probability(value) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ProbabilityError(f"la probabilidad debe ser int o float, no {type(value).__name__}: {value!r}")
-    if not math.isfinite(value) or not 0 <= value <= 1:
+    if not 0 <= value <= 1 or not math.isfinite(value):  # el rango primero: math.isfinite(10**400) desborda (OverflowError)
         raise ProbabilityError(f"probabilidad fuera de [0, 1] o no finita: {value!r}")
     return float(value) + 0.0  # -0.0 -> 0.0
 
@@ -178,7 +178,10 @@ def _probability(value) -> float:
 def _instant(value, name: str) -> datetime:
     if not isinstance(value, datetime) or value.utcoffset() is None:
         raise TemporalError(f"{name} debe ser un datetime con zona horaria: {value!r}")
-    return value.astimezone(timezone.utc)
+    try:
+        return value.astimezone(timezone.utc)
+    except OverflowError:  # p. ej. 0001-01-01 con offset positivo: el instante UTC queda fuera del rango de datetime
+        raise TemporalError(f"{name} no es representable en UTC: {value!r}") from None
 
 
 def _exact_fields(obj, fields: frozenset, what: str) -> None:

@@ -222,6 +222,13 @@ def test_invalid_probabilities_are_rejected_without_clamping(p):
         ou([rec(1, 0.5, "OVER"), rec(2, p, "OVER")])
 
 
+def test_huge_integer_probability_is_a_probability_error_not_overflow():
+    # MOD-DEV-099-D1: math.isfinite(10**400) desborda (OverflowError); debe ser el ProbabilityError documentado
+    with pytest.raises(ProbabilityError) as info:
+        ou([rec(1, 0.5, "OVER"), rec(2, 10**400, "OVER")])
+    assert isinstance(info.value, RecordError)
+
+
 # --- P/Q: resultado observado e identidad del evento ------------------------------------------------
 
 @pytest.mark.parametrize("result", ["PUSH", "over", "YES", "", None, True, 1, 1.0])
@@ -317,6 +324,13 @@ def test_temporal_validation(fields):
 def test_temporal_order_is_compared_as_instants():
     local = datetime(2026, 3, 1, 16, 30, tzinfo=timezone(timedelta(hours=2)))  # 14:30Z, antes del saque
     assert ou([rec(1, 0.5, "OVER", predicted_at=local)]).accepted == 1
+
+
+def test_timestamp_not_representable_in_utc_is_a_temporal_error_not_overflow():
+    # MOD-DEV-099-D1: 0001-01-01T00:00+05:00 es anterior a datetime.min en UTC; astimezone desborda (OverflowError)
+    with pytest.raises(TemporalError) as info:
+        ou([rec(1, 0.5, "OVER", predicted_at=datetime(1, 1, 1, tzinfo=timezone(timedelta(hours=5))))])
+    assert isinstance(info.value, RecordError)
 
 
 # --- S/T: procedencia e inmutabilidad --------------------------------------------------------------
