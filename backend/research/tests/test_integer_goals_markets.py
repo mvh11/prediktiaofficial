@@ -141,6 +141,18 @@ def test_invalid_probability_evidence_is_rejected(probabilities):
         evaluate_integer_over_under([obs("FT", 1, 1, probabilities)], "2.0")
 
 
+@pytest.mark.parametrize("huge", [10 ** 400, -(10 ** 400)], ids=["+10**400", "-10**400"])
+def test_huge_integer_probabilities_are_probability_evidence_errors_not_overflow(huge):
+    # MOD-DEV-101: math.isfinite(±10**400) desborda (OverflowError); el rango se comprueba antes
+    for k in INTEGER_OUTCOMES:
+        probabilities = {**P_A, k: huge}
+        with pytest.raises(ProbabilityEvidenceError, match=f"probabilidad {k} no válida"):
+            validate_integer_probabilities(probabilities)
+        with pytest.raises(ProbabilityEvidenceError, match="observación 0"):
+            evaluate_integer_over_under([obs("FT", 1, 1, probabilities)], "2.0")
+    assert dict(validate_integer_probabilities({"OVER": 1, "UNDER": 0, "PUSH": 0})) == {"OVER": 1, "UNDER": 0, "PUSH": 0}
+
+
 def test_sum_within_tolerance_is_used_without_renormalization():
     p = {"PUSH": 0.2500000005, "UNDER": 0.35, "OVER": 0.4}  # |suma - 1| = 5.0e-10; el orden de las claves no importa
     assert dict(validate_integer_probabilities(p)) == {"OVER": 0.4, "UNDER": 0.35, "PUSH": 0.2500000005}

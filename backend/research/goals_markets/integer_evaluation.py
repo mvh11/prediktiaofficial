@@ -70,7 +70,8 @@ def validate_integer_probabilities(probabilities) -> Mapping[str, float]:
         raise ProbabilityEvidenceError(f"se esperan exactamente las claves {INTEGER_OUTCOMES}: {sorted(map(repr, probabilities))}")
     for k in INTEGER_OUTCOMES:
         p = probabilities[k]
-        if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p) or not 0 <= p <= 1:
+        # el rango antes que la finitud: math.isfinite(10**400) desborda (OverflowError) (MOD-DEV-101)
+        if isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1 or not math.isfinite(p):
             raise ProbabilityEvidenceError(f"probabilidad {k} no válida: {p!r}")
     if abs(math.fsum(probabilities[k] for k in INTEGER_OUTCOMES) - 1) > SUM_TOLERANCE:
         raise ProbabilityEvidenceError(f"las probabilidades no suman 1 (tolerancia {SUM_TOLERANCE}): {dict(probabilities)!r}")

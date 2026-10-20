@@ -79,7 +79,8 @@ def validate_binary_probabilities(probabilities) -> tuple[float, float]:
     if not isinstance(probabilities, (list, tuple)) or len(probabilities) != 2:
         raise ProbabilityEvidenceError(f"se esperan dos probabilidades en una lista o tupla: {probabilities!r}")
     for p in probabilities:
-        if isinstance(p, bool) or not isinstance(p, (int, float)) or not math.isfinite(p) or not 0 <= p <= 1:
+        # el rango antes que la finitud: math.isfinite(10**400) desborda (OverflowError) (MOD-DEV-101)
+        if isinstance(p, bool) or not isinstance(p, (int, float)) or not 0 <= p <= 1 or not math.isfinite(p):
             raise ProbabilityEvidenceError(f"probabilidad no válida: {probabilities!r}")
     if abs(probabilities[0] + probabilities[1] - 1) > SUM_TOLERANCE:
         raise ProbabilityEvidenceError(f"las probabilidades no suman 1 (tolerancia {SUM_TOLERANCE}): {probabilities!r}")

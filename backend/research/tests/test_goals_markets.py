@@ -150,6 +150,17 @@ def test_invalid_probability_vectors_are_rejected(probabilities):
         evaluate_btts([obs("FT", 1, 1, probabilities)])
 
 
+@pytest.mark.parametrize("huge", [10 ** 400, -(10 ** 400)], ids=["+10**400", "-10**400"])
+def test_huge_integer_probabilities_are_probability_evidence_errors_not_overflow(huge):
+    # MOD-DEV-101: math.isfinite(±10**400) desborda (OverflowError); el rango se comprueba antes
+    for probabilities in ((huge, 0.5), (0.5, huge)):
+        with pytest.raises(ProbabilityEvidenceError):
+            validate_binary_probabilities(probabilities)
+        with pytest.raises(ProbabilityEvidenceError, match="observación 0"):
+            evaluate_btts([obs("FT", 1, 1, probabilities)])
+    assert validate_binary_probabilities((0, 1)) == (0, 1) and validate_binary_probabilities([1.0, 0.0]) == (1.0, 0.0)
+
+
 def test_missing_probability_evidence_fails_closed_and_is_never_an_exclusion():
     for row in (obs("FT", 1, 0), obs("FT", 1, 0, None) | {"probabilities": None}):
         with pytest.raises(ProbabilityEvidenceError, match="observación 1"):
