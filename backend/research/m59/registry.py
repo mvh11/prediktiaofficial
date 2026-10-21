@@ -92,7 +92,7 @@ def verify(records: list[dict]) -> list[dict]:
         body = {k: v for k, v in rec.items() if k != "record_hash"}
         try:
             expected = sha256_hex(body)
-        except (TypeError, ValueError):  # contenido sin forma canónica: no lo escribió append
+        except (TypeError, ValueError, RecursionError):  # contenido sin forma canónica (o anidado sin límite): no lo escribió append
             raise RegistryError(f"seq {i}: registro modificado") from None
         if rec.get("record_hash") != expected:
             raise RegistryError(f"seq {i}: registro modificado")

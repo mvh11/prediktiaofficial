@@ -1838,6 +1838,66 @@ def test_sequential_decisions_and_verified_reuse_are_deterministic(tmp_path):
     assert run("a.jsonl") == run("b.jsonl")
 
 
+# MOD-DEV-104A-R1: un registro JSON legible pero anidado más allá del límite de recursión llega al hash canónico; ahí
+# es RegistryError "registro modificado" (846f5eb: RecursionError sin capturar). 1 200 niveles: json.loads lo lee
+# (su límite es mayor) y canonical_json necesita un marco por nivel, por encima del límite de recursión por defecto (1 000).
+
+DEEP_LEVELS = 1_200
+DEEP_JSON = "[" * DEEP_LEVELS + "]" * DEEP_LEVELS
+
+
+def _deep_line(prev_hash, field):
+    """Línea con seq y prev_hash correctos (llega al hash) y un campo anidado DEEP_LEVELS niveles, escrita a mano."""
+    fields = {"kind": '"no_emission"', "prediction_id": '"deep"', "reason": f'"{FIXTURE_UNKNOWN}"', field: DEEP_JSON}
+    body = ",".join(f'"{k}":{v}' for k, v in fields.items())
+    return f'{{{body},"prev_hash":"{prev_hash}","record_hash":"{"0" * 64}","seq":1}}'.encode("utf-8")
+
+
+@pytest.mark.parametrize("field", ["payload", "prediction_id"])
+def test_deeply_nested_record_is_a_registry_error_at_verification(tmp_path, field):
+    reg = Registry(tmp_path / "r.jsonl")
+    first = reg.append(_rec(1))
+    _with_line(reg, _deep_line(first["record_hash"], field))
+    snapshot = reg.records()  # se lee: el JSON es válido
+    assert len(snapshot) == 2 and snapshot[1]["seq"] == 1 and snapshot[1]["prev_hash"] == first["record_hash"]
+    with pytest.raises(RegistryError, match="seq 1: registro modificado"):
+        verify(snapshot)
+    with pytest.raises(RegistryError, match="seq 1: registro modificado"):
+        reg.verified_records()
+
+
+@pytest.mark.parametrize("field", ["payload", "prediction_id"])
+def test_deeply_nested_history_blocks_append_without_writing(tmp_path, field):
+    reg = Registry(tmp_path / "r.jsonl")
+    first = reg.append(_rec(1))
+    _with_line(reg, _deep_line(first["record_hash"], field))
+    damaged = reg.path.read_bytes()
+    with pytest.raises(RegistryError, match="seq 1: registro modificado"):
+        reg.append(_rec(2))
+    assert reg.path.read_bytes() == damaged
+
+
+@pytest.mark.parametrize("field", ["payload", "prediction_id"])
+@pytest.mark.parametrize("kind", ["prediction", "late"])
+def test_deeply_nested_record_blocks_terminal_reuse_before_features_or_writing(reg, world, kind, field):
+    terminal = _terminal(reg, world, kind)
+    _with_line(reg, _deep_line(terminal["record_hash"], field))
+    damaged, calls = reg.path.read_bytes(), len(world.form_calls)
+    world.now = K - timedelta(hours=2) if kind == "prediction" else K - timedelta(hours=3)  # reintento; en LATE, reloj atrás
+    with pytest.raises(RegistryError, match="seq 1: registro modificado"):
+        world.emitter(reg).emit(1)
+    assert reg.path.read_bytes() == damaged and len(world.form_calls) == calls
+
+
+def test_bounded_nesting_written_by_append_still_verifies_and_reuse_is_unchanged(reg, world):
+    nested = json.loads("[" * 50 + "]" * 50)
+    shallow = reg.append(_rec(90, payload=nested))
+    assert shallow["record_hash"] == sha256_hex({k: v for k, v in shallow.items() if k != "record_hash"})
+    terminal = _terminal(reg, world, "prediction")
+    assert reg.verified_records() == [shallow, terminal]
+    assert _retry(world, reg, K - timedelta(hours=2)) == terminal
+
+
 # --- 9. MOD-PAR-029: escenarios S2, S4, S7, S10, S11, S12 y reutilización con metadatos incompletos ---
 
 FULL_IDENTITY = {"home_team_id": 10, "away_team_id": 20, "competition_id": 1}
