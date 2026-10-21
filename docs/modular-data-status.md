@@ -194,6 +194,38 @@
 - **Salvedades conocidas (no bloqueantes):** representación de entradas recursivas patológicas; excepciones de `repr` personalizados hostiles, no soportadas; underflow de coma flotante en casos extremos; la procedencia de las probabilidades y de las cuotas la aporta quien llama.
 - **Alcance de esta entrada:** registra solo MOD-INT-100-101. Las entradas anteriores y la cabecera de este ciclo se conservan tal como se escribieron y no describen el estado actual. El trabajo integrado en staging entre `97ee8d5` y `48e3529` (según los asuntos de sus commits, MOD-DEV-064 a MOD-DEV-099 y MOD-DATA-083) no se registra aquí.
 
+**Addendum de estado — 2026-10-21 (MOD-DOC-INT102-M59-103A-104A-STATE-001; solo investigación, `NOT_CERTIFIED`; sin integrar en `main` ni desplegar):**
+
+Clases: `VERIFIED_REMOTE` (leído en el remoto con `git ls-remote`), `VERIFIED_INDEPENDENT_QA` (QA de PRIMARY_MODULAR, según lo comunicado por MODULAR_PRINCIPAL; este documento no lo demuestra), `TERMINAL_REPORTED` (informado por el terminal que hizo el trabajo) y `PENDING`.
+
+- **A. Cierre de staging MOD-INT102-M59 (MOD-INT102-M59-FF-EXEC-001):**
+  - `VERIFIED_REMOTE`: `origin/integration/a6-main-compat` pasó de `bf0623d86d38d3eaf7deeeaabdf52dde3cc495b0` a `edcf3cd260f6099f7f1bb1d63eb6218328d75372` con un push fast-forward sin forzar, verificado después en el remoto (reflog local: «update by push», 2026-10-21 03:34:32 −03:00).
+  - `TERMINAL_REPORTED`: siete commits lineales sobre `bf0623d`, replays con `cherry-pick -x` y patch-id idéntico al de cada origen revisado: MOD-DEV-050 `a6acf8c`, MOD-DEV-055-R1 `b1e0b33`, R2 `f20d9b6`, R3 `58d8893`, MOD-DEV-102C `fc1c7a7`, 102C-R1 `9ef8e5a` y la entrada documental MOD-INT-100-101 `edcf3cd`. Exactamente seis rutas acumuladas: `backend/research/m59/anchors.py`, `backend/research/m59/emitter.py`, `backend/research/tests/test_m59_contracts.py`, `backend/research/quote_temporal_eligibility/__init__.py`, `backend/research/tests/test_quote_temporal_eligibility.py` y `docs/modular-data-status.md`.
+  - `VERIFIED_INDEPENDENT_QA`: 824/824 passed (679 de `test_m59_contracts.py` + 145 de `test_quote_temporal_eligibility.py`), solo esas dos suites.
+  - **Autorización:** `CHIEF-MOD-INT102-M59-FF-001` CONSUMIDA, según lo comunicado por la dirección; este documento no la demuestra.
+  - `VERIFIED_REMOTE`: `main` sigue en `d3f2bec` y el canónico histórico `integration/di-a6-modular-final` en `1c06ef9c`. No hay despliegue de producción ni de un modelo real.
+- **B. MOD-DEV-103A-R1, cierre de QA local:**
+  - `TERMINAL_REPORTED`: commit `df85c4f4dc3e7537523d548da25313ef0c23d67a` (padre `a284e62954ec3a8caaf736008e2f0d577bc6499e`, MOD-DEV-103A). `backend/research/quote_value_bridge`: puente sintético cuota elegible → cuota justa y EV con los motores existentes. Corrige D-103A-1: una línea Over/Under con exponente extremo (`1E+30`, `9E+999999999`) lanzaba una excepción de `decimal` sin capturar; ahora es `UNSUPPORTED_LINE`.
+  - `VERIFIED_INDEPENDENT_QA`: 101/101 passed en `test_quote_value_bridge.py`.
+  - **Gestión:** `LOCAL_QA_CLOSED` aceptado formalmente por MODULAR_PRINCIPAL, según lo comunicado. Código congelado en local.
+  - **NO publicado en staging** (`df85c4f` no es ancestro de `edcf3cd`). El versionado de cara a consumidores públicos requiere una decisión aparte.
+- **C. MOD-DEV-104A-R1, QA pendiente:**
+  - `TERMINAL_REPORTED`: MOD-DEV-104A `846f5eb9852363bc58e50b81f734b75051e9e3e7` (padre `edcf3cd`): el emisor solo reutiliza una predicción o un LATE guardados desde una lectura del registro verificada entera. Hijo correctivo R1 `96f2100f27121816bfc171cdedc8f81f38800606` (padre `846f5eb`): D-104A-1, un registro anidado en profundidad daba `RecursionError` en el hash canónico; ahora es `RegistryError`. 734/734 passed en `test_m59_contracts.py`, según el terminal propietario.
+  - `PENDING`: QA independiente de PRIMARY sobre `96f2100` activa / pendiente en este punto. `LOCAL_QA_CLOSED` de la dirección NO establecido.
+  - **NO publicado en staging** (ni `846f5eb` ni `96f2100` son ancestros de `edcf3cd`).
+- **D. Límites y ownership que se mantienen:**
+  - MOD-DEV-061 y MOD-DEV-062 siguen en HOLD. M5.10C/D/E, sin relación con esto, quedan excluidos de staging.
+  - No hay primer escritor ni instante de emisión autenticados de forma independiente; ni recepción auténtica de cuotas del proveedor ni mapeos certificados; ni emisor prospectivo de modelos verificado; ni garantía atómica con varios escritores del registro; ni TRUE_PIT ni EV certificado.
+  - Data Integrity es dueña de la implementación del adapter de cuotas. El DTO normalizado de cuotas V1 de DI sigue solo como diseño (`LOGICAL_DIRECTION_CLOSED`, NO congelado), según lo comunicado. No hay ninguna capacidad verificada del proveedor 5Dollar.
+- **E. Próximas puertas (`PENDING`; documentarlas NO autoriza ninguna):**
+  1. QA independiente de PRIMARY sobre el hijo exacto 104A-R1 `96f2100`.
+  2. Decisión de la dirección sobre el cierre local de 104A.
+  3. Posible composición local selectiva, aparte, de 103A y 104A revisados más esta documentación.
+  4. QA independiente del candidato compuesto.
+  5. Evaluación de topología por el Integration Coordinator.
+  6. Una NUEVA aprobación de un solo uso del Chief si más adelante se pide publicar en el staging compartido.
+- **Alcance de este addendum:** registra el estado al 2026-10-21. No modifica las entradas anteriores ni las convierte en estado actual.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
