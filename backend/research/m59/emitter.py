@@ -89,8 +89,11 @@ class Emitter:
         records = self.registry.records()
         for rec in records:  # reinicio / duplicado: la primera emisión manda, también pasado T
             if rec.get("kind") == "prediction" and rec["prediction_id"] == pid:
-                # solo es esta emisión si sus datos de identidad son los que dan pid (antes de escribir nada)
-                if (rec.get("model_set_sha"), rec.get("fixture_id"), rec.get("T")) != (self.model_set_sha, fixture_id, cutoff_iso):
+                # solo es esta emisión si sus datos de identidad son los que dan pid (antes de escribir nada), con su
+                # tipo canónico: True o 1.0 son == 1 en Python pero no dan el mismo id (MOD-DEV-055-R2)
+                stored = (rec.get("model_set_sha"), rec.get("fixture_id"), rec.get("T"))
+                if (stored != (self.model_set_sha, fixture_id, cutoff_iso) or type(stored[1]) is not int
+                        or not all(isinstance(v, str) for v in (stored[0], stored[2])) or prediction_id(*stored) != pid):
                     raise RegistryError("prediction_id ya registrado con otros modelos, partido o T")
                 return rec
         for rec in records:  # sin emisión previa, el primer LATE es definitivo aunque el reloj retroceda

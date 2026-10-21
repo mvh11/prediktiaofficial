@@ -1538,6 +1538,58 @@ def test_ids_that_are_not_the_canonical_one_are_neither_reused_nor_rejected(reg,
     assert verify(reg.records()) == [legacy, rec]  # el registro previo se conserva tal cual
 
 
+# MOD-DEV-055-R2: la identidad guardada tiene que tener su tipo canónico y reproducir el prediction_id. En Python
+# True == 1 y 1.0 == 1, pero en JSON canónico dan otro id: R1 los reutilizaba como la emisión del partido 1.
+
+NON_CANONICAL_FIXTURE_IDS = {"bool-true": True, "float-1.0": 1.0, "text-1": "1", "text-01": "01", "bool-false": False,
+                             "float-1.5": 1.5, "null": None, "list": [1], "object": {"id": 1}}
+
+
+@pytest.mark.parametrize("now", [K - timedelta(hours=3), K - timedelta(minutes=30)], ids=["before-T", "after-T"])
+@pytest.mark.parametrize("fixture_id", list(NON_CANONICAL_FIXTURE_IDS.values()), ids=list(NON_CANONICAL_FIXTURE_IDS))
+def test_stored_fixture_id_without_its_canonical_type_fails_closed(reg, world, fixture_id, now):
+    reg.append(_canonical_record(fixture_id=fixture_id))
+    stored = reg.records()[0]["fixture_id"]
+    assert stored == fixture_id and type(stored) is type(fixture_id)  # el JSON la conserva tal cual
+    assert prediction_id(PINNED_MODEL_SET, stored, T.isoformat()) != PINNED_PREDICTION_ID  # su propio id no es el de 1
+    before = reg.path.read_bytes()
+    world.now = now
+    with pytest.raises(RegistryError, match="otros modelos, partido o T"):
+        world.emitter(reg).emit(1)  # R1: con True o 1.0 devolvía ese registro como la emisión del partido 1
+    assert reg.path.read_bytes() == before and world.form_calls == []
+
+
+@pytest.mark.parametrize("changes", [
+    {"fixture_id": True, "T": T + timedelta(days=1)}, {"fixture_id": 1.0, "model_set_sha": "b" * 64},
+    {"T": T.astimezone(OFFSETS[1]).isoformat()}, {"T": T.astimezone(OFFSETS[4]).isoformat()}, {"model_set_sha": PINNED_MODEL_SET.upper()},
+], ids=["bool-and-other-cutoff", "float-and-other-model-set", "cutoff-as-+02:00-text", "cutoff-as-+14:00-text", "model-set-uppercase"])
+def test_other_non_canonical_stored_identities_fail_closed(reg, world, changes):
+    reg.append(_canonical_record(**changes))  # texto: el mismo instante en otro desplazamiento no es el T canónico guardado
+    before = reg.path.read_bytes()
+    with pytest.raises(RegistryError, match="otros modelos, partido o T"):
+        world.emitter(reg).emit(1)
+    assert reg.path.read_bytes() == before and world.form_calls == []
+
+
+@pytest.mark.parametrize("first, again", [(OFFSETS[1], OFFSETS[2]), (OFFSETS[2], OFFSETS[4]), (OFFSETS[4], OFFSETS[1])],
+                         ids=["+02:00-then--05:00", "-05:00-then-+14:00", "+14:00-then-+02:00"])
+@pytest.mark.parametrize("terminal_at", [K - timedelta(hours=3), K - timedelta(minutes=30)], ids=["prediction", "late"])
+def test_honest_terminal_decisions_keep_their_canonical_identity_and_are_reused(reg, terminal_at, first, again):
+    world = _world_with_kickoff(K.astimezone(first))
+    world.now = terminal_at
+    terminal = world.emitter(reg).emit(1)
+    (stored,) = reg.records()
+    assert type(stored["fixture_id"]) is int and stored["fixture_id"] == 1 and stored["T"] == T.isoformat()
+    if stored["kind"] == "prediction":
+        assert prediction_id(stored["model_set_sha"], stored["fixture_id"], stored["T"]) == stored["prediction_id"] == PINNED_PREDICTION_ID
+    else:
+        assert (stored["reason"], stored["prediction_id"]) == (LATE, PINNED_LATE_ID)
+    world.know(1, terminal_at, kickoff_at=K.astimezone(again), home_team_id=10, away_team_id=20, competition_id=1)  # el mismo K
+    for at in (K - timedelta(hours=2), K - timedelta(minutes=10)):
+        assert _retry(world, reg, at) == terminal
+    assert verify(reg.records()) == [terminal]
+
+
 # --- 9. MOD-PAR-029: escenarios S2, S4, S7, S10, S11, S12 y reutilización con metadatos incompletos ---
 
 FULL_IDENTITY = {"home_team_id": 10, "away_team_id": 20, "competition_id": 1}
