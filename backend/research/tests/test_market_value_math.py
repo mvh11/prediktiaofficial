@@ -284,6 +284,57 @@ def test_ordinary_invalid_input_messages_are_unchanged():
         assert type(exc.value) is error and str(exc.value) == message
 
 
+# MOD-DEV-100-D2: valores no int ya rechazados cuyo repr falla (contienen un int más allá del límite de dígitos)
+UNREPRESENTABLE = [Fraction(HUGE), Fraction(-HUGE), [HUGE, -HUGE], (HUGE, -HUGE), {HUGE: -HUGE, -HUGE: HUGE}]
+POSITIONS = [
+    ("binary.p_win", ProbabilityError, "p_win", lambda v: binary(v, 2.0)),
+    ("push.p_win", ProbabilityError, "p_win", lambda v: push(v, 0.3, 0.2, 2.0)),
+    ("push.p_lose", ProbabilityError, "p_lose", lambda v: push(0.5, v, 0.2, 2.0)),
+    ("push.p_push", ProbabilityError, "p_push", lambda v: push(0.5, 0.3, v, 2.0)),
+    ("binary.odds", OddsError, "decimal_odds", lambda v: binary(0.5, v)),
+    ("push.odds", OddsError, "decimal_odds", lambda v: push(0.4, 0.4, 0.2, v)),
+]
+
+
+@pytest.mark.parametrize("position", POSITIONS, ids=[p[0] for p in POSITIONS])
+@pytest.mark.parametrize("value", UNREPRESENTABLE, ids=["fraction_positive", "fraction_negative", "list", "tuple", "dict"])
+def test_rejected_values_whose_repr_fails_raise_the_documented_error(value, position):
+    _, error, name, call = position
+    with pytest.raises(error) as exc:
+        call(value)
+    kind = type(value).__name__
+    assert type(exc.value) is error and str(exc.value) == f"{name} debe ser int o float, no {kind}: <{kind} no representable>"
+
+
+def test_rejected_value_whose_repr_recurses_too_deeply_raises_the_documented_error():
+    nested = []
+    for _ in range(100_000):
+        nested = [nested]
+    with pytest.raises(ProbabilityError) as exc:
+        binary(nested, 2.0)
+    assert type(exc.value) is ProbabilityError and str(exc.value) == "p_win debe ser int o float, no list: <list no representable>"
+    with pytest.raises(OddsError) as exc:
+        push(0.4, 0.4, 0.2, nested)
+    assert type(exc.value) is OddsError and str(exc.value) == "decimal_odds debe ser int o float, no list: <list no representable>"
+
+
+def test_rejected_values_whose_repr_succeeds_keep_their_repr():
+    limit = sys.get_int_max_str_digits()
+    cases = [
+        (ProbabilityError, lambda: binary(Fraction(1, 2), 2.0), "p_win debe ser int o float, no Fraction: Fraction(1, 2)"),
+        (ProbabilityError, lambda: push(0.5, [0.3], 0.2, 2.0), "p_lose debe ser int o float, no list: [0.3]"),
+        (ProbabilityError, lambda: push(0.5, 0.3, {0.2: 1}, 2.0), "p_push debe ser int o float, no dict: {0.2: 1}"),
+        (OddsError, lambda: binary(0.5, (2.0,)), "decimal_odds debe ser int o float, no tuple: (2.0,)"),
+        (OddsError, lambda: push(0.4, 0.4, 0.2, Fraction(10 ** 400)), f"decimal_odds debe ser int o float, no Fraction: Fraction({10 ** 400}, 1)"),
+        (OddsError, lambda: binary(0.5, [10 ** (limit - 1)]), f"decimal_odds debe ser int o float, no list: [{10 ** (limit - 1)}]"),
+    ]
+    for error, call, message in cases:
+        with pytest.raises(error) as exc:
+            call()
+        assert type(exc.value) is error and str(exc.value) == message
+    assert sys.get_int_max_str_digits() == limit  # el límite global no se toca
+
+
 def test_largest_finite_odds_give_finite_ev():
     r = binary(0.5, MAX)
     assert (r.fair_odds, r.expected_net_return) == (2.0, 0.5 * MAX - 1) and math.isfinite(r.expected_net_return)

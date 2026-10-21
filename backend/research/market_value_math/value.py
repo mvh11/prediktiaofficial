@@ -36,7 +36,9 @@ Validación (sin recorte, normalización, imputación ni conversión de valores 
     El rango se comprueba antes que la finitud: un int enorme (10**400) es ProbabilityError y no
     OverflowError. Se informan como double (int 0/1 -> 0.0/1.0; -0.0 -> 0.0).
     En los mensajes de error, un int con más dígitos que sys.get_int_max_str_digits() no se pasa a
-    decimal: se describe por su signo y su número de bits (MOD-DEV-100-D1).
+    decimal: se describe por su signo y su número de bits (MOD-DEV-100-D1). Si falla el repr de otro valor
+    ya rechazado (un Fraction, list, tuple o dict con un int así), se describe solo por su tipo:
+    <Fraction no representable> (MOD-DEV-100-D2).
   PUSH: |math.fsum(p_win, p_lose, p_push) - 1| <= SUM_TOLERANCE (1e-9, la de research.m510a.evaluate y
     research.goals_markets). Las masas no se reescalan: el EV usa las suministradas.
   decimal_odds: int o float (bool no), > 1 y representable como double finito (NaN, +-inf o un int fuera
@@ -105,13 +107,16 @@ class ValueEvaluation:
 
 
 def _input_repr(value) -> str:
-    """repr para los mensajes de error; un int más allá del límite de CPython se describe por sus bits (MOD-DEV-100-D1)."""
+    """repr para los mensajes de error; un int más allá del límite de CPython se describe por sus bits (MOD-DEV-100-D1)
+    y otro valor ya rechazado cuyo repr falla, solo por su tipo (MOD-DEV-100-D2)."""
     try:
         return repr(value)
-    except ValueError:  # int -> str: "Exceeds the limit (4300 digits)"
+    except ValueError:  # int -> str: "Exceeds the limit (4300 digits)", directo o dentro de Fraction, list, dict...
         if isinstance(value, int):
             return f"<int {'negativo ' if value < 0 else ''}de {value.bit_length()} bits>"
-        raise
+    except (OverflowError, RecursionError):  # RecursionError: p. ej. una list anidada a gran profundidad
+        pass
+    return f"<{type(value).__name__} no representable>"
 
 
 def _probability(value, name: str) -> float:
