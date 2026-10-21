@@ -35,8 +35,16 @@ línea, received_at en UTC); su contenido, (precio, estado, convención, timesta
 mapeo). Dos cuotas con la misma clave y el mismo contenido son equivalentes (da igual su evidence_id) y
 se evalúan igual. Con la misma clave y contenido distinto, TODAS reciben QUOTE_TEMPORAL_AMBIGUITY:
 nunca se elige una por orden ni por valor. Un campo de contenido no válido cuenta como distinto de
-cualquier valor válido (fail-closed). Un mismo evidence_id con received_at distintos es incoherente
-(EVIDENCE_ID_INCONSISTENT) en todas sus cuotas. El resultado no depende del orden de entrada.
+cualquier valor válido (fail-closed). La clave solo exige proveedor, bookmaker, evento, mercado,
+selección, línea y received_at válidos: un evidence_id no válido no oculta el conflicto (MOD-DEV-102C-R1).
+
+Evidencia (MOD-DEV-102C-R1): un evidence_id válido es una respuesta lógica y puede llevar varias cuotas
+(otros bookmakers, eventos, mercados o selecciones). Si aparece en más de una observación, todas tienen
+que probar la misma respuesta: un único proveedor válido, un único received_at válido, un solo
+contenido por clave y un solo mapeo por evento del proveedor. Si no (también si en alguna falta, es
+naive o no se puede normalizar received_at), TODAS las observaciones de ese evidence_id reciben
+EVIDENCE_ID_INCONSISTENT; nunca se elige una ganadora. Un evidence_id no válido no enlaza nada: solo da
+IDENTITY_INVALID a su propia observación. El resultado no depende del orden de entrada.
 
 Procedencia: INPUT_BASIS y LIMITATIONS lo dejan explícito; PIT_STATUS = NOT_CERTIFIED.
 """
@@ -217,10 +225,13 @@ def _positive_int(value) -> bool:
 
 
 def _utc(value) -> datetime | None:
-    """El instante en UTC, o None si no es un datetime con zona horaria."""
-    if isinstance(value, datetime) and value.tzinfo is not None and value.utcoffset() is not None:
-        return value.astimezone(timezone.utc)
-    return None
+    """El instante en UTC, o None si no es un datetime con zona horaria que se pueda pasar a UTC."""
+    if not isinstance(value, datetime) or value.tzinfo is None:
+        return None
+    try:
+        return None if value.utcoffset() is None else value.astimezone(timezone.utc)
+    except (ArithmeticError, TypeError, ValueError):  # desplazamiento fuera de rango o desbordamiento al pasar a UTC
+        return None
 
 
 def _price(value) -> Decimal | None:
@@ -327,13 +338,29 @@ def _check_quote(q: QuoteObservation, ctx: EvaluationContext, issued: datetime):
         elif issued - received > ctx.max_quote_age:
             reasons.append(QUOTE_STALE)
 
-    key = None
-    if identity_ok and not shape and received is not None:
+    key = None  # sin el evidence_id: uno no válido no puede ocultar un conflicto de precio (MOD-DEV-102C-R1)
+    if all(_text(v) for v in (q.provider, q.bookmaker_id, q.provider_event_id)) and not shape and received is not None:
         key = (q.provider, q.bookmaker_id, q.provider_event_id, q.market, q.selection, q.line, received)
     mapping = _INVALID if m is not None and not isinstance(m, MappingProvenance) else (
         None if m is None else tuple(_canonical(v) for v in (m.mapping_ref, m.method, m.provider, m.provider_event_id, m.fixture_id)))
     content = (_INVALID if price is None else price, _canonical(q.quote_status), _canonical(q.settlement_convention), quoted, updated, mapping)
     return reasons, received, key, content
+
+
+def _consistent_evidence(group) -> bool:
+    """Las observaciones de un mismo evidence_id prueban una sola respuesta: un proveedor y un received_at
+    válidos y únicos, un contenido por clave y un mapeo por evento del proveedor (MOD-DEV-102C-R1)."""
+    if any(received is None or not _text(q.provider) for q, received, _, _ in group):
+        return False  # coherencia no probada
+    if len({q.provider for q, *_ in group}) > 1 or len({received for _, received, _, _ in group}) > 1:
+        return False
+    contents, mappings = defaultdict(set), defaultdict(set)
+    for q, _, key, content in group:
+        if key is not None:
+            contents[key].add(content)
+        if _text(q.provider_event_id):
+            mappings[q.provider_event_id].add(content[-1])
+    return all(len(values) == 1 for values in (*contents.values(), *mappings.values()))
 
 
 def evaluate_quote_eligibility(context: EvaluationContext, quotes) -> EligibilityReport:
@@ -346,19 +373,20 @@ def evaluate_quote_eligibility(context: EvaluationContext, quotes) -> Eligibilit
     issued, kickoff = _utc(context.issued_at), _utc(context.kickoff_at)
     checked = [_check_quote(q, context, issued) for q in quotes]
 
-    received_by_evidence, contents_by_key = defaultdict(set), defaultdict(set)
+    by_evidence, contents_by_key = defaultdict(list), defaultdict(set)
     for q, (_, received, key, content) in zip(quotes, checked):
-        if _text(q.evidence_id) and received is not None:
-            received_by_evidence[q.evidence_id].add(received)
+        if _text(q.evidence_id):  # un evidence_id no válido no enlaza observaciones
+            by_evidence[q.evidence_id].append((q, received, key, content))
         if key is not None:
             contents_by_key[key].add(content)
+    inconsistent = {e for e, group in by_evidence.items() if len(group) > 1 and not _consistent_evidence(group)}
 
     outcomes = []
     for position, (q, (reasons, received, key, _)) in enumerate(zip(quotes, checked)):
         found = set(reasons)
         if issued >= kickoff:
             found.add(ISSUED_AT_NOT_BEFORE_KICKOFF)
-        if _text(q.evidence_id) and len(received_by_evidence.get(q.evidence_id, ())) > 1:
+        if _text(q.evidence_id) and q.evidence_id in inconsistent:
             found.add(EVIDENCE_ID_INCONSISTENT)
         if key is not None and len(contents_by_key[key]) > 1:
             found.add(QUOTE_TEMPORAL_AMBIGUITY)

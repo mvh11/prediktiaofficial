@@ -9,7 +9,7 @@ import itertools
 import os
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
 
 import pytest
@@ -313,6 +313,176 @@ def test_several_reasons_are_reported_in_the_fixed_order():
     assert reasons(bad) == (BOOKMAKER_MISMATCH, MAPPING_PROVENANCE_MISSING, QUOTE_STATUS_NOT_ADMISSIBLE, PRICE_INVALID,
                             QUOTE_NOT_KNOWN_AT_ISSUE)
     assert len(set(REASONS)) == len(REASONS)
+
+
+# --- MOD-DEV-102C-R1: ambigüedad y evidencia, fail-closed ---------------------------------------
+
+class _NoOffset(tzinfo):
+    """Zona que no sabe su desplazamiento: el instante no se puede normalizar."""
+
+    def utcoffset(self, dt):
+        return None
+
+    def dst(self, dt):
+        return None
+
+
+class _OutOfRangeOffset(tzinfo):
+    """Zona con un desplazamiento imposible: utcoffset() lanza ValueError."""
+
+    def utcoffset(self, dt):
+        return timedelta(hours=30)
+
+    def dst(self, dt):
+        return None
+
+
+UNNORMALIZABLE = [None, datetime(2026, 1, 10, 11, 30), "2026-01-10T11:30:00Z", at(11, 30).date(),
+                  datetime(2026, 1, 10, 11, 30, tzinfo=_NoOffset()), datetime(2026, 1, 10, 11, 30, tzinfo=_OutOfRangeOffset()),
+                  datetime.min.replace(tzinfo=timezone(timedelta(hours=1)))]
+UNNORMALIZABLE_IDS = ["none", "naive", "text", "date", "tz_without_offset", "offset_out_of_range", "overflow_to_utc"]
+
+
+def by_label(report, order, labels) -> dict:
+    """Resultado por etiqueta del objeto de entrada (varios comparten evidence_id)."""
+    return {labels[id(q)]: (o.status, o.reasons, o.qualified) for q, o in zip(order, report.outcomes)}
+
+
+@pytest.mark.parametrize("c_id, c_reasons", [
+    ("", (IDENTITY_INVALID, QUOTE_TEMPORAL_AMBIGUITY)),
+    (None, (IDENTITY_INVALID, QUOTE_TEMPORAL_AMBIGUITY)),
+    ("   ", (IDENTITY_INVALID, QUOTE_TEMPORAL_AMBIGUITY)),
+    ("evd-c", (QUOTE_TEMPORAL_AMBIGUITY,)),  # control con evidence_id válido
+], ids=["empty", "none", "whitespace", "valid_control"])
+def test_r1_d1_invalid_evidence_id_does_not_mask_a_price_conflict(c_id, c_reasons):
+    c = quote(evidence_id=c_id, decimal_odds=Decimal("2.20"))
+    labels = {id(Q_A): "A", id(c): "C"}
+    for order in ([Q_A, c], [c, Q_A]):
+        report = evaluate(*order)
+        assert by_label(report, order, labels) == {"A": (INELIGIBLE, (QUOTE_TEMPORAL_AMBIGUITY,), None), "C": (INELIGIBLE, c_reasons, None)}
+        assert report.eligible == ()
+
+
+def test_r1_d1_conflict_with_invalid_id_does_not_poison_other_books_events_markets_or_times():
+    c = quote(evidence_id="", decimal_odds=Decimal("2.20"))
+    other_book = quote(evidence_id="evd-b", bookmaker_id="book-b", decimal_odds=Decimal("2.30"))
+    other_event = quote(evidence_id="evd-e", provider_event_id="ev-2", mapping=dataclasses.replace(MAPPING, provider_event_id="ev-2"),
+                        decimal_odds=Decimal("2.40"))
+    other_market = quote(evidence_id="evd-m", market=BTTS, selection="YES", decimal_odds=Decimal("1.80"))
+    other_time = quote(evidence_id="evd-t", provider_quoted_at=at(10, 30), provider_updated_at=at(10, 30), received_at=at(11),
+                       decimal_odds=Decimal("2.05"))
+    quotes = [Q_A, c, other_book, other_event, other_market, other_time]
+    labels = dict(zip(map(id, quotes), ["A", "C", "book", "event", "market", "time"]))
+    result = by_label(evaluate(*quotes), quotes, labels)
+    assert result["A"][:2] == (INELIGIBLE, (QUOTE_TEMPORAL_AMBIGUITY,))
+    assert result["C"][:2] == (INELIGIBLE, (IDENTITY_INVALID, QUOTE_TEMPORAL_AMBIGUITY))
+    assert result["book"][1] == (BOOKMAKER_MISMATCH,) and result["event"][1] == (EVENT_MISMATCH,)
+    assert result["market"][1] == (MARKET_MISMATCH, SELECTION_MISMATCH)
+    assert result["time"][0] == ELIGIBLE and result["time"][2].evidence_id == "evd-t"
+
+
+def test_r1_d1_equivalent_duplicate_with_invalid_id_does_not_reject_the_valid_quote():
+    c = quote(evidence_id="", decimal_odds=Decimal("2.1"))  # mismo contenido que A (2.10 == 2.1)
+    a, dup = evaluate(Q_A, c).outcomes
+    assert (a.status, a.reasons, a.qualified.evidence_id) == (ELIGIBLE, (), "evd-a")
+    assert (dup.status, dup.reasons, dup.qualified) == (INELIGIBLE, (IDENTITY_INVALID,), None)
+
+
+def test_r1_d1_invalid_evidence_ids_are_never_linked_to_each_other():
+    first = quote(evidence_id="", selection="DRAW", provider_quoted_at=at(10), provider_updated_at=at(10), received_at=at(11))
+    second = quote(evidence_id=None, selection="AWAY", received_at=at(11, 45))
+    assert [o.reasons for o in evaluate(first, second).outcomes] == [(IDENTITY_INVALID, SELECTION_MISMATCH)] * 2
+
+
+@pytest.mark.parametrize("bad_received", UNNORMALIZABLE, ids=UNNORMALIZABLE_IDS)
+def test_r1_d2_reused_evidence_id_with_unproven_receipt_rejects_every_occurrence(bad_received):
+    other = quote(selection="DRAW", decimal_odds=Decimal("3.30"), received_at=bad_received)  # mismo evidence_id que A
+    unrelated = quote(evidence_id="evd-u", provider_quoted_at=at(11, 10), provider_updated_at=at(11, 10), received_at=at(11, 20),
+                      decimal_odds=Decimal("2.05"))
+    labels = {id(Q_A): "A", id(other): "O", id(unrelated): "U"}
+    for order in itertools.permutations([Q_A, other, unrelated]):
+        result = by_label(evaluate(*order), order, labels)
+        assert result["A"] == (INELIGIBLE, (EVIDENCE_ID_INCONSISTENT,), None)
+        assert result["O"] == (INELIGIBLE, (SELECTION_MISMATCH, RECEIVED_AT_INVALID, EVIDENCE_ID_INCONSISTENT), None)
+        assert result["U"][0] == ELIGIBLE and result["U"][2].evidence_id == "evd-u"
+
+
+@pytest.mark.parametrize("bad_received", UNNORMALIZABLE, ids=UNNORMALIZABLE_IDS)
+def test_r1_unnormalizable_timestamps_fail_per_observation_without_aborting(bad_received):
+    report = evaluate(quote(evidence_id="evd-x", received_at=bad_received),
+                      quote(evidence_id="evd-y", provider_quoted_at=bad_received, received_at=at(11, 35)), Q_A)
+    assert [o.reasons for o in report.outcomes[:2]] == [(RECEIVED_AT_INVALID,), (PROVIDER_TIMESTAMP_INVALID,) if bad_received is not None else ()]
+    assert report.outcomes[2].status == ELIGIBLE
+
+
+@pytest.mark.parametrize("field", ["issued_at", "kickoff_at"])
+@pytest.mark.parametrize("bad", UNNORMALIZABLE[4:], ids=UNNORMALIZABLE_IDS[4:])
+def test_r1_unnormalizable_context_instants_raise_the_documented_error(field, bad):
+    with pytest.raises(EligibilityInputError):
+        evaluate_quote_eligibility(dataclasses.replace(CONTEXT, **{field: bad}), [Q_A])
+
+
+@pytest.mark.parametrize("changes, a_reasons", [
+    ({"selection": "DRAW", "provider": "prov-other", "mapping": dataclasses.replace(MAPPING, provider="prov-other")},
+     (EVIDENCE_ID_INCONSISTENT,)),
+    ({"selection": "DRAW", "provider": ""}, (EVIDENCE_ID_INCONSISTENT,)),
+    ({"selection": "DRAW", "provider_quoted_at": at(11, 40), "provider_updated_at": at(11, 40), "received_at": at(11, 45)},
+     (EVIDENCE_ID_INCONSISTENT,)),
+    ({"quote_status": SUSPENDED}, (EVIDENCE_ID_INCONSISTENT, QUOTE_TEMPORAL_AMBIGUITY)),
+    ({"decimal_odds": Decimal("2.20")}, (EVIDENCE_ID_INCONSISTENT, QUOTE_TEMPORAL_AMBIGUITY)),
+    ({"selection": "DRAW", "mapping": dataclasses.replace(MAPPING, mapping_ref="map-syn-2")}, (EVIDENCE_ID_INCONSISTENT,)),
+    ({"selection": "DRAW", "mapping": None}, (EVIDENCE_ID_INCONSISTENT,)),
+], ids=["other_provider", "invalid_provider", "other_receipt_time", "same_key_other_status", "same_key_other_price",
+        "same_event_other_mapping", "same_event_without_mapping"])
+def test_r1_d2_reused_evidence_id_with_material_inconsistency_rejects_all(changes, a_reasons):
+    other = quote(**changes)  # mismo evidence_id que A
+    labels = {id(Q_A): "A", id(other): "O"}
+    for order in ([Q_A, other], [other, Q_A]):
+        result = by_label(evaluate(*order), order, labels)
+        assert result["A"] == (INELIGIBLE, a_reasons, None)
+        assert result["O"][0] == INELIGIBLE and EVIDENCE_ID_INCONSISTENT in result["O"][1] and result["O"][2] is None
+
+
+@pytest.mark.parametrize("changes, other_reasons", [
+    ({"selection": "DRAW", "decimal_odds": Decimal("3.30")}, (SELECTION_MISMATCH,)),
+    ({"bookmaker_id": "book-b", "decimal_odds": Decimal("2.30")}, (BOOKMAKER_MISMATCH,)),
+    ({"provider_event_id": "ev-2", "mapping": dataclasses.replace(MAPPING, provider_event_id="ev-2")}, (EVENT_MISMATCH,)),
+    ({"market": BTTS, "selection": "YES"}, (MARKET_MISMATCH, SELECTION_MISMATCH)),
+    ({}, ()),  # la misma observación repetida
+    ({"decimal_odds": Decimal("2.1")}, ()),  # equivalente: mismo valor exacto
+], ids=["other_selection", "other_bookmaker", "other_event", "other_market", "exact_repeat", "equivalent_price"])
+def test_r1_d2_one_response_may_carry_several_quotes_and_equivalent_repeats(changes, other_reasons):
+    """Un evidence_id es una respuesta lógica: otras cuotas de la misma respuesta (mismo proveedor y
+    received_at) no son incoherencias; se rechazan solo por no ser la cuota objetivo."""
+    first, other = evaluate(Q_A, quote(**changes)).outcomes
+    assert (first.status, first.reasons) == (ELIGIBLE, ())
+    assert other.reasons == other_reasons and (other.qualified is None) == bool(other_reasons)
+
+
+R1_MIXED = [
+    Q_A,
+    quote(evidence_id="", decimal_odds=Decimal("2.20")),  # conflicto con A pese al id no válido
+    quote(evidence_id="evd-r", selection="DRAW", received_at=at(11, 40), provider_quoted_at=at(11, 35), provider_updated_at=at(11, 35)),
+    quote(evidence_id="evd-r", selection="AWAY", received_at=None),  # reutiliza evd-r sin recepción válida
+    quote(evidence_id="evd-u", provider_quoted_at=at(11, 10), provider_updated_at=at(11, 10), received_at=at(11, 20)),
+    quote(evidence_id="evd-u2", provider_quoted_at=at(11, 10), provider_updated_at=at(11, 10), received_at=at(11, 20),
+          decimal_odds=Decimal("2.1")),  # equivalente a evd-u
+]
+
+
+def test_r1_outcomes_are_independent_of_input_order():
+    labels = dict(zip(map(id, R1_MIXED), ["A", "C", "R1", "R2", "U", "U2"]))
+    reference = by_label(evaluate(*R1_MIXED), R1_MIXED, labels)
+    assert {k: v[:2] for k, v in reference.items()} == {
+        "A": (INELIGIBLE, (QUOTE_TEMPORAL_AMBIGUITY,)),
+        "C": (INELIGIBLE, (IDENTITY_INVALID, QUOTE_TEMPORAL_AMBIGUITY)),
+        "R1": (INELIGIBLE, (SELECTION_MISMATCH, EVIDENCE_ID_INCONSISTENT)),
+        "R2": (INELIGIBLE, (SELECTION_MISMATCH, RECEIVED_AT_INVALID, EVIDENCE_ID_INCONSISTENT)),
+        "U": (ELIGIBLE, ()),
+        "U2": (ELIGIBLE, ()),
+    }
+    for order in itertools.permutations(R1_MIXED):
+        assert by_label(evaluate(*order), order, labels) == reference
 
 
 # --- determinismo, inmutabilidad e independencia del orden ---------------------------------------
