@@ -13,6 +13,9 @@ Contrato temporal (M5.9A):
   Una predicción registrada se devuelve también pasado T; sin ella, el primer LATE de esos mismos
   (modelos, partido, T) es definitivo y se reutiliza. Los demás motivos se pueden reintentar.
   Solo para un único escritor secuencial: no hay exclusión entre procesos concurrentes.
+- fixture_id: un int >= 1 (bool no); si no, ValueError antes de leer el reloj, el conocimiento o el
+  registro. Un LATE guardado solo se reutiliza si prueba ser el que escribiría _no_emission para esos
+  (modelos, partido, T); uno que lo afirme sin probarlo es RegistryError (MOD-DEV-055-R3).
 """
 
 from collections.abc import Callable
@@ -52,6 +55,26 @@ def _cutoff_iso(cutoff: datetime) -> str:
     return (cutoff if cutoff.utcoffset() is None else cutoff.astimezone(timezone.utc)).isoformat()
 
 
+def _instant(value) -> datetime | None:
+    """El instante de un texto ISO-8601 con zona horaria, o None."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.utcoffset() is not None else None
+
+
+def _canonical_instant(value) -> datetime | None:
+    """El instante solo si el texto es su forma guardada por canonical_json (ISO-8601 en UTC), o None."""
+    parsed = _instant(value)
+    try:
+        return parsed if parsed is not None and parsed.astimezone(timezone.utc).isoformat() == value else None
+    except OverflowError:
+        return None
+
+
 class Emitter:
     def __init__(self, *, clock: Callable[[], datetime], knowledge: Callable[[int, datetime], FixtureFact],
                  form: Callable[[int, int, datetime, datetime], TeamRecentForm], models: dict[str, FrozenModel], registry: Registry):
@@ -73,7 +96,18 @@ class Emitter:
             "kickoff_known": fact.kickoff_at if fact else None, "model_set_sha": self.model_set_sha, "registry_version": REGISTRY_VERSION,
         })
 
+    def _proves_late(self, rec, fixture_id, cutoff_iso) -> bool:
+        """El LATE guardado es el que escribe _no_emission para (modelos, partido, T): tipos canónicos, T = kickoff
+        conocido − 1 h, H = emitted_at estrictamente posterior a T y el prediction_id de su fórmula (MOD-DEV-055-R3)."""
+        t, h, kickoff = (_canonical_instant(rec.get(k)) for k in ("T", "H", "kickoff_known"))
+        return (type(rec.get("fixture_id")) is int and rec["fixture_id"] == fixture_id and rec.get("model_set_sha") == self.model_set_sha
+                and rec.get("T") == cutoff_iso and type(rec.get("registry_version")) is int and rec["registry_version"] == REGISTRY_VERSION
+                and None not in (t, h, kickoff) and rec.get("emitted_at") == rec["H"] and h > t and kickoff - CUTOFF_BEFORE_KICKOFF == t
+                and rec.get("prediction_id") == sha256_hex({"model_set": self.model_set_sha, "fixture_id": fixture_id, "no_emission_at": rec["H"]}))
+
     def emit(self, fixture_id: int) -> dict:
+        if type(fixture_id) is not int or fixture_id < 1:  # antes del reloj, el conocimiento y el registro (MOD-DEV-055-R3)
+            raise ValueError("fixture_id tiene que ser un int >= 1 (bool, float, texto o None no)")
         now = self._now()
         horizon = now
         fact = self.knowledge(fixture_id, horizon)
@@ -96,10 +130,14 @@ class Emitter:
                         or not all(isinstance(v, str) for v in (stored[0], stored[2])) or prediction_id(*stored) != pid):
                     raise RegistryError("prediction_id ya registrado con otros modelos, partido o T")
                 return rec
-        for rec in records:  # sin emisión previa, el primer LATE es definitivo aunque el reloj retroceda
-            if (rec.get("kind") == "no_emission" and rec.get("reason") == LATE and rec.get("model_set_sha") == self.model_set_sha
-                    and rec.get("fixture_id") == fixture_id and rec.get("T") == cutoff_iso):
-                return rec
+        # sin emisión previa, el primer LATE es definitivo aunque el reloj retroceda. Uno que afirma ser de estos (modelos,
+        # partido, T), aunque sea con True, 1.0 u otro desplazamiento, y no lo prueba: RegistryError, ni se devuelve ni se sustituye
+        lates = [rec for rec in records if rec.get("kind") == "no_emission" and rec.get("reason") == LATE
+                 and rec.get("model_set_sha") == self.model_set_sha and rec.get("fixture_id") == fixture_id and _instant(rec.get("T")) == cutoff]
+        if any(not self._proves_late(rec, fixture_id, cutoff_iso) for rec in lates):
+            raise RegistryError("LATE ya registrado para estos modelos, partido y T sin identidad o retraso probados")
+        if lates:
+            return lates[0]
         if late:
             return self._no_emission(fixture_id, LATE, now, cutoff, fact)
         if None in (fact.home_team_id, fact.away_team_id, fact.competition_id):

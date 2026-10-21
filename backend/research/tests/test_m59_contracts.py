@@ -1590,6 +1590,101 @@ def test_honest_terminal_decisions_keep_their_canonical_identity_and_are_reused(
     assert verify(reg.records()) == [terminal]
 
 
+# MOD-DEV-055-R3: fixture_id del llamador estricto antes de cualquier efecto (L2) y un LATE guardado solo se reutiliza si
+# prueba ser el que escribiría _no_emission para (modelos, partido, T) (L1). R2 aceptaba True/1.0 y LATE sin prueba.
+
+class _Untouchable:
+    def records(self):
+        raise AssertionError("registro leído antes de validar fixture_id")
+
+    def append(self, record):
+        raise AssertionError("registro escrito antes de validar fixture_id")
+
+
+BAD_FIXTURE_IDS = {"bool-true": True, "bool-false": False, "float-1.0": 1.0, "float-1.5": 1.5, "text-1": "1", "null": None,
+                   "zero": 0, "negative": -1, "list": [1], "decimal": Decimal(1)}
+
+
+@pytest.mark.parametrize("fixture_id", list(BAD_FIXTURE_IDS.values()), ids=list(BAD_FIXTURE_IDS))
+def test_caller_fixture_id_must_be_a_positive_int_before_any_side_effect(fixture_id):
+    def untouched(*_args):
+        raise AssertionError("efecto antes de validar fixture_id")
+
+    emitter = Emitter(clock=untouched, knowledge=untouched, form=untouched, models=models(), registry=_Untouchable())
+    with pytest.raises(ValueError, match="fixture_id tiene que ser un int >= 1"):
+        emitter.emit(fixture_id)  # R2: leía el reloj y el conocimiento (con True o 1.0 llegaba a emitir una predicción)
+
+
+LATE_AT = K - timedelta(minutes=30)  # el instante de PINNED_LATE_ID
+
+
+def _late_record(at=LATE_AT, **changes):
+    """El LATE que escribe _no_emission en `at` para el partido 1 con los modelos fijados, con cambios."""
+    rec = {"kind": "no_emission", "prediction_id": sha256_hex({"model_set": PINNED_MODEL_SET, "fixture_id": 1, "no_emission_at": at}),
+           "fixture_id": 1, "reason": LATE, "emitted_at": at, "T": T, "H": at, "kickoff_known": K, "model_set_sha": PINNED_MODEL_SET,
+           "registry_version": 1, **changes}
+    return {k: v for k, v in rec.items() if v is not _DROP}
+
+
+FORGED_LATES = {
+    "fixture-true": {"fixture_id": True}, "fixture-1.0": {"fixture_id": 1.0},
+    "before-T-opaque-id": {"at": K - timedelta(hours=5), "prediction_id": "late-opaque"},
+    "before-T-formula-id": {"at": K - timedelta(hours=5)}, "at-T": {"at": T},
+    "emitted-at-not-H": {"emitted_at": LATE_AT + timedelta(minutes=1)}, "opaque-id": {"prediction_id": "late-opaque"},
+    "id-of-another-instant": {"prediction_id": sha256_hex({"model_set": PINNED_MODEL_SET, "fixture_id": 1, "no_emission_at": LATE_AT + timedelta(minutes=1)})},
+    "no-kickoff": {"kickoff_known": _DROP}, "kickoff-not-T-plus-1h": {"kickoff_known": K + timedelta(hours=1)},
+    "registry-version-2": {"registry_version": 2}, "registry-version-true": {"registry_version": True}, "no-registry-version": {"registry_version": _DROP},
+    "T-as-+02:00-text": {"T": T.astimezone(OFFSETS[1]).isoformat()}, "H-as-+02:00-text": {"H": LATE_AT.astimezone(OFFSETS[1]).isoformat()},
+    "H-naive-text": {"H": LATE_AT.replace(tzinfo=None).isoformat()}, "no-H": {"H": _DROP},
+}
+
+
+@pytest.mark.parametrize("now", [K - timedelta(hours=3), K - timedelta(minutes=10)], ids=["before-T", "after-T"])
+@pytest.mark.parametrize("changes", list(FORGED_LATES.values()), ids=list(FORGED_LATES))
+def test_stored_late_claim_without_proof_fails_closed_before_writing(reg, world, changes, now):
+    reg.append(_late_record(**changes))  # el registro genérico lo admite
+    before = reg.path.read_bytes()
+    world.now = now
+    with pytest.raises(RegistryError, match="LATE ya registrado"):
+        world.emitter(reg).emit(1)  # R2: lo devolvía como la decisión terminal (o lo ignoraba y emitía)
+    assert reg.path.read_bytes() == before and world.form_calls == []
+
+
+def test_a_proven_late_record_is_what_no_emission_writes_and_stays_terminal(reg, world, tmp_path):
+    world.now = LATE_AT
+    genuine = world.emitter(Registry(tmp_path / "genuine.jsonl")).emit(1)
+    stored = reg.append(_late_record())
+    assert stored == genuine and stored["prediction_id"] == PINNED_LATE_ID  # mismos bytes que _no_emission
+    for at in (K - timedelta(hours=3), K - timedelta(hours=2), K + timedelta(days=1)):  # el reloj retrocede o avanza
+        assert _retry(world, reg, at) == stored
+    assert verify(reg.records()) == [stored]
+
+
+def test_an_unproven_claim_next_to_a_genuine_late_fails_closed(reg, world):
+    world.now = LATE_AT
+    world.emitter(reg).emit(1)
+    reg.append(_late_record(fixture_id=True, prediction_id="late-forged"))
+    before = reg.path.read_bytes()
+    with pytest.raises(RegistryError, match="LATE ya registrado"):
+        world.emitter(reg).emit(1)  # nunca se elige la que conviene
+    assert reg.path.read_bytes() == before
+
+
+UNRELATED_LATES = {"other-fixture": {"fixture_id": 2}, "other-model-set": {"model_set_sha": "b" * 64}, "other-cutoff": {"T": T + timedelta(days=1)},
+                   "not-late": {"reason": IDENTITY_INVALID}, "prediction-kind": {"kind": "prediction"}, "unparseable-T": {"T": "not-a-time"}}
+
+
+@pytest.mark.parametrize("now", [K - timedelta(hours=3), K - timedelta(minutes=10)], ids=["before-T", "after-T"])
+@pytest.mark.parametrize("changes", list(UNRELATED_LATES.values()), ids=list(UNRELATED_LATES))
+def test_unproven_records_of_other_keys_do_not_block_a_legitimate_decision(reg, world, changes, now):
+    unrelated = reg.append(_late_record(prediction_id="unrelated", **changes))
+    world.now = now
+    rec = world.emitter(reg).emit(1)
+    assert (rec["kind"], rec.get("reason")) == (("prediction", None) if now < T else ("no_emission", LATE))
+    assert rec["prediction_id"] in (PINNED_PREDICTION_ID, sha256_hex({"model_set": PINNED_MODEL_SET, "fixture_id": 1, "no_emission_at": now}))
+    assert verify(reg.records()) == [unrelated, rec]
+
+
 # --- 9. MOD-PAR-029: escenarios S2, S4, S7, S10, S11, S12 y reutilización con metadatos incompletos ---
 
 FULL_IDENTITY = {"home_team_id": 10, "away_team_id": 20, "competition_id": 1}
