@@ -179,6 +179,21 @@
 - **Pendiente (NO resuelto):** la evaluación histórica; la integración de un dataset histórico real; los contratos con Data Integrity. No ha habido activación de producción.
 - **Gobierno:** cierre solo documental; no está listo para producción; sin cambios en Data Integrity; sin esquemas ni migraciones; sin activación de producción ni del scheduler; sin promoción a `main`; sin push.
 
+**Cierre de integración MOD-INT-100-101 — 2026-10-20/21 (`origin/integration/a6-main-compat`, staging compartido; sin integrar en `main` ni desplegar):**
+
+- **Estado:** `SHARED_STAGING_INTEGRATED` / DONE.
+- **Destino:** `origin/integration/a6-main-compat`. HEAD de staging verificado: `bf0623d86d38d3eaf7deeeaabdf52dde3cc495b0`. Base de staging anterior: `48e35293e7beb1c891037c8535d024eee434c2f0`.
+- **Composición:** cinco commits lineales sobre la base, sin merges. MOD-DEV-101: `cff6d638` → `508ab7e` (R1). Replay de MOD-DEV-100: `fd6e2f3` → `066f375` → `bf0623d`, que corresponden al original, D1 y D2 (orígenes `32bc09a`, `64301e9` y `dc9bea7`), reproducidos con `cherry-pick -x` y con equivalencia de parche verificada (patch-id estable idéntico al de cada origen).
+- **Alcance:** exactamente siete rutas de `backend/research`: cuatro modificadas por MOD-DEV-101 (`goals_markets/evaluation.py`, `goals_markets/integer_evaluation.py`, `tests/test_goals_markets.py` y `tests/test_integer_goals_markets.py`) y tres añadidas por MOD-DEV-100 (`market_value_math/__init__.py`, `market_value_math/value.py` y `tests/test_market_value_math.py`). Fuera de esas rutas, el árbol es idéntico a la base.
+- **QA independiente (MOD-QA-INT100-101-FINAL-CANDIDATE-001, PRIMARY_MODULAR_TERMINAL, sobre una exportación aislada de `bf0623d`):** 280/280 passed: 61 binarios (`test_goals_markets.py`), 70 enteros (`test_integer_goals_markets.py`) y 149 de valor de mercado (`test_market_value_math.py`). Solo esas tres suites: el resto de `research/tests` y la suite completa del backend NO se han ejecutado sobre este commit.
+- **Autorización:** `CHIEF-MOD-INT100-101-FF-001` CONSUMIDA, según lo comunicado por la dirección (MODULAR_PRINCIPAL, Slack). Este documento no la demuestra por sí mismo y no hay registro previo en el repositorio.
+- **Verificación remota:** MODULAR_PRINCIPAL verificó de forma independiente en GitHub el HEAD remoto de staging, según lo comunicado. En local, `origin/integration/a6-main-compat` apunta a `bf0623d` (reflog: «update by push», 2026-10-20 23:42:35 −03:00).
+- **Canónico histórico:** `integration/di-a6-modular-final` sigue en `1c06ef9c`.
+- **Checkout local obsoleto:** la rama local `integration/a6-main-compat` está en `97ee8d5` a propósito. Está obsoleta y no se debe confundir con la rama remota.
+- **Límites:** sin promoción a `main`, al canónico ni a producción; sin cambios en Data Integrity; sin esquemas ni migraciones. No es una certificación TRUE_PIT ni una garantía de EV económico aprovechable.
+- **Salvedades conocidas (no bloqueantes):** representación de entradas recursivas patológicas; excepciones de `repr` personalizados hostiles, no soportadas; underflow de coma flotante en casos extremos; la procedencia de las probabilidades y de las cuotas la aporta quien llama.
+- **Alcance de esta entrada:** registra solo MOD-INT-100-101. Las entradas anteriores y la cabecera de este ciclo se conservan tal como se escribieron y no describen el estado actual. El trabajo integrado en staging entre `97ee8d5` y `48e3529` (según los asuntos de sus commits, MOD-DEV-064 a MOD-DEV-099 y MOD-DATA-083) no se registra aquí.
+
 **Cierre de M5.7 (cerrado para desarrollo Modular; sin integrar en `main` ni desplegar):**
 
 - **Readiness:** apta para experimentación en backtest retrospectivo y marcado (`HISTORICAL_BACKTEST` con H fijo; ~73 % de features utilizables). No apta para simular conocimiento operativo estricto hasta que haya evidencia de fixtures en producción.
