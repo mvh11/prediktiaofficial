@@ -281,6 +281,47 @@ def test_g_other_unsupported_targets(engine, tgt, reason):
     assert (result.status, result.reasons) == (UNSUPPORTED, (reason,)) and engine == {"binary": [], "push": []}
 
 
+# MOD-DEV-103A-R1: una línea Over/Under con exponente extremo o forma no canónica es UNSUPPORTED, nunca una excepción de
+# decimal (a284e629: "1E+30" lanzaba InvalidOperation/DivisionImpossible y "9E+999999999", Overflow, en _line_kind)
+
+EXTREME_LINES = {
+    "1E+30": UNSUPPORTED_LINE, "9E+999999999": UNSUPPORTED_LINE, "1E+28": UNSUPPORTED_LINE, "4E+27": UNSUPPORTED_LINE,
+    "-9E+999999999": UNSUPPORTED_LINE, "1E-999999999": UNSUPPORTED_LINE, "9E+999999999999999999": UNSUPPORTED_LINE,
+    "2.5E0": UNSUPPORTED_LINE, "25E-1": UNSUPPORTED_LINE, "+2.5": UNSUPPORTED_LINE, "2.50": UNSUPPORTED_LINE, " 2.5": UNSUPPORTED_LINE,
+    "1e3": UNSUPPORTED_LINE, "-0": UNSUPPORTED_LINE, "Infinity": UNSUPPORTED_LINE, "NaN": UNSUPPORTED_LINE, "sNaN": UNSUPPORTED_LINE,
+    "2.2500000000000000000000000001": UNSUPPORTED_LINE,  # no es 2.25 exacto: no es de cuarto
+    "+2.25": UNSUPPORTED_QUARTER_LINE, "2.250": UNSUPPORTED_QUARTER_LINE, "225E-2": UNSUPPORTED_QUARTER_LINE, "1E+3.25": UNSUPPORTED_LINE,
+}
+
+
+@pytest.mark.parametrize("line", list(EXTREME_LINES), ids=[f"line[{line}]" for line in EXTREME_LINES])
+def test_r1_extreme_or_noncanonical_lines_are_unsupported_without_raising(engine, monkeypatch, line):
+    monkeypatch.setattr(bridge, "evaluate_quote_eligibility", lambda *a: pytest.fail("no se evalúa la elegibilidad"))
+    ctx = context(target(OVER_UNDER, "OVER", line))
+    snapshot = copy.deepcopy(ctx)
+    first, again = (evaluate_quote_value(ctx, [ou_quote("2.5")], probs(ctx, p_win=0.5)) for _ in range(2))
+    assert (first.status, first.reasons, first.eligible_count, first.quotes_received) == (UNSUPPORTED, (EXTREME_LINES[line],), None, 0)
+    assert first == again and ctx == snapshot and first.valuation is None and engine == {"binary": [], "push": []}
+
+
+@pytest.mark.parametrize("line, kind", [("2.0", "push"), ("2.5", "binary"), ("2.25", None)], ids=["integer", "half", "quarter"])
+def test_r1_canonical_lines_keep_their_behavior(engine, line, kind):
+    ctx = context(target(OVER_UNDER, "OVER", line))
+    masses = {"p_win": 0.4, "p_lose": 0.35, "p_push": 0.25} if kind == "push" else {"p_win": 0.55}
+    result = evaluate_quote_value(ctx, [ou_quote(line)], probs(ctx, **masses))
+    if kind is None:
+        assert (result.status, result.reasons) == (UNSUPPORTED, (UNSUPPORTED_QUARTER_LINE,)) and engine == {"binary": [], "push": []}
+    else:
+        assert result.status == VALUE_EVALUATED and len(engine[kind]) == 1 and engine["push" if kind == "binary" else "binary"] == []
+
+
+def test_r1_extreme_line_is_reported_before_context_validation_as_before(engine):
+    """Orden documentado: la semántica del objetivo se comprueba antes que el resto del contexto."""
+    ctx = context(target(OVER_UNDER, "OVER", "9E+999999999"), issued_at=datetime(2026, 1, 10, 12))  # issued_at naive
+    result = evaluate_quote_value(ctx, [ou_quote("2.5")], probs(ctx))
+    assert (result.status, result.reasons) == (UNSUPPORTED, (UNSUPPORTED_LINE,)) and engine == {"binary": [], "push": []}
+
+
 # --- H: probabilidades -----------------------------------------------------------------------------
 
 @pytest.mark.parametrize("p, expected", [

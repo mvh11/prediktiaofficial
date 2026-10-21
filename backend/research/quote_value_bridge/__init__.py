@@ -42,6 +42,7 @@ import math
 from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from fractions import Fraction
 
 from research.market_value_math import value as market_value
 from research.quote_temporal_eligibility import MARKET_SELECTIONS, OVER_UNDER
@@ -53,6 +54,7 @@ BRIDGE_ID = "QUOTE_VALUE_BRIDGE"
 BRIDGE_VERSION = "1"
 VALUE_EVALUATED, NO_VALUE, UNSUPPORTED = "VALUE_EVALUATED", "NO_VALUE", "UNSUPPORTED"
 NUMERIC_BASIS = "IEEE754_DOUBLE_APPROXIMATE_FROM_NEAREST_DOUBLE_OF_DECIMAL_ODDS"
+_LINE_DIGIT_BOUND = 30  # una línea con forma: menos de 10**31 y como mucho 30 decimales (antes de operar con ella)
 
 # Motivos, en el orden en que se informan
 UNSUPPORTED_MARKET = "UNSUPPORTED_MARKET"
@@ -132,9 +134,11 @@ def _line_kind(line) -> str | None:
         value = Decimal(line)
     except (InvalidOperation, ValueError):
         return None
-    if value.is_finite() and value >= 0 and (value * 4) % 1 == 0 and (value * 2) % 1 != 0:
-        return "QUARTER"
-    return None
+    # Sin aritmética Decimal (con 1E+30 o 9E+999999999 lanzaba InvalidOperation u Overflow, MOD-DEV-103A-R1): fuera de una
+    # magnitud y una precisión acotadas no es una línea; dentro, la parte fraccionaria exacta decide si es de cuarto
+    if not value.is_finite() or value.is_signed() or value.adjusted() > _LINE_DIGIT_BOUND or value.as_tuple().exponent < -_LINE_DIGIT_BOUND:
+        return None
+    return "QUARTER" if Fraction(value) % 1 in (Fraction(1, 4), Fraction(3, 4)) else None
 
 
 def _unsupported(target) -> str | None:
