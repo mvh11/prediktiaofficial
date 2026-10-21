@@ -16,6 +16,9 @@ Contrato temporal (M5.9A):
 - fixture_id: un int >= 1 (bool no); si no, ValueError antes de leer el reloj, el conocimiento o el
   registro. Un LATE guardado solo se reutiliza si prueba ser el que escribiría _no_emission para esos
   (modelos, partido, T); uno que lo afirme sin probarlo es RegistryError (MOD-DEV-055-R3).
+- Una predicción o un LATE guardados solo se reutilizan desde una lectura del registro con la cadena
+  verificada entera (Registry.verified_records); una cadena rota o una línea ilegible es RegistryError
+  antes de calcular features o escribir (MOD-DEV-104A).
 """
 
 from collections.abc import Callable
@@ -120,7 +123,7 @@ class Emitter:
         cutoff_iso = _cutoff_iso(cutoff)
         pid = prediction_id(self.model_set_sha, fixture_id, cutoff_iso)
         # Decisiones terminales de (modelos, partido, T), antes de mirar el reloj: no se repiten ni se duplican.
-        records = self.registry.records()
+        records = self.registry.verified_records()  # una lectura, verificada; la misma para predicción y LATE (MOD-DEV-104A)
         for rec in records:  # reinicio / duplicado: la primera emisión manda, también pasado T
             if rec.get("kind") == "prediction" and rec["prediction_id"] == pid:
                 # solo es esta emisión si sus datos de identidad son los que dan pid (antes de escribir nada), con su

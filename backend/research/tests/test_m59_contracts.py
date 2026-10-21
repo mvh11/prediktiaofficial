@@ -1685,6 +1685,159 @@ def test_unproven_records_of_other_keys_do_not_block_a_legitimate_decision(reg, 
     assert verify(reg.records()) == [unrelated, rec]
 
 
+# MOD-DEV-104A: una predicción o un LATE guardados solo se reutilizan desde una lectura del registro verificada entera.
+# Antes el emisor leía records() sin verificar: una cadena rota alrededor de un registro terminal lo devolvía igual.
+
+def _terminal(reg, world, kind):
+    """Decisión terminal genuina del partido 1: una predicción (antes de T) o un LATE (en K − 30 min)."""
+    world.now = K - timedelta(hours=3) if kind == "prediction" else LATE_AT
+    rec = world.emitter(reg).emit(1)
+    assert rec["kind"] == ("prediction" if kind == "prediction" else "no_emission")
+    return rec
+
+
+def _with_line(reg, line: bytes):
+    reg.path.write_bytes(reg.path.read_bytes() + line + b"\n")
+
+
+def _rewrite(reg, change):
+    """Reescribe el registro 0 tal cual lo cambia `change`, sin recalcular su huella."""
+    (rec,) = reg.records()
+    change(rec)
+    reg.path.write_bytes((canonical_json(rec) + "\n").encode("utf-8"))
+
+
+def _bad_prev(reg):
+    junk = {"kind": "no_emission", "prediction_id": "junk", "reason": FIXTURE_UNKNOWN, "seq": 1, "prev_hash": GENESIS}
+    _with_line(reg, canonical_json(_rehash(junk)).encode("utf-8"))  # su propia huella es buena; no enlaza con el anterior
+
+
+def _duplicate(reg):
+    (rec,) = reg.records()
+    copies = _rechain([rec, json.loads(json.dumps(rec))])
+    reg.path.write_bytes("".join(canonical_json(r) + "\n" for r in copies).encode("utf-8"))
+
+
+BROKEN_REGISTRIES = {
+    "next-record-bad-prev-hash": (_bad_prev, "seq 1: prev_hash no enlaza"),
+    "content-tampered": (lambda reg: _rewrite(reg, lambda r: r.update(note="alterado")), "seq 0: registro modificado"),
+    "seq-erased": (lambda reg: _rewrite(reg, lambda r: r.pop("seq")), "seq None en la posición 0"),
+    "seq-null": (lambda reg: _rewrite(reg, lambda r: r.update(seq=None)), "seq None en la posición 0"),
+    "prev-hash-erased": (lambda reg: _rewrite(reg, lambda r: r.pop("prev_hash")), "seq 0: prev_hash no enlaza"),
+    "prev-hash-empty": (lambda reg: _rewrite(reg, lambda r: r.update(prev_hash="")), "seq 0: prev_hash no enlaza"),
+    "record-hash-erased": (lambda reg: _rewrite(reg, lambda r: r.pop("record_hash")), "seq 0: registro modificado"),
+    "record-hash-empty": (lambda reg: _rewrite(reg, lambda r: r.update(record_hash="")), "seq 0: registro modificado"),
+    "duplicate-prediction-id": (_duplicate, "seq 1: prediction_id duplicado"),
+    "torn-json-line": (lambda reg: _with_line(reg, b'{"kind":"pred'), "línea ilegible"),
+    "array-line": (lambda reg: _with_line(reg, b"[1, 2]"), "posición 1: el registro no es un objeto"),
+    "null-line": (lambda reg: _with_line(reg, b"null"), "posición 1: el registro no es un objeto"),
+    "text-line": (lambda reg: _with_line(reg, b'"x"'), "posición 1: el registro no es un objeto"),
+    "invalid-utf8": (lambda reg: _with_line(reg, b"\xff\xfe"), "línea ilegible"),
+    "int-beyond-str-limit": (lambda reg: _with_line(reg, b'{"x": 1' + b"0" * 5000 + b"}"), "línea ilegible"),
+    "pathological-nesting": (lambda reg: _with_line(reg, b"[" * 100_000 + b"]" * 100_000), "línea ilegible"),
+}
+
+
+@pytest.mark.parametrize("kind", ["prediction", "late"])
+@pytest.mark.parametrize("name", BROKEN_REGISTRIES)
+def test_a_terminal_record_is_not_reused_from_a_registry_whose_chain_fails(reg, world, kind, name):
+    _terminal(reg, world, kind)
+    corrupt, message = BROKEN_REGISTRIES[name]
+    corrupt(reg)
+    damaged, calls = reg.path.read_bytes(), len(world.form_calls)
+    world.now = K - timedelta(hours=2) if kind == "prediction" else K - timedelta(hours=3)  # reintento; en LATE, reloj atrás
+    with pytest.raises(RegistryError, match=message):
+        world.emitter(reg).emit(1)  # edcf3cd: devolvía el registro terminal (o fallaba con otro error)
+    assert reg.path.read_bytes() == damaged and len(world.form_calls) == calls  # ni features ni escritura
+
+
+@pytest.mark.parametrize("name", ["next-record-bad-prev-hash", "torn-json-line", "null-line"])
+def test_a_broken_registry_blocks_a_new_decision_before_features_or_writing(reg, world, name):
+    reg.append(_rec(90))  # un registro ajeno: no hay decisión terminal del partido 1
+    BROKEN_REGISTRIES[name][0](reg)
+    damaged = reg.path.read_bytes()
+    world.now = K - timedelta(hours=3)
+    with pytest.raises(RegistryError):
+        world.emitter(reg).emit(1)
+    assert reg.path.read_bytes() == damaged and world.form_calls == []
+
+
+def test_verified_records_is_one_read_of_the_file_and_returns_that_verified_snapshot(reg, world, monkeypatch):
+    first, second = _terminal(reg, world, "prediction"), reg.append(_rec(90))
+    reads = []
+    real_read = type(reg.path).read_text
+    monkeypatch.setattr(type(reg.path), "read_text", lambda self, *a, **k: reads.append(self) or real_read(self, *a, **k))
+    snapshot = reg.verified_records()
+    assert snapshot == [first, second] == reg.records() and len(reads) == 2  # una lectura cada una
+    assert verify(snapshot) is snapshot
+
+
+def test_reuse_reads_the_registry_once_through_the_verified_snapshot(reg, world, monkeypatch):
+    terminal = _terminal(reg, world, "prediction")
+    calls = {"verified": 0, "raw": 0}
+    real_verified, real_raw = Registry.verified_records, Registry.records
+    monkeypatch.setattr(Registry, "verified_records", lambda self: calls.__setitem__("verified", calls["verified"] + 1) or real_verified(self))
+    monkeypatch.setattr(Registry, "records", lambda self: calls.__setitem__("raw", calls["raw"] + 1) or real_raw(self))
+    world.now = K - timedelta(hours=2)
+    assert world.emitter(reg).emit(1) == terminal and calls == {"verified": 1, "raw": 0}
+
+
+def test_append_reports_an_unreadable_line_as_a_registry_error(reg):
+    reg.append(_rec(1))
+    _with_line(reg, b'{"kind":"pred')
+    damaged = reg.path.read_bytes()
+    with pytest.raises(RegistryError, match="línea ilegible"):  # edcf3cd: json.JSONDecodeError
+        reg.append(_rec(2))
+    with pytest.raises(ValueError):  # records() sigue siendo una lectura sin verificar
+        reg.records()
+    assert reg.path.read_bytes() == damaged
+
+
+@pytest.mark.parametrize("terminal_kind", ["prediction", "late"])
+def test_honest_terminal_decisions_are_still_reused_from_an_intact_multi_record_chain(reg, world, terminal_kind):
+    reg.append(_rec(90))
+    terminal = _terminal(reg, world, terminal_kind)
+    reg.append(_rec(91))
+    before = reg.path.read_bytes()
+    for at in (K - timedelta(hours=3), K - timedelta(hours=2), K + timedelta(days=1)):
+        assert _retry(world, reg, at) == terminal
+    assert verify(reg.records())[1] == terminal and reg.path.read_bytes() == before
+
+
+@pytest.mark.parametrize("fixture_id", [True, 1.0, "1", None, 0])
+def test_invalid_caller_fixture_id_still_fails_before_any_registry_read(fixture_id):
+    class Untouchable:
+        def verified_records(self):
+            raise AssertionError("registro verificado leído antes de validar fixture_id")
+
+        def records(self):
+            raise AssertionError("registro leído antes de validar fixture_id")
+
+        def append(self, record):
+            raise AssertionError("registro escrito antes de validar fixture_id")
+
+    def untouched(*_args):
+        raise AssertionError("efecto antes de validar fixture_id")
+
+    with pytest.raises(ValueError, match="fixture_id tiene que ser un int >= 1"):
+        Emitter(clock=untouched, knowledge=untouched, form=untouched, models=models(), registry=Untouchable()).emit(fixture_id)
+
+
+def test_sequential_decisions_and_verified_reuse_are_deterministic(tmp_path):
+    def run(name):
+        w = World()
+        for fid in (1, 2, 3):
+            w.know(fid, K - timedelta(days=30), kickoff_at=K + timedelta(hours=fid - 1), home_team_id=10, away_team_id=20, competition_id=1)
+        r = Registry(tmp_path / name)
+        w.now = K - timedelta(minutes=30)  # 1: LATE; 2 y 3: predicciones
+        decisions = [w.emitter(r).emit(fid) for fid in (1, 2, 3)]
+        w.now = K - timedelta(hours=3)
+        assert [w.emitter(r).emit(fid) for fid in (1, 2, 3)] == decisions and verify(r.records()) == decisions
+        return r.path.read_bytes()
+
+    assert run("a.jsonl") == run("b.jsonl")
+
+
 # --- 9. MOD-PAR-029: escenarios S2, S4, S7, S10, S11, S12 y reutilización con metadatos incompletos ---
 
 FULL_IDENTITY = {"home_team_id": 10, "away_team_id": 20, "competition_id": 1}

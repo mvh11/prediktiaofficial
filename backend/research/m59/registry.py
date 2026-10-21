@@ -6,6 +6,10 @@ GENESIS en el primero) y record_hash = sha256 del resto. Dos tipos:
 - "no_emission": decisión de NO emitir con su motivo (cuenta en los denominadores de cobertura).
 prediction_id es determinista (modelo + partido + T): reemitir tras un reinicio no duplica nada.
 verify() detecta registros modificados, eliminados, duplicados o reordenados.
+records() solo lee; verified_records() lee el archivo UNA vez y devuelve exactamente esa lectura ya
+verificada con verify() (una línea ilegible también es RegistryError). Es lo que usan append() y la
+reutilización del emisor (MOD-DEV-104A). No hay bloqueo entre procesos: la verificación de una lectura no
+hace atómica una escritura posterior, y una cadena reescrita entera con hashes válidos sigue pasando.
 """
 
 import json
@@ -32,7 +36,15 @@ class Registry:
         self.path.touch(exist_ok=True)
 
     def records(self) -> list[dict]:
-        return [json.loads(line) for line in self.path.read_text(encoding="utf-8").splitlines() if line]
+        return _parse(self.path.read_text(encoding="utf-8"))
+
+    def verified_records(self) -> list[dict]:
+        """Una sola lectura, verificada con verify(): se devuelven esos mismos registros, sin releer el archivo."""
+        try:
+            snapshot = _parse(self.path.read_text(encoding="utf-8"))
+        except (ValueError, RecursionError):  # UTF-8 o JSON no válidos, un int demasiado largo o un anidamiento patológico
+            raise RegistryError("el registro tiene una línea ilegible") from None
+        return verify(snapshot)
 
     def head(self) -> tuple[int, str]:
         recs = self.records()
@@ -43,7 +55,7 @@ class Registry:
         si ya existe uno idéntico en contenido se devuelve ese; si difiere, error (no se reescribe)."""
         if record.get("kind") not in KINDS or "prediction_id" not in record:
             raise RegistryError("registro sin tipo o sin prediction_id")
-        existing = verify(self.records())
+        existing = self.verified_records()
         for rec in existing:
             if rec["prediction_id"] == record["prediction_id"]:
                 body = {k: v for k, v in rec.items() if k not in ("seq", "prev_hash", "record_hash", "emitted_at")}
@@ -57,6 +69,11 @@ class Registry:
         with self.path.open("a", encoding="utf-8", newline="\n") as f:
             f.write(canonical_json(full) + "\n")
         return full
+
+
+def _parse(text: str) -> list:
+    """Cada línea no vacía es un JSON (lo escribe append con canonical_json)."""
+    return [json.loads(line) for line in text.splitlines() if line]
 
 
 def verify(records: list[dict]) -> list[dict]:
