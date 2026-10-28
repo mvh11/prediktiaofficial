@@ -473,3 +473,167 @@ def test_r1_base_exceptions_are_not_swallowed_by_rendering(monkeypatch, exc):
     monkeypatch.setattr(cohort_diagnostics, "_type_name", interrupted)
     with pytest.raises(exc):
         declare_cohort([object()])
+
+
+# MOD-DEV-105A-R2: el nombre de una clase puede ser un str derivado con métodos hostiles; el mensaje nunca los ejecuta.
+
+NAME_CALLS = []
+
+
+class FormatName(str):
+    def __format__(self, spec):
+        NAME_CALLS.append("format")
+        return "N" * 1_000_000
+
+
+class StrName(str):
+    def __str__(self):
+        NAME_CALLS.append("str")
+        raise RuntimeError("str hostil")
+
+
+class ReprName(str):
+    def __repr__(self):
+        NAME_CALLS.append("repr")
+        raise TypeError("repr hostil")
+
+
+class EverythingName(str):
+    """Todo lo que una conversión ingenua llamaría: formato gigante, str/repr que lanzan, len que miente, slicing y suma gigantes."""
+
+    def __format__(self, spec):
+        NAME_CALLS.append("format")
+        return "N" * 1_000_000
+
+    def __str__(self):
+        NAME_CALLS.append("str")
+        raise RuntimeError("str hostil")
+
+    def __repr__(self):
+        NAME_CALLS.append("repr")
+        raise TypeError("repr hostil")
+
+    def __len__(self):
+        NAME_CALLS.append("len")
+        return 1
+
+    def __getitem__(self, key):
+        NAME_CALLS.append("getitem")
+        return "G" * 1_000_000
+
+    def __add__(self, other):
+        NAME_CALLS.append("add")
+        return "A" * 1_000_000
+
+    __radd__ = __add__
+
+
+WeirdFormat = type(FormatName("W"), (), {})  # D: el nombre se fija al construir la clase
+WeirdStr = type(StrName("S"), (), {})
+WeirdRepr = type(ReprName("R"), (), {})
+WeirdEverything = type(EverythingName("E" * 100), (), {})
+
+
+class Renamed:
+    pass
+
+
+Renamed.__name__ = FormatName("P")  # E: el nombre se reasigna después
+HostileList = type(FormatName("L"), (list,), {})
+HostileTuple = type(FormatName("T"), (tuple,), {})
+
+HOSTILE_NAMES = [
+    pytest.param(WeirdFormat, "W", id="A-format-1M"),
+    pytest.param(WeirdStr, "S", id="B-str-raises"),
+    pytest.param(WeirdRepr, "R", id="C-repr-raises"),
+    pytest.param(WeirdEverything, "E" * 40 + "...", id="all-methods-long-name"),
+    pytest.param(Renamed, "P", id="E-reassigned-name"),
+]
+HOSTILE_POSITIONS = [
+    pytest.param(lambda v: declare_cohort([v]), FIXTURE_ID_INVALID, "fixture inscrito inválido: ", id="F-cohort-entry"),
+    pytest.param(lambda v: evaluate_cohort([1], [(v, INFORMATIVE)]), FIXTURE_ID_INVALID, "fixture de estado inválido: ", id="G-status-fixture"),
+    pytest.param(lambda v: evaluate_cohort([1], [(1, v)]), STATUS_VALUE_UNSUPPORTED, "estado no soportado para el fixture 1: ", id="G-status-value"),
+    pytest.param(lambda v: evaluate_cohort([1], (), [v]), FIXTURE_ID_INVALID, "fixture de etiqueta inválido: ", id="G-label-fixture"),
+    pytest.param(lambda v: evaluate_cohort([1], [v]), STATUS_ENTRY_INVALID, "cada estado es un par (fixture_id, estado), no ", id="H-status-entry"),
+    pytest.param(lambda v: declare_cohort(v), COHORT_CONTAINER_INVALID, "enrolled_fixture_ids tiene que ser list o tuple, no ", id="cohort-container"),
+    pytest.param(lambda v: evaluate_cohort([1], v), STATUS_CONTAINER_INVALID, "statuses tiene que ser list o tuple, no ", id="status-container"),
+    pytest.param(lambda v: evaluate_cohort([1], (), v), LABEL_CONTAINER_INVALID, "labeled_fixture_ids tiene que ser list o tuple, no ",
+                 id="label-container"),
+]
+
+
+@pytest.mark.parametrize("call, code, prefix", HOSTILE_POSITIONS)
+@pytest.mark.parametrize("cls, shown", HOSTILE_NAMES)
+def test_r2_hostile_class_name_is_bounded_exact_and_never_invoked(cls, shown, call, code, prefix):
+    NAME_CALLS.clear()
+    err = raises_bounded(code, call, cls())
+    assert str(err) == f"{code}: {prefix}<{shown}>"
+    assert NAME_CALLS == []  # K: ni __format__, ni __str__, ni __repr__, ni __len__, ni __getitem__ del nombre
+
+
+@pytest.mark.parametrize("value, code, expected", [
+    pytest.param(lambda: HostileList([1, 2]), COHORT_CONTAINER_INVALID, "enrolled_fixture_ids tiene que ser list o tuple, no <L>",
+                 id="H-list-subclass-cohort"),
+    pytest.param(lambda: [HostileTuple((1, INFORMATIVE))], STATUS_ENTRY_INVALID, "cada estado es un par (fixture_id, estado), no <T>",
+                 id="H-tuple-subclass-status-pair"),
+])
+def test_r2_hostile_named_container_subclasses(value, code, expected):
+    NAME_CALLS.clear()
+    v = value()
+    call = (lambda: declare_cohort(v)) if code == COHORT_CONTAINER_INVALID else (lambda: evaluate_cohort([1], v))
+    assert str(raises_bounded(code, call)) == f"{code}: {expected}"
+    assert NAME_CALLS == []
+
+
+@pytest.mark.parametrize("cls, shown", HOSTILE_NAMES)
+def test_r2_type_name_is_exact_builtin_str(cls, shown):
+    NAME_CALLS.clear()
+    name = cohort_diagnostics._type_name(cls())
+    assert type(name) is str and name == shown and NAME_CALLS == []
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt, SystemExit, GeneratorExit], ids=["keyboard_interrupt", "system_exit", "generator_exit"])
+def test_r2_name_methods_raising_base_exceptions_are_never_invoked(exc):
+    class InterruptName(str):
+        def __format__(self, spec):
+            raise exc()
+
+        def __str__(self):
+            raise exc()
+
+        def __repr__(self):
+            raise exc()
+
+    Interrupting = type(InterruptName("I"), (), {})
+    assert str(raises_bounded(FIXTURE_ID_INVALID, declare_cohort, [Interrupting()])) == "FIXTURE_ID_INVALID: fixture inscrito inválido: <I>"
+
+
+def test_r2_benign_class_names_unchanged():
+    class Plain:
+        pass
+
+    assert str(raises(FIXTURE_ID_INVALID, declare_cohort, [Plain()])) == "FIXTURE_ID_INVALID: fixture inscrito inválido: <Plain>"
+    assert str(raises(FIXTURE_ID_INVALID, declare_cohort, [object()])) == "FIXTURE_ID_INVALID: fixture inscrito inválido: <object>"
+    long_named = type("Q" * 60, (), {})
+    assert str(raises(FIXTURE_ID_INVALID, declare_cohort, [long_named()])) == f"FIXTURE_ID_INVALID: fixture inscrito inválido: <{'Q' * 40}...>"
+    assert str(raises(COHORT_CONTAINER_INVALID, declare_cohort, {1, 2})) == \
+        "COHORT_CONTAINER_INVALID: enrolled_fixture_ids tiene que ser list o tuple, no <set de 2 elementos>"
+    assert str(raises(STATUS_VALUE_UNSUPPORTED, evaluate_cohort, [1], [(1, 1.5)])) == \
+        "STATUS_VALUE_UNSUPPORTED: estado no soportado para el fixture 1: 1.5"
+
+
+def test_r2_prior_contracts_preserved_after_hostile_rejections():
+    NAME_CALLS.clear()
+    raises_bounded(FIXTURE_ID_INVALID, declare_cohort, [WeirdFormat()])
+    # M: enteros gigantes; N: contenedores profundos y textos largos
+    assert "<int negativo de" in str(raises_bounded(FIXTURE_ID_INVALID, declare_cohort, [-H]))
+    raises_bounded(FIXTURE_ID_DUPLICATE, declare_cohort, [H, H])
+    raises_bounded(FIXTURE_ID_INVALID, declare_cohort, [nested_list(100_000)])
+    raises_bounded(STATUS_VALUE_UNSUPPORTED, evaluate_cohort, [1], [(1, "x" * 1_000_000)])
+    # P / Q: el ejemplo estadístico y la cohorte de seis distinta
+    ten = evaluate_cohort(TEN, TEN_STATUSES, SIX_LABELS)
+    six = evaluate_cohort(SIX, [(f, INFORMATIVE) for f in SIX], SIX_LABELS)
+    assert (ten.enrolled_count, ten.informative_synthetic_coverage, ten.label_observability) == (10, 0.6, 0.6)
+    assert (six.enrolled_count, six.informative_synthetic_coverage, six.label_observability) == (6, 1.0, 1.0)
+    assert six.cohort.cohort_digest != ten.cohort.cohort_digest
+    assert NAME_CALLS == []

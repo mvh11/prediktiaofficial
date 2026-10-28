@@ -140,9 +140,18 @@ _SIZED_BUILTINS = (list, tuple, dict, set, frozenset)
 
 
 def _type_name(value) -> str:
-    # El descriptor de type, no getattr: una metaclase con su propio __name__ no interviene
+    """Nombre del tipo como str EXACTO de como mucho _DISPLAY_TEXT_CHARS caracteres (más "..."), solo para _display.
+    El descriptor de type, no getattr: una metaclase con su propio __name__ no interviene. Ese nombre puede ser un str
+    derivado (type(Name("W"), (), {}) o C.__name__ = Name("P")), así que solo se usan str.__len__ y str.__getitem__ de
+    str, nunca su __format__, __str__, __repr__, __len__ ni __getitem__, y lo que sale es un str exacto (MOD-DEV-105A-R2)."""
     name = type.__dict__["__name__"].__get__(type(value))
-    return name if len(name) <= _DISPLAY_TEXT_CHARS else name[:_DISPLAY_TEXT_CHARS] + "..."
+    if not issubclass(type(name), str):
+        raise TypeError("nombre de tipo que no es str")  # lo recoge _display: _DISPLAY_FALLBACK
+    size = str.__len__(name)
+    text = str.__getitem__(name, slice(0, _DISPLAY_TEXT_CHARS))  # copia str exacta también de un str derivado
+    if type(text) is not str:
+        raise TypeError("nombre de tipo no normalizable")
+    return text if size <= _DISPLAY_TEXT_CHARS else text + "..."
 
 
 def _display(value) -> str:
