@@ -38,7 +38,9 @@ Validación (sin recorte, normalización, imputación ni conversión de valores 
     En los mensajes de error, un int con más dígitos que sys.get_int_max_str_digits() no se pasa a
     decimal: se describe por su signo y su número de bits (MOD-DEV-100-D1). Si falla el repr de otro valor
     ya rechazado (un Fraction, list, tuple o dict con un int así), se describe solo por su tipo:
-    <Fraction no representable> (MOD-DEV-100-D2).
+    <Fraction no representable> (MOD-DEV-100-D2). Igual si el repr lanza cualquier otra Exception (un __repr__
+    hostil) o el nombre del tipo no se puede leer, y un repr de más de 5000 caracteres se recorta (MOD-DEV-107A):
+    un valor rechazado siempre da su ProbabilityError / OddsError.
   PUSH: |math.fsum(p_win, p_lose, p_push) - 1| <= SUM_TOLERANCE (1e-9, la de research.m510a.evaluate y
     research.goals_markets). Las masas no se reescalan: el EV usa las suministradas.
   decimal_odds: int o float (bool no), > 1 y representable como double finito (NaN, +-inf o un int fuera
@@ -106,22 +108,45 @@ class ValueEvaluation:
     limitations: tuple[str, ...]
 
 
+_REPR_MAX_CHARS = 5000  # cabe entero cualquier repr con un int en el límite de dígitos por defecto (4300), como [10**4299]
+_TYPE_NAME_MAX_CHARS = 100
+
+
+def _type_name(value) -> str:
+    """Nombre del tipo para los mensajes, acotado; por el descriptor de type, así que una metaclase con su propio
+    __name__ no interviene (MOD-DEV-107A). Para un tipo corriente es exactamente type(value).__name__."""
+    try:
+        name = type.__dict__["__name__"].__get__(type(value))
+        return name if len(name) <= _TYPE_NAME_MAX_CHARS else name[:_TYPE_NAME_MAX_CHARS] + "..."
+    except Exception:  # solo el mensaje; BaseException se propaga
+        return "?"
+
+
 def _input_repr(value) -> str:
     """repr para los mensajes de error; un int más allá del límite de CPython se describe por sus bits (MOD-DEV-100-D1)
-    y otro valor ya rechazado cuyo repr falla, solo por su tipo (MOD-DEV-100-D2)."""
+    y otro valor ya rechazado cuyo repr falla, solo por su tipo (MOD-DEV-100-D2). Cualquier Exception ordinaria del repr
+    (RuntimeError, TypeError de un __repr__ hostil...) también va a ese descriptor, que no vuelve a llamar al valor, y un
+    repr de más de _REPR_MAX_CHARS caracteres se recorta (MOD-DEV-107A). KeyboardInterrupt, SystemExit y demás
+    BaseException se propagan."""
     try:
-        return repr(value)
-    except ValueError:  # int -> str: "Exceeds the limit (4300 digits)", directo o dentro de Fraction, list, dict...
-        if isinstance(value, int):
-            return f"<int {'negativo ' if value < 0 else ''}de {value.bit_length()} bits>"
-    except (OverflowError, RecursionError):  # RecursionError: p. ej. una list anidada a gran profundidad
-        pass
-    return f"<{type(value).__name__} no representable>"
+        try:
+            text = repr(value)
+        except ValueError:  # int -> str: "Exceeds the limit (4300 digits)", directo o dentro de Fraction, list, dict...
+            if not isinstance(value, int):
+                raise
+            # int.__lt__ / int.bit_length: un int derivado no ejecuta aquí sus propios métodos
+            return f"<int {'negativo ' if int.__lt__(value, 0) else ''}de {int.bit_length(value)} bits>"
+        size = str.__len__(text)
+        if size <= _REPR_MAX_CHARS:
+            return str.__getitem__(text, slice(None))  # str exacto: un str derivado no llega al f-string del mensaje
+        return f"{str.__getitem__(text, slice(_REPR_MAX_CHARS))}... ({size} caracteres)"
+    except Exception:  # D2 y 107A: también RecursionError (una list anidada a gran profundidad) y OverflowError
+        return f"<{_type_name(value)} no representable>"
 
 
 def _probability(value, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ProbabilityError(f"{name} debe ser int o float, no {type(value).__name__}: {_input_repr(value)}")
+        raise ProbabilityError(f"{name} debe ser int o float, no {_type_name(value)}: {_input_repr(value)}")
     if not 0 <= value <= 1 or not math.isfinite(value):  # el rango primero: math.isfinite(10**400) desborda
         raise ProbabilityError(f"{name} fuera de [0, 1] o no finita: {_input_repr(value)}")
     return float(value) + 0.0  # -0.0 -> 0.0
@@ -129,7 +154,7 @@ def _probability(value, name: str) -> float:
 
 def _decimal_odds(value) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise OddsError(f"decimal_odds debe ser int o float, no {type(value).__name__}: {_input_repr(value)}")
+        raise OddsError(f"decimal_odds debe ser int o float, no {_type_name(value)}: {_input_repr(value)}")
     if not value > 1:  # también NaN
         raise OddsError(f"decimal_odds debe ser > 1: {_input_repr(value)}")
     try:
@@ -170,7 +195,7 @@ def evaluate_push_value(*, p_win, p_lose, p_push, decimal_odds) -> ValueEvaluati
     """WIN/LOSE/PUSH: EV = p_win * (decimal_odds - 1) - p_lose; fair_odds = 1 + p_lose / p_win (ver el módulo)."""
     win, lose, push = _probability(p_win, "p_win"), _probability(p_lose, "p_lose"), _probability(p_push, "p_push")
     if abs(math.fsum((win, lose, push)) - 1) > SUM_TOLERANCE:
-        raise ProbabilityError(f"p_win + p_lose + p_push no suman 1 (tolerancia {SUM_TOLERANCE}): {(p_win, p_lose, p_push)!r}")
+        raise ProbabilityError(f"p_win + p_lose + p_push no suman 1 (tolerancia {SUM_TOLERANCE}): ({_input_repr(p_win)}, {_input_repr(p_lose)}, {_input_repr(p_push)})")
     odds = _decimal_odds(decimal_odds)
     fair, status = _fair_odds(win, lose, lambda w: 1.0 + lose / w)
     return _evaluation(WIN_LOSE_PUSH, win, lose, push, odds, fair, status, win * (odds - 1.0) - lose)

@@ -391,3 +391,224 @@ def test_module_imports_no_app_database_provider_or_numeric_stack():
     env = {k: v for k, v in os.environ.items() if k not in ("DATABASE_URL", "TEST_DATABASE_URL", "TEST_DATABASE_ALLOW_DESTRUCTIVE")}
     out = subprocess.run([sys.executable, "-B", "-c", code], cwd=BACKEND, env=env, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0 and out.stdout.strip() == "[]"
+
+
+# --- MOD-DEV-107A: un valor rechazado con un repr hostil da su ProbabilityError / OddsError ---------------
+# Ningún valor hostil ni gigante se pasa a texto en los ids de parametrize (ids explícitos y cortos).
+
+MESSAGE_BOUND = 5200  # _REPR_MAX_CHARS (5000) más el prefijo y el sufijo del mensaje
+
+
+class HostileRepr:
+    """repr, str y format lanzan la excepción de la clase y cuentan las llamadas."""
+    error = RuntimeError
+    calls = 0
+
+    def _boom(self, *args):
+        type(self).calls += 1
+        raise type(self).error("repr hostil")
+
+    __repr__ = __str__ = __format__ = _boom
+
+
+class RuntimeRepr(HostileRepr):
+    error = RuntimeError
+
+
+class TypeRepr(HostileRepr):
+    error = TypeError
+
+
+class IntRuntimeRepr(int):
+    __repr__ = __str__ = __format__ = HostileRepr._boom
+    error, calls = RuntimeError, 0
+
+
+class FloatTypeRepr(float):
+    __repr__ = __str__ = __format__ = HostileRepr._boom
+    error, calls = TypeError, 0
+
+
+class IntHostileBitLength(int):
+    """Un int derivado sin repr propio (repr de un int enorme lanza ValueError) cuyo bit_length lanza."""
+
+    def bit_length(self):
+        raise RuntimeError("bit_length hostil")
+
+
+class IntPlain(int):
+    pass
+
+
+class StrHostileFormat(str):
+    def __format__(self, spec):
+        raise RuntimeError("format hostil")
+
+    __str__ = __format__
+
+
+class ReprReturnsHostileStr:
+    def __repr__(self):
+        return StrHostileFormat("valor-raro")
+
+
+class HugeRepr:
+    def __repr__(self):
+        return "x" * 2_000_000
+
+
+class HostileNameMeta(type):
+    @property
+    def __name__(cls):
+        raise RuntimeError("name hostil")
+
+
+class HostileName(RuntimeRepr, metaclass=HostileNameMeta):
+    pass
+
+
+def nested(depth, leaf):
+    value = leaf
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+def raises_typed(error, call):
+    with pytest.raises(MarketValueInputError) as exc:
+        call()
+    assert type(exc.value) is error and len(str(exc.value)) <= MESSAGE_BOUND
+    return str(exc.value)
+
+
+@pytest.mark.parametrize("position", POSITIONS, ids=[p[0] for p in POSITIONS])
+@pytest.mark.parametrize("hostile", [RuntimeRepr, TypeRepr], ids=["runtime_error", "type_error"])
+def test_107a_rejected_value_whose_repr_raises_gives_typed_error(hostile, position):
+    _, error, name, call = position
+    hostile.calls = 0
+    message = raises_typed(error, lambda: call(hostile()))
+    kind = hostile.__name__
+    assert message == f"{name} debe ser int o float, no {kind}: <{kind} no representable>"
+    assert hostile.calls == 1  # un intento de repr; el descriptor de respaldo no vuelve a llamar al valor
+
+
+@pytest.mark.parametrize("case", [
+    pytest.param((ProbabilityError, lambda: binary(IntRuntimeRepr(2), 2.0), "p_win fuera de [0, 1] o no finita: <IntRuntimeRepr no representable>"),
+                 id="int_subclass_out_of_range"),
+    pytest.param((ProbabilityError, lambda: push(0.5, FloatTypeRepr(-0.5), 0.2, 2.0),
+                  "p_lose fuera de [0, 1] o no finita: <FloatTypeRepr no representable>"), id="float_subclass_out_of_range"),
+    pytest.param((OddsError, lambda: binary(0.5, IntRuntimeRepr(1)), "decimal_odds debe ser > 1: <IntRuntimeRepr no representable>"),
+                 id="int_subclass_odds_not_above_one"),
+    pytest.param((ProbabilityError, lambda: push(IntRuntimeRepr(1), 0.3, 0.2, 2.0),
+                  "p_win + p_lose + p_push no suman 1 (tolerancia 1e-09): (<IntRuntimeRepr no representable>, 0.3, 0.2)"), id="push_sum_int"),
+    pytest.param((ProbabilityError, lambda: push(0.4, 0.4, FloatTypeRepr(0.1), 2.0),
+                  "p_win + p_lose + p_push no suman 1 (tolerancia 1e-09): (0.4, 0.4, <FloatTypeRepr no representable>)"), id="push_sum_float"),
+    pytest.param((ProbabilityError, lambda: binary(HostileName(), 2.0),
+                  "p_win debe ser int o float, no HostileName: <HostileName no representable>"), id="metaclass_name"),
+    pytest.param((OddsError, lambda: binary(0.5, ReprReturnsHostileStr()),
+                  "decimal_odds debe ser int o float, no ReprReturnsHostileStr: valor-raro"), id="repr_returns_hostile_str"),
+    pytest.param((ProbabilityError, lambda: binary([RuntimeRepr()], 2.0), "p_win debe ser int o float, no list: <list no representable>"),
+                 id="list_with_hostile"),
+    pytest.param((OddsError, lambda: push(0.4, 0.4, 0.2, {1: TypeRepr()}), "decimal_odds debe ser int o float, no dict: <dict no representable>"),
+                 id="dict_with_hostile"),
+    pytest.param((ProbabilityError, lambda: push(0.5, 0.3, nested(50, RuntimeRepr()), 2.0),
+                  "p_push debe ser int o float, no list: <list no representable>"), id="nested_with_hostile"),
+])
+def test_107a_validated_or_contained_hostile_values_give_typed_error(case):
+    error, call, expected = case
+    IntRuntimeRepr.calls = FloatTypeRepr.calls = 0
+    assert raises_typed(error, call) == expected
+
+
+def test_107a_huge_int_subclass_bits_without_its_own_methods():
+    with pytest.raises(ProbabilityError) as exc:
+        binary(IntHostileBitLength(HUGE), 2.0)
+    assert str(exc.value) == "p_win fuera de [0, 1] o no finita: <int de 16610 bits>"
+    with pytest.raises(OddsError) as exc:
+        binary(0.5, IntPlain(-HUGE))
+    assert str(exc.value) == "decimal_odds debe ser > 1: <int negativo de 16610 bits>"
+
+
+@pytest.mark.parametrize("position", POSITIONS, ids=[p[0] for p in POSITIONS])
+def test_107a_huge_int_rejections_keep_bits_message(position):
+    _, error, name, call = position
+    message = raises_typed(error, lambda: call(-HUGE))
+    assert message.endswith(": <int negativo de 16610 bits>") and message.startswith(name)
+
+
+def test_107a_huge_nonraising_repr_is_bounded():
+    message = raises_typed(ProbabilityError, lambda: binary(HugeRepr(), 2.0))
+    prefix = "p_win debe ser int o float, no HugeRepr: "
+    assert message == prefix + "x" * 5000 + "... (2000000 caracteres)"
+    message = raises_typed(OddsError, lambda: push(0.4, 0.4, 0.2, Decimal("1" * 20_000)))
+    assert message.endswith("... (20011 caracteres)") and message.startswith("decimal_odds debe ser int o float, no Decimal: Decimal('111")
+    # el mayor repr que fijan las pruebas de MOD-DEV-100 sigue entero
+    limit = sys.get_int_max_str_digits()
+    assert raises_typed(OddsError, lambda: binary(0.5, [10 ** (limit - 1)])) == f"decimal_odds debe ser int o float, no list: [{10 ** (limit - 1)}]"
+
+
+@pytest.mark.parametrize("depth", [100_000], ids=["deep"])
+@pytest.mark.parametrize("make", [lambda d: nested(d, 0.5), lambda d: nested(d, RuntimeRepr())], ids=["plain_leaf", "hostile_leaf"])
+def test_107a_deeply_nested_rejections_are_bounded(make, depth):
+    value = make(depth)
+    assert raises_typed(ProbabilityError, lambda: binary(value, 2.0)) == "p_win debe ser int o float, no list: <list no representable>"
+    assert raises_typed(OddsError, lambda: binary(0.5, value)) == "decimal_odds debe ser int o float, no list: <list no representable>"
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit, GeneratorExit], ids=["keyboard_interrupt", "system_exit", "generator_exit"])
+def test_107a_base_exceptions_from_repr_propagate(exc_type):
+    class Interrupting:
+        def __repr__(self):
+            raise exc_type()
+
+    class IntInterrupting(int):
+        def __repr__(self):
+            raise exc_type()
+
+    for call in (lambda: binary(Interrupting(), 2.0), lambda: binary(0.5, Interrupting()), lambda: push(0.5, Interrupting(), 0.2, 2.0),
+                 lambda: push(IntInterrupting(1), 0.3, 0.2, 2.0), lambda: binary(IntInterrupting(5), 2.0)):
+        with pytest.raises(exc_type):
+            call()
+
+
+def test_107a_error_precedence_unchanged():
+    # p_win antes que la cuota en binario; las masas antes que la suma y la suma antes que la cuota en PUSH
+    assert raises_typed(ProbabilityError, lambda: binary(RuntimeRepr(), TypeRepr())).startswith("p_win ")
+    assert raises_typed(ProbabilityError, lambda: push(0.5, 0.3, TypeRepr(), RuntimeRepr())).startswith("p_push ")
+    assert raises_typed(ProbabilityError, lambda: push(IntRuntimeRepr(1), 0.3, 0.2, RuntimeRepr())).startswith("p_win + p_lose + p_push ")
+    assert raises_typed(OddsError, lambda: push(0.4, 0.4, 0.2, RuntimeRepr())).startswith("decimal_odds ")
+
+
+VALID_BINARY = [(0.25, 4.0), (0.5, 2), (1, 3), (0, 2.5), (5e-324, 2.0), (1e-300, 2.0), (0.3, 1.0000000000000002), (0.7, MAX), (1 / 3, 3.0)]
+VALID_PUSH = [(0.4, 0.4, 0.2, 2.0), (0, 0, 1, 10 ** 300), (0.5, 0.5, 0, 2), (1, 0, 0, MAX), (5e-324, 0.5, 0.5, 2.0), (0.25, 0.5, 0.25, 3.5)]
+
+
+@pytest.mark.parametrize("p, odds", VALID_BINARY, ids=[f"b{i}" for i in range(len(VALID_BINARY))])
+def test_107a_valid_binary_evaluations_unchanged(p, odds):
+    r = binary(p, odds)
+    w, o = float(p) + 0.0, float(odds)
+    fair = None if w == 0 else (1.0 / w if math.isfinite(1.0 / w) else None)
+    status = UNDEFINED_NO_WIN_PROBABILITY if w == 0 else (DEFINED if fair is not None else NOT_COMPUTABLE_OUTSIDE_FLOAT_RANGE)
+    assert r == ValueEvaluation(EVALUATOR_ID, EVALUATOR_VERSION, CONVENTION_VERSION, BINARY_WIN_LOSE, w, 1.0 - w, None, o, fair, status,
+                                w * o - 1.0, INPUT_BASIS, PIT_STATUS, LIMITATIONS)
+    assert r == binary(IntPlain(p) if type(p) is int else p, odds)  # un int derivado sin métodos propios se evalúa igual
+
+
+@pytest.mark.parametrize("win, lose, p_push, odds", VALID_PUSH, ids=[f"p{i}" for i in range(len(VALID_PUSH))])
+def test_107a_valid_push_evaluations_unchanged(win, lose, p_push, odds):
+    r = push(win, lose, p_push, odds)
+    w, l, u, o = float(win), float(lose), float(p_push), float(odds)
+    if w == 0:
+        fair, status = None, NON_UNIQUE_ALWAYS_PUSH if l == 0 else UNDEFINED_NO_WIN_PROBABILITY
+    else:
+        f = 1.0 + l / w
+        fair, status = (f, DEFINED) if math.isfinite(f) else (None, NOT_COMPUTABLE_OUTSIDE_FLOAT_RANGE)
+    assert r == ValueEvaluation(EVALUATOR_ID, EVALUATOR_VERSION, CONVENTION_VERSION, WIN_LOSE_PUSH, w, l, u, o, fair, status,
+                                w * (o - 1.0) - l, INPUT_BASIS, PIT_STATUS, LIMITATIONS)
+
+
+def test_107a_valid_values_with_hostile_repr_are_evaluated_without_rendering():
+    IntRuntimeRepr.calls = FloatTypeRepr.calls = 0
+    assert binary(IntRuntimeRepr(1), 2.0) == binary(1, 2.0)
+    assert push(FloatTypeRepr(0.4), 0.4, 0.2, IntRuntimeRepr(2)) == push(0.4, 0.4, 0.2, 2)
+    assert IntRuntimeRepr.calls == FloatTypeRepr.calls == 0
