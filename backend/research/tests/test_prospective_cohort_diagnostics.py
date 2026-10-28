@@ -310,3 +310,166 @@ def test_module_imports_no_app_database_provider_or_research_siblings():
     out = subprocess.run([sys.executable, "-B", "-c", code], cwd=BACKEND, env=env, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0
     assert out.stdout.strip() == str(["research.prospective_cohort_diagnostics"])
+
+
+# MOD-DEV-105A-R1: el mensaje de error nunca sustituye el CohortInputError por otra excepción.
+# H no se pasa a texto en ningún sitio del test: ids de parametrize explícitos y aserciones sobre .code y len(mensaje).
+
+H = 10 ** 5000  # str(H) lanza ValueError (límite de 4300 dígitos de CPython)
+MAX_MESSAGE = 400
+
+
+def raises_bounded(code, fn, *args):
+    err = raises(code, fn, *args)
+    assert len(str(err)) <= MAX_MESSAGE and str(err).startswith(f"{code}: ")
+    return err
+
+
+class ReprBomb:
+    """repr, str y format lanzan una Exception ordinaria y cuentan las llamadas."""
+    calls = 0
+
+    def _boom(self, *args):
+        type(self).calls += 1
+        raise RuntimeError("repr hostil")
+
+    __repr__ = __str__ = __format__ = _boom
+
+
+class IntReprBomb(int):
+    __repr__ = __str__ = __format__ = ReprBomb._boom
+    calls = 0
+
+
+class StrReprBomb(str):
+    __repr__ = __str__ = __format__ = ReprBomb._boom
+    calls = 0
+
+
+class HostileMeta(type):
+    """Metaclase cuyo __eq__ y __name__ lanzan: rompe `type(x) in (...)` y `type(x).__name__`."""
+
+    def __eq__(cls, other):
+        raise RuntimeError("eq hostil")
+
+    __hash__ = type.__hash__
+
+    @property
+    def __name__(cls):
+        raise RuntimeError("name hostil")
+
+
+class HostileType(metaclass=HostileMeta):
+    pass
+
+
+def nested_list(depth):
+    value = []
+    for _ in range(depth):
+        value = [value]
+    return value
+
+
+@pytest.mark.parametrize("call, code", [
+    pytest.param(lambda: declare_cohort([H, H]), FIXTURE_ID_DUPLICATE, id="A-cohort-duplicate-H"),
+    pytest.param(lambda: declare_cohort([-H]), FIXTURE_ID_INVALID, id="B-cohort-negative-H"),
+    pytest.param(lambda: evaluate_cohort([1], [(H, INFORMATIVE)]), STATUS_FIXTURE_UNKNOWN, id="C-status-unknown-H"),
+    pytest.param(lambda: evaluate_cohort([1], (), [H]), LABEL_FIXTURE_UNKNOWN, id="D-label-unknown-H"),
+    pytest.param(lambda: evaluate_cohort([1], [(-H, INFORMATIVE)]), FIXTURE_ID_INVALID, id="status-negative-H"),
+    pytest.param(lambda: evaluate_cohort([1], (), [-H]), FIXTURE_ID_INVALID, id="label-negative-H"),
+    pytest.param(lambda: evaluate_cohort([H], [(H, "BAD")]), STATUS_VALUE_UNSUPPORTED, id="status-value-for-H"),
+    pytest.param(lambda: evaluate_cohort([1], [(1, H)]), STATUS_VALUE_UNSUPPORTED, id="status-value-is-H"),
+    pytest.param(lambda: evaluate_cohort([H], [(H, INFORMATIVE), (H, DEGRADED)]), STATUS_CONTRADICTORY, id="status-contradictory-H"),
+    pytest.param(lambda: evaluate_cohort([H], [(H, INFORMATIVE), (H, INFORMATIVE)]), STATUS_DUPLICATE, id="status-duplicate-H"),
+    pytest.param(lambda: evaluate_cohort([H], (), [H, H]), LABEL_DUPLICATE, id="label-duplicate-H"),
+    pytest.param(lambda: evaluate_cohort([1], [(1, INFORMATIVE, H)]), STATUS_ENTRY_INVALID, id="status-entry-with-H"),
+    pytest.param(lambda: declare_cohort([[H]]), FIXTURE_ID_INVALID, id="cohort-entry-list-with-H"),
+    pytest.param(lambda: declare_cohort(H), COHORT_CONTAINER_INVALID, id="cohort-container-is-H"),
+])
+def test_r1_giant_integer_keeps_typed_error_code(call, code):
+    raises_bounded(code, call)
+
+
+def test_r1_giant_integer_message_uses_sign_and_bit_length():
+    err = raises_bounded(FIXTURE_ID_INVALID, declare_cohort, [-H])
+    assert f"<int negativo de {H.bit_length()} bits>" in str(err)
+    err = raises_bounded(LABEL_FIXTURE_UNKNOWN, evaluate_cohort, [1], (), [H])
+    assert f"<int de {H.bit_length()} bits>" in str(err)
+    err = raises_bounded(FIXTURE_ID_INVALID, declare_cohort, [-(2 ** 64)])
+    assert "<int negativo de 65 bits>" in str(err)
+    err = raises_bounded(FIXTURE_ID_INVALID, declare_cohort, [-(2 ** 63)])
+    assert "-9223372036854775808" in str(err)  # hasta 64 bits se muestra en decimal
+
+
+def test_r1_valid_giant_ids_are_not_transformed():
+    c = declare_cohort([H, 1])
+    assert c.fixture_ids == (1, H) and c.fixture_ids[1] is H and type(c.fixture_ids[1]) is int
+    assert c.cohort_digest == declare_cohort([1, H]).cohort_digest != declare_cohort([1, H + 1]).cohort_digest
+    d = evaluate_cohort([H, 1], [(H, INFORMATIVE)], [1])
+    assert (d.enrolled_count, d.informative_synthetic_coverage, d.label_observability) == (2, 0.5, 0.5)
+    assert [(x.fixture_id is H, x.status, x.label_observed) for x in d.fixtures] == [(False, NO_RECORD, True), (True, INFORMATIVE, False)]
+
+
+@pytest.mark.parametrize("call, code", [
+    pytest.param(lambda: declare_cohort([ReprBomb()]), FIXTURE_ID_INVALID, id="E-cohort-entry"),
+    pytest.param(lambda: evaluate_cohort([1], [(ReprBomb(), INFORMATIVE)]), FIXTURE_ID_INVALID, id="E-status-fixture"),
+    pytest.param(lambda: evaluate_cohort([1], (), [ReprBomb()]), FIXTURE_ID_INVALID, id="E-label-fixture"),
+    pytest.param(lambda: evaluate_cohort([1], [ReprBomb()]), STATUS_ENTRY_INVALID, id="E-status-pair-object"),
+    pytest.param(lambda: evaluate_cohort([1], [(1, INFORMATIVE, ReprBomb())]), STATUS_ENTRY_INVALID, id="E-status-pair-tuple3"),
+    pytest.param(lambda: evaluate_cohort([1], [[1, ReprBomb()]]), STATUS_ENTRY_INVALID, id="E-status-pair-list"),
+    pytest.param(lambda: evaluate_cohort([1], [(1, ReprBomb())]), STATUS_VALUE_UNSUPPORTED, id="E-status-value"),
+    pytest.param(lambda: declare_cohort([IntReprBomb(5)]), FIXTURE_ID_INVALID, id="E-int-subclass-cohort"),
+    pytest.param(lambda: evaluate_cohort([1], (), [IntReprBomb(1)]), FIXTURE_ID_INVALID, id="E-int-subclass-label"),
+    pytest.param(lambda: evaluate_cohort([1], [(1, StrReprBomb(INFORMATIVE))]), STATUS_VALUE_UNSUPPORTED, id="E-str-subclass-status"),
+    pytest.param(lambda: declare_cohort(ReprBomb()), COHORT_CONTAINER_INVALID, id="E-cohort-container"),
+    pytest.param(lambda: evaluate_cohort([1], HostileType()), STATUS_CONTAINER_INVALID, id="E-hostile-metaclass-container"),
+    pytest.param(lambda: declare_cohort([HostileType()]), FIXTURE_ID_INVALID, id="E-hostile-metaclass-entry"),
+])
+def test_r1_hostile_repr_keeps_typed_error_code_without_calling_repr(call, code):
+    ReprBomb.calls = IntReprBomb.calls = StrReprBomb.calls = 0
+    raises_bounded(code, call)
+    assert ReprBomb.calls == IntReprBomb.calls == StrReprBomb.calls == 0  # el mensaje no depende del repr del valor
+
+
+@pytest.mark.parametrize("call, code", [
+    pytest.param(lambda: declare_cohort([nested_list(100_000)]), FIXTURE_ID_INVALID, id="F-deep-cohort-entry"),
+    pytest.param(lambda: evaluate_cohort([1], [nested_list(100_000)]), STATUS_ENTRY_INVALID, id="F-deep-status-entry"),
+    pytest.param(lambda: evaluate_cohort([1], [(1, nested_list(100_000))]), STATUS_VALUE_UNSUPPORTED, id="F-deep-status-value"),
+    pytest.param(lambda: evaluate_cohort([1], (), [nested_list(100_000)]), FIXTURE_ID_INVALID, id="F-deep-label"),
+    pytest.param(lambda: declare_cohort(["x" * 1_000_000]), FIXTURE_ID_INVALID, id="F-huge-str-entry"),
+    pytest.param(lambda: evaluate_cohort([1], [(1, "x" * 1_000_000)]), STATUS_VALUE_UNSUPPORTED, id="F-huge-str-status"),
+    pytest.param(lambda: evaluate_cohort([1], [tuple(range(100_000))]), STATUS_ENTRY_INVALID, id="F-huge-tuple-entry"),
+    pytest.param(lambda: declare_cohort([[0] * 1_000_000]), FIXTURE_ID_INVALID, id="F-huge-list-entry"),
+])
+def test_r1_deep_or_huge_values_render_bounded(call, code):
+    raises_bounded(code, call)
+
+
+def test_r1_bounded_text_rendering_is_deterministic():
+    err = raises_bounded(STATUS_VALUE_UNSUPPORTED, evaluate_cohort, [1], [(1, "y" * 500)])
+    assert "(500 caracteres)" in str(err) and "y" * 41 not in str(err)
+    err = raises_bounded(STATUS_VALUE_UNSUPPORTED, evaluate_cohort, [1], [(1, "informative")])
+    assert "'informative'" in str(err)
+    err = raises_bounded(STATUS_ENTRY_INVALID, evaluate_cohort, [1], [(1, INFORMATIVE, "x")])
+    assert "<tuple de 3 elementos>" in str(err)
+    assert str(raises(FIXTURE_ID_INVALID, declare_cohort, [ReprBomb()])) == str(raises(FIXTURE_ID_INVALID, declare_cohort, [ReprBomb()]))
+
+
+def test_r1_rendering_failure_falls_back_and_keeps_code(monkeypatch):
+    def broken(value):
+        raise RuntimeError("fallo de renderizado")
+
+    monkeypatch.setattr(cohort_diagnostics, "_type_name", broken)
+    err = raises_bounded(FIXTURE_ID_INVALID, declare_cohort, [object()])
+    assert "<valor no representable>" in str(err)
+    raises_bounded(COHORT_CONTAINER_INVALID, declare_cohort, {1})
+
+
+@pytest.mark.parametrize("exc", [KeyboardInterrupt, SystemExit, GeneratorExit])
+def test_r1_base_exceptions_are_not_swallowed_by_rendering(monkeypatch, exc):
+    def interrupted(value):
+        raise exc()
+
+    monkeypatch.setattr(cohort_diagnostics, "_type_name", interrupted)
+    with pytest.raises(exc):
+        declare_cohort([object()])

@@ -8,7 +8,9 @@ independiente, ni una decisión de admisión. No hay umbrales de publicación ni
 Interfaz:
   declare_cohort(enrolled_fixture_ids) -> DeclaredCohort
   evaluate_cohort(enrolled_fixture_ids, statuses=(), labeled_fixture_ids=()) -> CohortDiagnostics
-Cualquier entrada inválida lanza CohortInputError con un .code de ERROR_CODES (sin resultado parcial).
+Cualquier entrada inválida lanza CohortInputError con un .code de ERROR_CODES (sin resultado parcial). Su mensaje describe
+el valor rechazado con _display, acotado y sin llamar a su __repr__ (MOD-DEV-105A-R1): un int enorme o un repr que lanza
+ya no sustituyen el CohortInputError por otra excepción.
 
 Identidad de fixture: válida solo si type(id) is int e id > 0 (se rechazan bool, float, str, cero y negativos). Los
 contenedores tienen que ser list o tuple: un dict o un set colapsan claves iguales (1 == True == 1.0) antes de que la API
@@ -131,13 +133,50 @@ class CohortDiagnostics:
     limitations: tuple[str, ...]
 
 
+_DISPLAY_INT_BITS = 64  # un int de más bits se describe por su signo y sus bits, nunca en decimal
+_DISPLAY_TEXT_CHARS = 40
+_DISPLAY_FALLBACK = "<valor no representable>"
+_SIZED_BUILTINS = (list, tuple, dict, set, frozenset)
+
+
+def _type_name(value) -> str:
+    # El descriptor de type, no getattr: una metaclase con su propio __name__ no interviene
+    name = type.__dict__["__name__"].__get__(type(value))
+    return name if len(name) <= _DISPLAY_TEXT_CHARS else name[:_DISPLAY_TEXT_CHARS] + "..."
+
+
+def _display(value) -> str:
+    """Texto acotado de un valor rechazado, SOLO para mensajes de error (MOD-DEV-105A-R1). Nunca llama a __repr__, __str__
+    ni __format__ del valor ni recorre contenedores: solo usa las implementaciones de los tipos exactos int, float, str,
+    bool y None. Un int de más de _DISPLAY_INT_BITS bits se describe por signo y bits (str() de un int enorme lanza
+    ValueError), un str se recorta, un contenedor builtin se describe por tipo y tamaño y el resto solo por su tipo."""
+    try:
+        kind = type(value)
+        if value is None or kind is bool:
+            return "None" if value is None else ("True" if value is True else "False")
+        if kind is int:
+            bits = value.bit_length()
+            return int.__repr__(value) if bits <= _DISPLAY_INT_BITS else f"<int {'negativo ' if value < 0 else ''}de {bits} bits>"
+        if kind is float:
+            return float.__repr__(value)
+        if kind is str:
+            if len(value) <= _DISPLAY_TEXT_CHARS:
+                return str.__repr__(value)
+            return f"{str.__repr__(value[:_DISPLAY_TEXT_CHARS])}... ({len(value)} caracteres)"
+        if any(kind is t for t in _SIZED_BUILTINS):
+            return f"<{_type_name(value)} de {len(value)} elementos>"
+        return f"<{_type_name(value)}>"
+    except Exception:  # solo el renderizado del mensaje; KeyboardInterrupt, SystemExit y demás BaseException se propagan
+        return _DISPLAY_FALLBACK
+
+
 def _is_fixture_id(value) -> bool:
     return type(value) is int and value > 0
 
 
 def _require_sequence(value, code: str, what: str):
-    if type(value) not in (list, tuple):
-        raise CohortInputError(code, f"{what} tiene que ser list o tuple, no {type(value).__name__}")
+    if type(value) is not list and type(value) is not tuple:  # `is`: `in` compararía tipos con un __eq__ de metaclase
+        raise CohortInputError(code, f"{what} tiene que ser list o tuple, no {_display(value)}")
 
 
 def _cohort_digest(fixture_ids: tuple[int, ...]) -> str:
@@ -154,9 +193,9 @@ def declare_cohort(enrolled_fixture_ids) -> DeclaredCohort:
     seen = set()
     for f in enrolled_fixture_ids:
         if not _is_fixture_id(f):
-            raise CohortInputError(FIXTURE_ID_INVALID, f"fixture inscrito inválido: {f!r}")
+            raise CohortInputError(FIXTURE_ID_INVALID, f"fixture inscrito inválido: {_display(f)}")
         if f in seen:
-            raise CohortInputError(FIXTURE_ID_DUPLICATE, f"fixture inscrito repetido: {f}")
+            raise CohortInputError(FIXTURE_ID_DUPLICATE, f"fixture inscrito repetido: {_display(f)}")
         seen.add(f)
     fixture_ids = tuple(sorted(seen))
     return DeclaredCohort(fixture_ids=fixture_ids, enrolled_count=len(fixture_ids), cohort_digest=_cohort_digest(fixture_ids),
@@ -169,17 +208,17 @@ def _statuses_by_fixture(statuses, enrolled: frozenset) -> dict[int, str]:
     found: dict[int, str] = {}
     for entry in statuses:
         if type(entry) is not tuple or len(entry) != 2:
-            raise CohortInputError(STATUS_ENTRY_INVALID, f"cada estado es un par (fixture_id, estado), no {entry!r}")
+            raise CohortInputError(STATUS_ENTRY_INVALID, f"cada estado es un par (fixture_id, estado), no {_display(entry)}")
         f, status = entry
         if not _is_fixture_id(f):
-            raise CohortInputError(FIXTURE_ID_INVALID, f"fixture de estado inválido: {f!r}")
+            raise CohortInputError(FIXTURE_ID_INVALID, f"fixture de estado inválido: {_display(f)}")
         if type(status) is not str or status not in STATUSES:
-            raise CohortInputError(STATUS_VALUE_UNSUPPORTED, f"estado no soportado para el fixture {f}: {status!r}")
+            raise CohortInputError(STATUS_VALUE_UNSUPPORTED, f"estado no soportado para el fixture {_display(f)}: {_display(status)}")
         if f not in enrolled:
-            raise CohortInputError(STATUS_FIXTURE_UNKNOWN, f"estado de un fixture fuera de la cohorte: {f}")
+            raise CohortInputError(STATUS_FIXTURE_UNKNOWN, f"estado de un fixture fuera de la cohorte: {_display(f)}")
         if f in found:
             code = STATUS_DUPLICATE if found[f] == status else STATUS_CONTRADICTORY
-            raise CohortInputError(code, f"más de un estado para el fixture {f}: {found[f]} y {status}")
+            raise CohortInputError(code, f"más de un estado para el fixture {_display(f)}: {_display(found[f])} y {_display(status)}")
         found[f] = status
     return found
 
@@ -189,11 +228,11 @@ def _labeled_fixtures(labeled_fixture_ids, enrolled: frozenset) -> frozenset:
     seen = set()
     for f in labeled_fixture_ids:
         if not _is_fixture_id(f):
-            raise CohortInputError(FIXTURE_ID_INVALID, f"fixture de etiqueta inválido: {f!r}")
+            raise CohortInputError(FIXTURE_ID_INVALID, f"fixture de etiqueta inválido: {_display(f)}")
         if f not in enrolled:
-            raise CohortInputError(LABEL_FIXTURE_UNKNOWN, f"etiqueta de un fixture fuera de la cohorte: {f}")
+            raise CohortInputError(LABEL_FIXTURE_UNKNOWN, f"etiqueta de un fixture fuera de la cohorte: {_display(f)}")
         if f in seen:
-            raise CohortInputError(LABEL_DUPLICATE, f"etiqueta repetida para el fixture {f}")
+            raise CohortInputError(LABEL_DUPLICATE, f"etiqueta repetida para el fixture {_display(f)}")
         seen.add(f)
     return frozenset(seen)
 
