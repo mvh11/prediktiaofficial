@@ -114,10 +114,19 @@ _TYPE_NAME_MAX_CHARS = 100
 
 def _type_name(value) -> str:
     """Nombre del tipo para los mensajes, acotado; por el descriptor de type, así que una metaclase con su propio
-    __name__ no interviene (MOD-DEV-107A). Para un tipo corriente es exactamente type(value).__name__."""
+    __name__ no interviene (MOD-DEV-107A). Para un tipo corriente es exactamente type(value).__name__.
+    Ese nombre puede ser un str derivado (type(Name("W"), (), {}) o C.__name__ = Name("P")): solo se usan str.__len__ y
+    str.__getitem__ de str, nunca su __len__, __getitem__, __format__, __str__ ni __repr__, y lo que sale es siempre un
+    str exacto antes de entrar en ningún mensaje (MOD-DEV-107A-R1)."""
     try:
         name = type.__dict__["__name__"].__get__(type(value))
-        return name if len(name) <= _TYPE_NAME_MAX_CHARS else name[:_TYPE_NAME_MAX_CHARS] + "..."
+        if not issubclass(type(name), str):
+            return "?"
+        size = str.__len__(name)
+        text = str.__getitem__(name, slice(0, _TYPE_NAME_MAX_CHARS))  # copia str exacta también de un str derivado
+        if type(text) is not str:
+            return "?"
+        return text if size <= _TYPE_NAME_MAX_CHARS else text + "..."
     except Exception:  # solo el mensaje; BaseException se propaga
         return "?"
 

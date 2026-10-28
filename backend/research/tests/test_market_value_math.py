@@ -612,3 +612,176 @@ def test_107a_valid_values_with_hostile_repr_are_evaluated_without_rendering():
     assert binary(IntRuntimeRepr(1), 2.0) == binary(1, 2.0)
     assert push(FloatTypeRepr(0.4), 0.4, 0.2, IntRuntimeRepr(2)) == push(0.4, 0.4, 0.2, 2)
     assert IntRuntimeRepr.calls == FloatTypeRepr.calls == 0
+
+
+# --- MOD-DEV-107A-R1: el nombre de una clase puede ser un str derivado con métodos hostiles ----------------
+# El mensaje nunca los ejecuta: el nombre se normaliza a un str exacto y acotado con los métodos de str.
+
+NAME_CALLS = []
+
+
+class FormatRaisesName(str):
+    def __format__(self, spec):
+        NAME_CALLS.append("format")
+        raise RuntimeError("boom")
+
+
+class FormatHugeName(str):
+    def __format__(self, spec):
+        NAME_CALLS.append("format")
+        return "N" * 1_000_000
+
+
+class StrRaisesName(str):
+    def __str__(self):
+        NAME_CALLS.append("str")
+        raise RuntimeError("str hostil")
+
+
+class ReprRaisesName(str):
+    def __repr__(self):
+        NAME_CALLS.append("repr")
+        raise TypeError("repr hostil")
+
+
+class LenLiesName(str):
+    def __len__(self):
+        NAME_CALLS.append("len")
+        return 1
+
+
+class LenRaisesName(str):
+    def __len__(self):
+        NAME_CALLS.append("len")
+        raise RuntimeError("len hostil")
+
+
+class EverythingName(str):
+    """Todo lo que una conversión ingenua llamaría: formato gigante, str/repr que lanzan, len que miente, slicing y suma gigantes."""
+
+    def __format__(self, spec):
+        NAME_CALLS.append("format")
+        return "N" * 1_000_000
+
+    def __str__(self):
+        NAME_CALLS.append("str")
+        raise RuntimeError("str hostil")
+
+    def __repr__(self):
+        NAME_CALLS.append("repr")
+        raise TypeError("repr hostil")
+
+    def __len__(self):
+        NAME_CALLS.append("len")
+        return 1
+
+    def __getitem__(self, key):
+        NAME_CALLS.append("getitem")
+        return "G" * 1_000_000
+
+    def __add__(self, other):
+        NAME_CALLS.append("add")
+        return "A" * 1_000_000
+
+    __radd__ = __add__
+
+
+class RenamedClass:
+    pass
+
+
+RenamedClass.__name__ = FormatRaisesName("P")  # K: el nombre se reasigna después de crear la clase
+
+HOSTILE_CLASSES = [  # G: construidas como en el informe, type(Name("W"), (), {})
+    pytest.param(lambda: type(FormatRaisesName("W"), (), {}), "W", id="A-format-raises"),
+    pytest.param(lambda: type(FormatHugeName("W"), (), {}), "W", id="B-format-1M"),
+    pytest.param(lambda: type(StrRaisesName("W"), (), {}), "W", id="C-str-raises"),
+    pytest.param(lambda: type(ReprRaisesName("W"), (), {}), "W", id="D-repr-raises"),
+    pytest.param(lambda: type(LenLiesName("E" * 100_000), (), {}), "E" * 100 + "...", id="E-len-lies-long"),
+    pytest.param(lambda: type(LenRaisesName("W"), (), {}), "W", id="E-len-raises"),
+    pytest.param(lambda: type(EverythingName("E" * 300), (), {}), "E" * 100 + "...", id="F-all-methods-long"),
+    pytest.param(lambda: RenamedClass, "P", id="K-reassigned"),
+]
+
+
+@pytest.mark.parametrize("position", POSITIONS, ids=[p[0] for p in POSITIONS])  # G/H/I/J: p_win, decimal_odds, p_lose, p_push
+@pytest.mark.parametrize("make, shown", HOSTILE_CLASSES)
+def test_107a_r1_hostile_class_name_gives_bounded_typed_error(make, shown, position):
+    _, error, name, call = position
+    cls = make()
+    NAME_CALLS.clear()
+    message = raises_typed(error, lambda: call(cls()))  # L/M: la clase exacta y el mensaje acotado
+    assert message.startswith(f"{name} debe ser int o float, no {shown}: <")
+    assert NAME_CALLS == []  # O: ningún método del nombre se ejecuta
+
+
+@pytest.mark.parametrize("make, shown", HOSTILE_CLASSES)
+def test_107a_r1_type_name_is_exact_bounded_str(make, shown):
+    from research.market_value_math import value as value_module
+
+    cls = make()
+    NAME_CALLS.clear()
+    name = value_module._type_name(cls())
+    assert type(name) is str and name == shown and NAME_CALLS == []  # N
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit, GeneratorExit], ids=["keyboard_interrupt", "system_exit", "generator_exit"])
+def test_107a_r1_name_methods_raising_base_exceptions_are_never_invoked(exc_type):
+    class InterruptingName(str):
+        def __format__(self, spec):
+            raise exc_type()
+
+        def __str__(self):
+            raise exc_type()
+
+        def __len__(self):
+            raise exc_type()
+
+    named = type(InterruptingName("I"), (), {"__repr__": lambda self: "i"})
+    assert raises_typed(ProbabilityError, lambda: binary(named(), 2.0)) == "p_win debe ser int o float, no I: i"
+
+
+@pytest.mark.parametrize("exc_type", [KeyboardInterrupt, SystemExit, GeneratorExit], ids=["keyboard_interrupt", "system_exit", "generator_exit"])
+def test_107a_r1_base_exception_from_instance_repr_still_propagates(exc_type):
+    def interrupt(self):
+        raise exc_type()
+
+    named = type(FormatHugeName("W"), (), {"__repr__": interrupt})  # P: el renderizado no se traga una BaseException
+    with pytest.raises(exc_type):
+        binary(named(), 2.0)
+    with pytest.raises(exc_type):
+        push(0.5, 0.3, 0.2, named())
+
+
+def test_107a_r1_error_precedence_with_hostile_names():
+    weird = type(FormatRaisesName("W"), (), {"__repr__": lambda self: "w"})
+    assert raises_typed(ProbabilityError, lambda: binary(weird(), weird())) == "p_win debe ser int o float, no W: w"
+    assert raises_typed(ProbabilityError, lambda: push(0.5, 0.3, weird(), weird())) == "p_push debe ser int o float, no W: w"
+    assert raises_typed(ProbabilityError, lambda: push(0.5, weird(), weird(), 2.0)) == "p_lose debe ser int o float, no W: w"
+    assert raises_typed(OddsError, lambda: push(0.4, 0.4, 0.2, weird())) == "decimal_odds debe ser int o float, no W: w"
+
+
+def test_107a_r1_ordinary_class_names_unchanged():
+    plain = type("Plain", (), {"__repr__": lambda self: "plain"})
+    assert raises_typed(ProbabilityError, lambda: binary(plain(), 2.0)) == "p_win debe ser int o float, no Plain: plain"
+    long_named = type("Q" * 150, (), {"__repr__": lambda self: "q"})
+    assert raises_typed(OddsError, lambda: binary(0.5, long_named())) == f"decimal_odds debe ser int o float, no {'Q' * 100}...: q"
+    assert raises_typed(ProbabilityError, lambda: binary("0.5", 2.0)) == "p_win debe ser int o float, no str: '0.5'"  # R
+    assert raises_typed(OddsError, lambda: binary(0.5, Decimal("2.0"))) == "decimal_odds debe ser int o float, no Decimal: Decimal('2.0')"
+
+
+def test_107a_r1_prior_contracts_preserved_after_hostile_rejections():
+    NAME_CALLS.clear()
+    raises_typed(ProbabilityError, lambda: binary(type(FormatHugeName("W"), (), {})(), 2.0))
+    # Q: entero gigante, contenedor profundo y repr larga
+    assert raises_typed(ProbabilityError, lambda: binary(-HUGE, 2.0)) == "p_win fuera de [0, 1] o no finita: <int negativo de 16610 bits>"
+    assert raises_typed(OddsError, lambda: binary(0.5, nested(100_000, 0.5))) == "decimal_odds debe ser int o float, no list: <list no representable>"
+    assert raises_typed(ProbabilityError, lambda: binary(HugeRepr(), 2.0)).endswith("... (2000000 caracteres)")
+    # S: valores válidos, cuota justa, procedencia y ValueEvaluation
+    r = binary(0.25, 4.0)
+    assert r == ValueEvaluation(EVALUATOR_ID, EVALUATOR_VERSION, CONVENTION_VERSION, BINARY_WIN_LOSE, 0.25, 0.75, None, 4.0, 4.0, DEFINED,
+                                0.0, INPUT_BASIS, PIT_STATUS, LIMITATIONS)
+    w = push(0.4, 0.4, 0.2, 2.0)
+    assert (w.fair_odds, w.fair_odds_status, w.expected_net_return, w.pit_status) == (2.0, DEFINED, 0.4 * (2.0 - 1.0) - 0.4, "NOT_CERTIFIED")
+    assert binary(0, 2.5).fair_odds_status == UNDEFINED_NO_WIN_PROBABILITY
+    assert NAME_CALLS == []
