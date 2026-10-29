@@ -10,7 +10,7 @@ import os
 import socket
 import subprocess
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
 
 import pytest
@@ -408,3 +408,183 @@ def test_15b_module_imports_without_app_database_provider_or_numeric_stack():
     out = subprocess.run([sys.executable, "-B", "-c", code], cwd=BACKEND, env=env, capture_output=True, text=True, timeout=120)
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "[]"
+
+
+# --- R1 (MOD-DEV108A-R1, D-108A-1): diagnósticos seguros, acotados y tipados -----------------------
+# Variantes H de la auditoría de SECONDARY (H1-H6) más su observación O5 (desplazamiento de 30 h). Solo API pública,
+# así que este archivo también se ejecuta contra la versión original como control negativo.
+
+TOUCHED = []  # métodos del llamador que llegó a ejecutar un diagnóstico (tiene que quedar vacío)
+MESSAGE_MAX = 400
+
+
+class Halt(BaseException):
+    """No es una Exception: nunca se convierte en PrematchSmokeInputError."""
+
+
+def _boom(name):
+    def method(self, *args, **kwargs):
+        TOUCHED.append(name)
+        raise RuntimeError(f"hostile {name}")
+    return method
+
+
+_TEXT = {n: _boom(n) for n in ("__repr__", "__str__", "__format__")}
+_DT_METHODS = {n: _boom(n) for n in ("utcoffset", "astimezone", "isoformat", "__sub__")}
+HostileRepr = type("HostileRepr", (), dict(_TEXT))
+HostileInt = type("HostileInt", (int,), dict(_TEXT))
+HostileStr = type("HostileStr", (str,), {**_TEXT, **{n: _boom(n) for n in ("__len__", "__getitem__")}})
+HostileNaive = type("HostileNaive", (datetime,), {**_TEXT, **_DT_METHODS})
+HostileAware = type("HostileAware", (datetime,), {**_TEXT, **_DT_METHODS})
+
+
+class BigRepr:
+    def __repr__(self):
+        TOUCHED.append("__repr__")
+        return "x" * 5_000_000
+
+
+class FixedOffset(tzinfo):
+    """tzinfo del llamador: devuelve `offset` o, si es una clase de excepción, la lanza."""
+
+    def __init__(self, offset):
+        self.offset = offset
+
+    def utcoffset(self, dt):
+        if isinstance(self.offset, type) and issubclass(self.offset, BaseException):
+            raise self.offset("tzinfo del llamador")
+        return self.offset
+
+
+@pytest.fixture
+def touched():
+    TOUCHED.clear()
+    yield TOUCHED
+    TOUCHED.clear()
+
+
+def assert_typed_and_safe(fn, calls, touched):
+    with pytest.raises(PrematchSmokeInputError) as info:
+        fn()
+    message = info.value.args[0]
+    assert type(message) is str and len(message) <= MESSAGE_MAX, len(message)
+    assert touched == [] and all(log == [] for log in calls.values())
+    return message
+
+
+H_CASES = {
+    "H1-fixture-object-hostile-repr": lambda: run(target={**TARGET, "fixture_id": HostileRepr()}, quotes=[]),
+    "H2-fixture-int-subclass-hostile-repr": lambda: run(target={**TARGET, "fixture_id": HostileInt(FIXTURE)}, quotes=[]),
+    "H3-fixture-huge-int-mismatch": lambda: run(target={**TARGET, "fixture_id": 10 ** 5000}, quotes=[]),
+    "H4-cutoff-object-hostile-repr": lambda: run(cutoff=HostileRepr(), quotes=[]),
+    "H5-cutoff-naive-datetime-subclass-hostile": lambda: run(cutoff=HostileNaive(2026, 3, 1, 18), quotes=[]),
+    "H6-btts-selection-str-subclass-hostile-repr": lambda: run(context(qtarget(selection=HostileStr("MAYBE"))), quotes=[]),
+    "O5-cutoff-utcoffset-30h": lambda: run(cutoff=T.replace(tzinfo=FixedOffset(timedelta(hours=30))), quotes=[]),
+}
+
+
+@pytest.mark.parametrize("case", list(H_CASES), ids=list(H_CASES))
+def test_r1_audit_variants_raise_typed_bounded_errors_without_running_caller_code(calls, touched, case):
+    assert_typed_and_safe(H_CASES[case], calls, touched)
+
+
+@pytest.mark.parametrize("build", [
+    lambda: {"target": {**TARGET, "fixture_id": HostileInt(1)}, "ctx": context(qtarget(fixture_id=HostileInt(1)))},
+    lambda: {"target": {**TARGET, "fixture_id": HostileStr("1000")}},
+    lambda: {"ctx": context(issued_at=HostileNaive(2026, 3, 1, 18, 30))},
+    lambda: {"ctx": context(kickoff_at=HostileNaive(2026, 3, 1, 20))},
+    lambda: {"target": {**TARGET, "kickoff_at": HostileNaive(2026, 3, 1, 20)}},
+    # aware con utcoffset/astimezone/__sub__ hostiles: se lee con los métodos base y la cronología inválida se tipa
+    lambda: {"ctx": context(issued_at=HostileAware(2026, 3, 1, 17, tzinfo=UTC))},
+    lambda: {"ctx": context(qtarget(market=HostileStr("BTTS_FT90"), selection="MAYBE"))},
+    lambda: {"ctx": context(qtarget(OVER_UNDER, HostileStr("HOME"), "2.5"))},
+], ids=["int-both-sides", "str-fixture", "issued-naive", "ctx-kickoff-naive", "target-kickoff-naive", "aware-hostile-methods",
+        "market-hostile-format", "ou-selection-hostile"])
+def test_r1_hostile_int_str_and_datetime_subclasses_are_typed(calls, touched, build):
+    case = build()
+    assert_typed_and_safe(lambda: run(case.get("ctx"), quotes=[], target=case.get("target", TARGET)), calls, touched)
+
+
+def test_r1_class_name_that_is_a_hostile_str_subclass_is_never_executed(calls, touched):
+    evil = type("Evil", (), {})
+    evil.__name__ = HostileStr("EvilName")
+    weird = type(HostileStr("WeirdName"), (), {})
+    for value, name in ((evil(), "EvilName"), (weird(), "WeirdName")):
+        message = assert_typed_and_safe(lambda: run(cutoff=value, quotes=[]), calls, touched)
+        assert message == f"cutoff: se espera un datetime con zona horaria, no <{name}>"
+
+
+@pytest.mark.parametrize("build", [
+    lambda: {"target": {**TARGET, "fixture_id": BigRepr()}},
+    lambda: {"cutoff": BigRepr()},
+    lambda: {"ctx": context(qtarget(selection="Z" * 5_000_000))},
+    lambda: {"ctx": context(qtarget(selection=HostileStr("Z" * 5_000_000)))},
+    lambda: {"target": {**TARGET, "kickoff_at": "9" * 5_000_000}},
+], ids=["fixture-big-repr", "cutoff-big-repr", "selection-5MB", "selection-5MB-hostile", "kickoff-5MB-str"])
+def test_r1_multi_megabyte_representations_give_bounded_messages(calls, touched, build):
+    case = build()
+    message = assert_typed_and_safe(lambda: run(case.get("ctx"), quotes=[], target=case.get("target", TARGET), cutoff=case.get("cutoff", T)),
+                                    calls, touched)
+    assert "(5000000 caracteres)" in message or "<BigRepr>" in message
+
+
+def test_r1_huge_ints_compare_exactly_and_are_described_by_sign_and_bits(calls, touched):
+    huge = 10 ** 5000
+    message = assert_typed_and_safe(lambda: run(context(qtarget(fixture_id=huge + 1)), quotes=[], target={**TARGET, "fixture_id": huge}),
+                                    calls, touched)
+    assert message == "fixture_id distinto entre target (<int de 16610 bits>) y context (<int de 16610 bits>)"
+    message = assert_typed_and_safe(lambda: run(target={**TARGET, "fixture_id": -huge}, quotes=[]), calls, touched)
+    assert message == "fixture_id distinto entre target (<int negativo de 16610 bits>) y context (1000)"
+    # el mismo int enorme en los dos lados no es un error de identidad: comparación exacta, sin texto ni float
+    result = run(context(qtarget(fixture_id=huge)), quotes=[], target={**TARGET, "fixture_id": huge}, history=[])
+    assert result.status == NO_ESTIMATE and result.fixture_id == huge
+
+
+@pytest.mark.parametrize("offset", [timedelta(hours=30), timedelta(hours=-30), "not-a-timedelta", RuntimeError, ArithmeticError],
+                         ids=["+30h", "-30h", "not-timedelta", "raises-RuntimeError", "raises-ArithmeticError"])
+@pytest.mark.parametrize("where", ["cutoff", "issued_at", "ctx_kickoff", "target_kickoff"])
+def test_r1_invalid_tzinfo_offsets_are_typed(calls, touched, offset, where):
+    base = {"cutoff": T, "issued_at": T + timedelta(minutes=30), "ctx_kickoff": KICKOFF, "target_kickoff": KICKOFF}[where]
+    bad = base.replace(tzinfo=FixedOffset(offset))
+    ctx = context(issued_at=bad) if where == "issued_at" else context(kickoff_at=bad) if where == "ctx_kickoff" else None
+    target = {**TARGET, "kickoff_at": bad} if where == "target_kickoff" else TARGET
+    message = assert_typed_and_safe(lambda: run(ctx, quotes=[], target=target, cutoff=bad if where == "cutoff" else T), calls, touched)
+    assert "zona horaria o instante no válidos" in message
+
+
+@pytest.mark.parametrize("where", ["cutoff", "issued_at", "target_kickoff"])
+def test_r1_base_exceptions_are_never_converted(calls, where):
+    base = {"cutoff": T, "issued_at": T + timedelta(minutes=30), "target_kickoff": KICKOFF}[where]
+    bad = base.replace(tzinfo=FixedOffset(Halt))
+    with pytest.raises(Halt):
+        run(context(issued_at=bad) if where == "issued_at" else None, quotes=[],
+            target={**TARGET, "kickoff_at": bad} if where == "target_kickoff" else TARGET, cutoff=bad if where == "cutoff" else T)
+    assert all(log == [] for log in calls.values())
+
+
+def test_r1_ordinary_messages_and_valid_inputs_are_preserved(touched):
+    with pytest.raises(PrematchSmokeInputError, match=r"^fixture_id distinto entre target \(1000\) y context \(1001\)$"):
+        run(context(qtarget(fixture_id=1001)), quotes=[])
+    with pytest.raises(PrematchSmokeInputError, match=r"^fixture_id: se espera un int \(no bool\): True / 1$"):
+        run(context(qtarget(fixture_id=1)), quotes=[], target={**TARGET, "fixture_id": True})
+    with pytest.raises(PrematchSmokeInputError, match=r"^selección 'OVER' no válida para BTTS_FT90$"):
+        run(context(qtarget(selection="OVER")), quotes=[])
+    with pytest.raises(PrematchSmokeInputError, match=r"^target\.kickoff_at: se espera un datetime con zona horaria, no '2026-03-01T20:00:00Z'$"):
+        run(quotes=[], target={**TARGET, "kickoff_at": "2026-03-01T20:00:00Z"})
+    with pytest.raises(PrematchSmokeInputError, match=r"^se exige cutoff <= issued_at < kickoff_at$"):
+        run(context(issued_at=KICKOFF), quotes=[])
+    # datetime subclases válidas (solo texto hostil) en otra zona: el recorrido válido y su resultado no cambian
+    plus3 = timezone(timedelta(hours=3))
+    aware = type("TextHostileAware", (datetime,), dict(_TEXT))
+    ctx = context(issued_at=aware(2026, 3, 1, 21, 30, tzinfo=plus3), kickoff_at=aware(2026, 3, 1, 23, tzinfo=plus3))
+    result = run(ctx, cutoff=aware(2026, 3, 1, 21, tzinfo=plus3), target={**TARGET, "kickoff_at": aware(2026, 3, 1, 20, tzinfo=UTC)})
+    assert (result.status, result.reasons) == (VALUE_EVALUATED, ())
+    assert result.selection_probabilities == run().selection_probabilities and touched == []
+
+
+def test_r1_rejected_naive_datetime_is_described_by_its_base_fields():
+    """Formato R1 del diagnóstico (el original usaba repr; no es un defecto): campos base, sin zona."""
+    with pytest.raises(PrematchSmokeInputError, match=r"^cutoff: se espera un datetime con zona horaria, no datetime 2026-03-01T18:00:00\.000000$"):
+        run(cutoff=T.replace(tzinfo=None), quotes=[])
+    with pytest.raises(PrematchSmokeInputError, match=r"^cutoff: se espera un datetime con zona horaria, no <HostileNaive 2026-03-01T18:00:00\.000000>$"):
+        run(cutoff=HostileNaive(2026, 3, 1, 18), quotes=[])

@@ -21,6 +21,13 @@ Orden (el primer fallo decide):
      el mismo instante UTC; cutoff <= context.issued_at < context.kickoff_at, todos con zona horaria;
      quotes list/tuple de QuoteObservation; en BTTS_FT90 y OVER_UNDER_FT90, selección del mercado y BTTS
      sin línea. Es consistencia sintética entre entradas, no acreditación independiente de los instantes.
+     Diagnóstico seguro (MOD-DEV108A-R1): los mensajes nunca llaman al __repr__, __str__ ni __format__ de un
+     valor rechazado; solo métodos base de int, str y type (un int de más de 64 bits se describe por su signo
+     y sus bits; un str, por sus primeros 40 caracteres; un datetime, por sus campos sin zona; cualquier otro
+     valor, por el nombre de su tipo) y siempre son str exactos y acotados. Los instantes se leen con los
+     métodos base de datetime (nunca los de una subclase); una
+     Exception ordinaria del tzinfo del llamador (p. ej. un desplazamiento de 30 h) es PrematchSmokeInputError;
+     un BaseException se propaga. Los errores del estimador, la referencia, la proyección y el puente no se tocan.
   2. Mercado: 1X2_FT90 -> UNSUPPORTED (ONE_X_TWO_PROJECTION_NOT_AUTHORIZED; no hay proyección 1X2) sin
      llamar a nada. Over/Under fuera de las 13 líneas canónicas (cuartos incluidos) u otro mercado ->
      el puente decide UNSUPPORTED con sus motivos (sin probabilidades: probabilities=None). Ni el
@@ -115,13 +122,63 @@ class PrematchValueSmoke:
     limitations: tuple[str, ...]
 
 
-def _instant(value, what: str) -> datetime:
-    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
-        raise PrematchSmokeInputError(f"{what}: se espera un datetime con zona horaria, no {value!r}")
+_INT_MAX_BITS = 64  # un int mayor se describe por su signo y sus bits, nunca por sus dígitos
+_STR_MAX_CHARS = 40
+_TYPE_NAME_MAX_CHARS = 100
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_DATETIME_FIELDS = tuple(getattr(datetime, n) for n in ("year", "month", "day", "hour", "minute", "second", "microsecond"))  # descriptores base
+
+
+def _type_name(value) -> str:
+    """Nombre del tipo, acotado y como str exacto: por el descriptor de type (una metaclase no interviene) y con
+    str.__len__ / str.__getitem__ de str, así que un __name__ que sea un str derivado hostil no se ejecuta."""
     try:
-        return value.astimezone(timezone.utc)
-    except (ArithmeticError, ValueError):
-        raise PrematchSmokeInputError(f"{what}: no se puede expresar en UTC: {value!r}") from None
+        name = type.__dict__["__name__"].__get__(type(value))
+        if not issubclass(type(name), str):
+            return "?"
+        text = str.__getitem__(name, slice(0, min(str.__len__(name), _TYPE_NAME_MAX_CHARS)))
+        return text if type(text) is str else "?"
+    except Exception:  # solo el diagnóstico; un BaseException se propaga
+        return "?"
+
+
+def _describe(value) -> str:
+    """Descripción acotada de un valor rechazado, sin llamar a ninguno de sus métodos (ver el módulo)."""
+    try:
+        cls = type(value)
+        if value is None or cls is bool:
+            return "None" if value is None else ("True" if value is True else "False")
+        if issubclass(cls, int):
+            bits = int.bit_length(value)
+            text = f"<int {'negativo ' if int.__lt__(value, 0) else ''}de {bits} bits>" if bits > _INT_MAX_BITS else int.__repr__(value)
+        elif issubclass(cls, str):
+            size = str.__len__(value)
+            text = str.__repr__(str.__getitem__(value, slice(0, _STR_MAX_CHARS)))
+            if size > _STR_MAX_CHARS:
+                text = f"{text}... ({size} caracteres)"
+        elif issubclass(cls, datetime):  # campos por los descriptores base; sin tzinfo (podría ejecutar código del llamador)
+            y, mo, d, h, mi, s, us = (field.__get__(value) for field in _DATETIME_FIELDS)
+            text = f"{y:04d}-{mo:02d}-{d:02d}T{h:02d}:{mi:02d}:{s:02d}.{us:06d}"
+            return f"datetime {text}" if cls is datetime else f"<{_type_name(value)} {text}>"
+        else:
+            return f"<{_type_name(value)}>"
+        return text if cls is int or cls is str else f"<{_type_name(value)} {text}>"
+    except Exception:  # solo el diagnóstico; un BaseException se propaga
+        return "<?>"
+
+
+def _instant(value, what: str) -> datetime:
+    """El instante en UTC como datetime exacto, leído con los métodos base de datetime (nunca los de una subclase)."""
+    if not issubclass(type(value), datetime):
+        raise PrematchSmokeInputError(f"{what}: se espera un datetime con zona horaria, no {_describe(value)}")
+    try:
+        offset = datetime.utcoffset(value)  # llama al tzinfo del llamador, que puede fallar (p. ej. 30 h)
+        instant = None if offset is None else _EPOCH + datetime.__sub__(value, _EPOCH)
+    except Exception:
+        raise PrematchSmokeInputError(f"{what}: zona horaria o instante no válidos ({_describe(value)})") from None
+    if instant is None:
+        raise PrematchSmokeInputError(f"{what}: se espera un datetime con zona horaria, no {_describe(value)}")
+    return instant
 
 
 def _check(target, cutoff, context, quotes) -> None:
@@ -131,9 +188,9 @@ def _check(target, cutoff, context, quotes) -> None:
         raise PrematchSmokeInputError("context: se espera un EvaluationContext con un QuoteTarget")
     fixture, quoted = target["fixture_id"], context.target.fixture_id
     if type(fixture) is not int or type(quoted) is not int:
-        raise PrematchSmokeInputError(f"fixture_id: se espera un int (no bool): {fixture!r} / {quoted!r}")
-    if fixture != quoted:
-        raise PrematchSmokeInputError(f"fixture_id distinto entre target ({fixture}) y context ({quoted})")
+        raise PrematchSmokeInputError(f"fixture_id: se espera un int (no bool): {_describe(fixture)} / {_describe(quoted)}")
+    if fixture != quoted:  # comparación exacta de int, sin pasar por texto
+        raise PrematchSmokeInputError(f"fixture_id distinto entre target ({_describe(fixture)}) y context ({_describe(quoted)})")
     kickoff = _instant(target["kickoff_at"], "target.kickoff_at")
     if _instant(context.kickoff_at, "context.kickoff_at") != kickoff:
         raise PrematchSmokeInputError("target.kickoff_at y context.kickoff_at no son el mismo instante UTC")
@@ -143,7 +200,8 @@ def _check(target, cutoff, context, quotes) -> None:
         raise PrematchSmokeInputError("quotes: se espera una list o tuple de QuoteObservation")
     t = context.target
     if t.market in (BTTS, OVER_UNDER) and (not isinstance(t.selection, str) or t.selection not in MARKET_SELECTIONS[t.market]):
-        raise PrematchSmokeInputError(f"selección {t.selection!r} no válida para {t.market}")
+        market = BTTS if t.market == BTTS else OVER_UNDER  # la constante publicada, nunca el valor del llamador
+        raise PrematchSmokeInputError(f"selección {_describe(t.selection)} no válida para {market}")
     if t.market == BTTS and t.line is not None:
         raise PrematchSmokeInputError("BTTS_FT90 no lleva línea")
 
