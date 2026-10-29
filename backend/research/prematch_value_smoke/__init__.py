@@ -21,8 +21,8 @@ Orden (el primer fallo decide):
      el mismo instante UTC; cutoff <= context.issued_at < context.kickoff_at, todos con zona horaria;
      quotes list/tuple de QuoteObservation; en BTTS_FT90 y OVER_UNDER_FT90, selección del mercado y BTTS
      sin línea. Es consistencia sintética entre entradas, no acreditación independiente de los instantes.
-     Diagnóstico seguro (MOD-DEV108A-R1): los mensajes nunca llaman al __repr__, __str__ ni __format__ de un
-     valor rechazado; solo métodos base de int, str y type (un int de más de 64 bits se describe por su signo
+     Diagnóstico seguro (MOD-DEV108A-R1/R2): los mensajes nunca llaman al __repr__, __str__, __format__, __eq__
+     ni __hash__ de un valor rechazado; solo métodos base de int, str y type (un int de más de 64 bits se describe por su signo
      y sus bits; un str, por sus primeros 40 caracteres; un datetime, por sus campos sin zona; cualquier otro
      valor, por el nombre de su tipo) y siempre son str exactos y acotados. Los instantes se leen con los
      métodos base de datetime (nunca los de una subclase); una
@@ -167,6 +167,18 @@ def _describe(value) -> str:
         return "<?>"
 
 
+def _market_label(value) -> str:
+    """La constante publicada cuyo texto es exactamente el de value, o su descripción segura. No vuelve a comparar el
+    objeto del llamador (su __eq__ / __hash__ no se ejecutan, MOD-DEV108A-R2): copia str exacta con str.__getitem__."""
+    if issubclass(type(value), str):
+        text = str.__getitem__(value, slice(None))
+        if type(text) is str:
+            for known in (BTTS, OVER_UNDER):
+                if text == known:  # dos str exactos
+                    return known
+    return _describe(value)
+
+
 def _instant(value, what: str) -> datetime:
     """El instante en UTC como datetime exacto, leído con los métodos base de datetime (nunca los de una subclase)."""
     if not issubclass(type(value), datetime):
@@ -200,8 +212,7 @@ def _check(target, cutoff, context, quotes) -> None:
         raise PrematchSmokeInputError("quotes: se espera una list o tuple de QuoteObservation")
     t = context.target
     if t.market in (BTTS, OVER_UNDER) and (not isinstance(t.selection, str) or t.selection not in MARKET_SELECTIONS[t.market]):
-        market = BTTS if t.market == BTTS else OVER_UNDER  # la constante publicada, nunca el valor del llamador
-        raise PrematchSmokeInputError(f"selección {_describe(t.selection)} no válida para {market}")
+        raise PrematchSmokeInputError(f"selección {_describe(t.selection)} no válida para {_market_label(t.market)}")
     if t.market == BTTS and t.line is not None:
         raise PrematchSmokeInputError("BTTS_FT90 no lleva línea")
 

@@ -588,3 +588,91 @@ def test_r1_rejected_naive_datetime_is_described_by_its_base_fields():
         run(cutoff=T.replace(tzinfo=None), quotes=[])
     with pytest.raises(PrematchSmokeInputError, match=r"^cutoff: se espera un datetime con zona horaria, no <HostileNaive 2026-03-01T18:00:00\.000000>$"):
         run(cutoff=HostileNaive(2026, 3, 1, 18), quotes=[])
+
+
+# --- R2 (MOD-DEV108A-R2, D-108A-R1-1): el diagnóstico del mercado no vuelve a comparar el objeto del llamador --
+# Comparaciones funcionales (las de 95a766a, sin cambios): BTTS = 2 __eq__ (tupla + clave del dict) y 1 __hash__;
+# Over/Under = 3 __eq__ (BTTS y OVER_UNDER en la tupla + clave) y 1 __hash__. R1 añadía una más en el mensaje.
+
+R2_OPS = []  # operaciones personalizadas del mercado ejecutadas
+
+
+def market_str(text, *, fail_on_eq=None, hostile_text=False, liar=False, base=str):
+    """Mercado del llamador con __eq__ / __hash__ que se cuentan (y delegan en str salvo liar); opcionalmente lanza en
+    la comparación número fail_on_eq o tiene __repr__ / __str__ / __format__ hostiles."""
+    def __eq__(self, other):
+        R2_OPS.append("__eq__")
+        if fail_on_eq is not None and R2_OPS.count("__eq__") >= fail_on_eq:
+            raise RuntimeError(f"hostile __eq__ en la comparación {R2_OPS.count('__eq__')}")
+        return True if liar else str.__eq__(self, other)
+
+    def __hash__(self):
+        R2_OPS.append("__hash__")
+        return str.__hash__(BTTS) if liar else str.__hash__(self)
+
+    ns = {"__eq__": __eq__, "__hash__": __hash__}
+    if hostile_text:
+        for name in ("__repr__", "__str__", "__format__"):
+            def text_method(self, *args, _name=name):
+                R2_OPS.append(_name)
+                raise RuntimeError(f"hostile {_name}")
+            ns[name] = text_method
+    cls = type("LiarMarket" if liar else "CallerMarket", (base,), ns)
+    return cls(text) if base is str else cls()
+
+
+@pytest.fixture
+def ops():
+    R2_OPS.clear()
+    yield R2_OPS
+    R2_OPS.clear()
+
+
+R2_CASES = {
+    # A: el caso exacto de SECONDARY (BTTS válido, selección MAYBE, __eq__ falla en la 3.ª comparación)
+    "A-btts-eq-fails-on-3rd": (lambda: qtarget(market=market_str(BTTS, fail_on_eq=3), selection="MAYBE"),
+                               "selección 'MAYBE' no válida para BTTS_FT90", 2),
+    "A-ou-eq-fails-on-4th": (lambda: qtarget(market=market_str(OVER_UNDER, fail_on_eq=4), selection="HOME", line="2.5"),
+                             "selección 'HOME' no válida para OVER_UNDER_FT90", 3),
+    # E/H: texto hostil más comparación contada: ni texto ni comparaciones extra en el diagnóstico
+    "E-btts-hostile-text": (lambda: qtarget(market=market_str(BTTS, hostile_text=True), selection="MAYBE"),
+                            "selección 'MAYBE' no válida para BTTS_FT90", 2),
+    "E-ou-hostile-text": (lambda: qtarget(market=market_str(OVER_UNDER, hostile_text=True), selection="HOME", line="2.5"),
+                          "selección 'HOME' no válida para OVER_UNDER_FT90", 3),
+    # E: un mercado que "iguala" a todo: la etiqueta sale de su contenido base, nunca de volver a preguntarle
+    "E-liar-str": (lambda: qtarget(market=market_str("XYZ", liar=True), selection="MAYBE"),
+                   "selección 'MAYBE' no válida para <LiarMarket 'XYZ'>", 2),
+    "E-liar-object": (lambda: qtarget(market=market_str(None, liar=True, base=object), selection="MAYBE"),
+                      "selección 'MAYBE' no válida para <LiarMarket>", 2),
+}
+
+
+@pytest.mark.parametrize("case", list(R2_CASES), ids=list(R2_CASES))
+def test_r2_market_diagnostic_runs_only_the_functional_comparisons(calls, touched, ops, case):
+    build, expected, functional_eq = R2_CASES[case]
+    message = assert_typed_and_safe(lambda: run(context(build()), quotes=[]), calls, touched)  # F: ningún componente
+    assert message == expected
+    assert ops == ["__eq__"] * (functional_eq - 1) + ["__hash__", "__eq__"]  # H: tupla, hash y clave; nada más
+
+
+@pytest.mark.parametrize("tgt, expected", [
+    (qtarget(selection="MAYBE"), "selección 'MAYBE' no válida para BTTS_FT90"),
+    (qtarget(selection="OVER"), "selección 'OVER' no válida para BTTS_FT90"),
+    (qtarget(OVER_UNDER, "HOME", "2.5"), "selección 'HOME' no válida para OVER_UNDER_FT90"),
+    (qtarget(OVER_UNDER, "YES", "2.0"), "selección 'YES' no válida para OVER_UNDER_FT90"),
+], ids=["btts-maybe", "btts-over", "ou-home", "ou-yes"])
+def test_r2_ordinary_btts_and_over_under_messages_are_unchanged(calls, tgt, expected):
+    with pytest.raises(PrematchSmokeInputError) as info:
+        run(context(tgt), quotes=[])
+    assert info.value.args[0] == expected and all(log == [] for log in calls.values())
+
+
+@pytest.mark.parametrize("tgt", [qtarget(), qtarget(OVER_UNDER, "OVER", "2.0")], ids=["btts", "ou-2.0-push"])
+def test_r2_valid_btts_and_integer_over_under_results_are_unchanged(ops, tgt):
+    plain = run(context(tgt))
+    counted = run(context(dataclasses.replace(tgt, market=market_str(tgt.market))))
+    assert (plain.status, counted.status) == (VALUE_EVALUATED, VALUE_EVALUATED)
+    assert counted.selection_probabilities == plain.selection_probabilities
+    assert counted.quote_value.valuation == plain.quote_value.valuation
+    if tgt.line == "2.0":
+        assert plain.selection_probabilities.p_push == plain.market_probabilities["over_under"]["2.0"]["PUSH"] > 0
