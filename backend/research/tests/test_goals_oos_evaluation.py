@@ -6,7 +6,7 @@ import copy
 import json
 import math
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone, tzinfo
 from decimal import Decimal
 
 import pytest
@@ -364,3 +364,120 @@ def test_15_module_is_pure_and_offline():
     for forbidden in ("sqlalchemy", "requests", "urllib", "socket", "os.environ", "open(", "datetime.now", "time.time", "random"):
         assert forbidden not in source
     assert AVAILABLE == "AVAILABLE"
+
+
+# ---------------------------------------------------------------- R1: tzinfo con utcoffset() no válido (MOD-DEV109A-R1)
+
+class OffsetTz(tzinfo):
+    """tzinfo del llamador que devuelve `offset` tal cual (válido o no) en utcoffset()."""
+
+    def __init__(self, offset):
+        self.offset = offset
+
+    def utcoffset(self, dt):
+        return self.offset
+
+    def dst(self, dt):
+        return timedelta(0)  # tzinfo.fromutc (astimezone hacia esta zona) exige un dst() timedelta
+
+    def tzname(self, dt):
+        return "SYNTHETIC"
+
+
+class RaisingTz(OffsetTz):
+    def __init__(self, exc):
+        super().__init__(None)
+        self.exc = exc
+
+    def utcoffset(self, dt):
+        raise self.exc
+
+
+class Halt(BaseException):
+    pass
+
+
+BAD_OFFSETS = [3600, 3600.0, "-03:00", Decimal(1), timedelta(hours=24), timedelta(hours=30), -timedelta(hours=25)]
+TEMPORAL_FIELDS = ("kickoff_at", "cutoff_at", "feature_observed_at", "outcome.observed_at")
+
+
+def with_instant(field, value):
+    """Una fila válida de holdout con `field` sustituido por `value`."""
+    row = obs(1, day(3, 5))
+    if field == "outcome.observed_at":
+        row["outcome"]["observed_at"] = value
+    else:
+        row[field] = value
+    return row
+
+
+@pytest.mark.parametrize("offset", BAD_OFFSETS)
+@pytest.mark.parametrize("field", TEMPORAL_FIELDS)
+def test_r1_malformed_utcoffset_in_observations_is_a_typed_temporal_error(field, offset):
+    bad = datetime(2025, 3, 5, 17, tzinfo=OffsetTz(offset))
+    with pytest.raises(TemporalError) as info:
+        evaluate_goals_oos([obs(10, day(1, 5)), with_instant(field, bad)], CONFIG)  # una fila mala y ningún informe parcial
+    assert not isinstance(info.value, LeakageError)
+    message = info.value.args[0]
+    assert type(message) is str and message.startswith(f"observación 1.{field}: zona horaria u offset no válidos") and len(message) < 200
+    assert "SYNTHETIC" not in message and "must return" not in message  # nunca texto del tzinfo ni de CPython
+
+
+@pytest.mark.parametrize("offset", BAD_OFFSETS)
+def test_r1_malformed_utcoffset_in_config_origins_is_a_typed_config_error(offset):
+    with pytest.raises(ConfigError, match=r"^origins\[1\]: zona horaria u offset no válidos"):
+        evaluate_goals_oos([obs(1, day(3, 5))], dict(CONFIG, origins=(O1, datetime(2025, 4, 1, tzinfo=OffsetTz(offset)))))
+
+
+def test_r1_messages_are_deterministic_and_independent_of_the_offset_value():
+    def message(offset):
+        with pytest.raises(TemporalError) as info:
+            evaluate_goals_oos([with_instant("kickoff_at", datetime(2025, 3, 5, 18, tzinfo=OffsetTz(offset)))], CONFIG)
+        return info.value.args[0]
+    assert {message(o) for o in BAD_OFFSETS} == {message(3600)} == {"observación 0.kickoff_at: zona horaria u offset no válidos, o instante "
+                                                                    "no representable en UTC"}
+
+
+def test_r1_other_tzinfo_failures_are_not_swallowed():
+    for exc in (RuntimeError("tz"), KeyError("tz"), ZeroDivisionError()):
+        with pytest.raises(type(exc)):
+            evaluate_goals_oos([with_instant("kickoff_at", datetime(2025, 3, 5, 18, tzinfo=RaisingTz(exc)))], CONFIG)
+    with pytest.raises(Halt):
+        evaluate_goals_oos([with_instant("cutoff_at", datetime(2025, 3, 5, 17, tzinfo=RaisingTz(Halt())))], CONFIG)
+
+
+def test_r1_none_offset_from_a_custom_tzinfo_is_still_a_naive_datetime_error():
+    with pytest.raises(TemporalError, match="sin zona"):
+        evaluate_goals_oos([with_instant("kickoff_at", datetime(2025, 3, 5, 18, tzinfo=OffsetTz(None)))], CONFIG)
+    with pytest.raises(TemporalError, match="no str"):
+        evaluate_goals_oos([with_instant("kickoff_at", "2025-03-05T18:00:00+00:00")], CONFIG)
+
+
+def utc_dataset_in(zone_of):
+    """dataset() con cada instante expresado en la zona que devuelve zone_of(i) (mismo instante UTC)."""
+    rows = dataset()
+    for i, row in enumerate(rows):
+        tz = zone_of(i)
+        for field in ("kickoff_at", "cutoff_at", "feature_observed_at"):
+            row[field] = row[field].astimezone(tz)
+        row["outcome"]["observed_at"] = row["outcome"]["observed_at"].astimezone(tz)
+    return rows
+
+
+def test_r1_valid_aware_timestamps_in_any_valid_zone_give_the_identical_report():
+    base = evaluate_goals_oos(dataset(), CONFIG)
+    zones = [timezone(timedelta(hours=-3)), timezone(timedelta(hours=5, minutes=30)), OffsetTz(timedelta(hours=-23, minutes=59)),
+             OffsetTz(timedelta(hours=13, seconds=7))]
+    for zone_of in (lambda i: zones[i % len(zones)], lambda i: zones[-1 - i % len(zones)]):
+        assert evaluate_goals_oos(utc_dataset_in(zone_of), CONFIG) == base
+    shifted = dict(CONFIG, origins=tuple(o.astimezone(OffsetTz(timedelta(hours=-7))) for o in CONFIG["origins"]))
+    assert evaluate_goals_oos(dataset(), shifted) == base
+
+
+def test_r1_fold_chronology_embargo_scoring_and_push_are_unchanged():
+    """Huellas del informe de dataset() calculadas con la implementación original b98fb37 antes de R1."""
+    report = evaluate_goals_oos(dataset(), CONFIG)
+    assert report["dataset_fingerprint"] == "a13aeb2582ff072dc336a7baae091c6e8750e590aa5e2b696b945f83cb4e3dd6"
+    assert report["report_digest"] == "bcb33e7accdf1823a0e976a5f7067e0d7e9720c2275b42dbed248bc47395e359"
+    push = group(report, 0, OVER_UNDER, "2.0")
+    assert push["outcome_counts"] == {"OVER": 0, "UNDER": 0, "PUSH": 1} and push["metric_basis"] == THREE_CLASS

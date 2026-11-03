@@ -151,14 +151,19 @@ class ProbabilityInputError(ObservationError):
 
 
 def _instant(value, what: str, error=TemporalError) -> datetime:
+    """El instante en UTC de un datetime con zona, o `error` (TemporalError; ConfigError en la configuración)."""
+    if not isinstance(value, datetime):
+        raise error(f"{what}: se espera un datetime con zona horaria, no {type(value).__name__}")
+    # Solo la normalización, que ejecuta el tzinfo del llamador: un utcoffset() de tipo no válido (p. ej. un int: TypeError,
+    # MOD-DEV109A-R1), fuera de ±24 h (ValueError) o un instante fuera del rango de datetime en UTC (OverflowError) es
+    # entrada no válida. Cualquier otra excepción del tzinfo se propaga; el mensaje nunca incluye texto del llamador.
     try:
-        if not isinstance(value, datetime) or value.utcoffset() is None:
-            raise error(f"{what}: se espera un datetime con zona horaria, no {type(value).__name__}")
-        return value.astimezone(timezone.utc)
-    except (OverflowError, ValueError) as exc:  # tzinfo inválido o instante fuera del rango de datetime en UTC
-        if isinstance(exc, OOSInputError):
-            raise
-        raise error(f"{what}: instante no representable en UTC") from None
+        instant = None if value.utcoffset() is None else value.astimezone(timezone.utc)
+    except (TypeError, ValueError, OverflowError):
+        raise error(f"{what}: zona horaria u offset no válidos, o instante no representable en UTC") from None
+    if instant is None:
+        raise error(f"{what}: se espera un datetime con zona horaria, no un datetime sin zona")
+    return instant
 
 
 def _span(value, what: str, *, positive: bool) -> timedelta:
