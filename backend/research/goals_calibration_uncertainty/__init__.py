@@ -65,6 +65,24 @@ dataset_identity = sha256 del objetivo y todas las filas normalizadas (también 
 report_identity = sha256 de canonical_report_json sin ese campo. Cambiar una fila relevante o la configuración cambia el
 informe y su identidad. Nada de esto prueba admisión por Data Integrity, cronología histórica auténtica, emisor ni recibo
 original: semana y etiqueta las declara el llamador. PIT_STATUS = NOT_CERTIFIED.
+
+Enteros grandes (MOD-DEV109B-R1): fixture_id y seed admiten cualquier int válido, también 10**5000. La serialización nunca
+pasa por la conversión int -> decimal de CPython (límite sys.get_int_max_str_digits, configurable y como mínimo 640
+dígitos) para valores grandes, y no se toca ese límite global. Un int con |n| < 10**DECIMAL_INT_DIGITS (640 dígitos o
+menos) se escribe como siempre (número JSON decimal y su texto decimal en block_draw), así que las identidades de entradas
+ordinarias no cambian. Uno mayor se escribe con la codificación INT_ENCODING: en el JSON canónico, el objeto
+{"INT_HEX_V1": "<signo><hex>"} (signo "+" o "-", dígitos hexadecimales en minúscula sin 0x ni ceros a la izquierda); en
+block_draw, el texto "INT_HEX_V1:<signo><hex>". Ninguna de las dos formas puede coincidir con la decimal (un objeto no es un
+número y ":" no es un dígito), y la hexadecimal es biyectiva: enteros grandes distintos dan identidades distintas.
+
+Errores (MOD-DEV109B-R1): toda entrada rechazada lanza una subclase de InputError con un mensaje determinista y acotado
+(cientos de caracteres) que nunca llama a __repr__, __str__, __format__, __eq__ ni __hash__ de un objeto del llamador
+que no sea de un tipo exacto admitido: los textos se recortan a DESCRIBE_TEXT_LIMIT caracteres, un int grande se describe
+por su número de bits y cualquier otro objeto por el nombre (recortado) de su tipo. Por eso los textos, etiquetas,
+mercados, líneas, semanas e identificadores tienen que ser exactamente str (una subclase de str se rechaza) y las
+probabilidades exactamente int o float (bool no; una subclase, p. ej. de float, se rechaza). Límite conocido: un Mapping o
+una colección del llamador se recorren con su propio __iter__ / __getitem__ / __len__, y isinstance puede consultar su
+__class__; ese código del llamador se ejecuta (no se protege contra un Mapping hostil funcional).
 """
 
 import hashlib
@@ -127,6 +145,75 @@ LIMITATIONS = (
 
 ROW_FIELDS = frozenset({"sample_id", "fixture_id", "week", "market", "line", "estimate_status", "probabilities", "label"})
 _KNOWN_LABELS = frozenset({BTTS_YES, BTTS_NO, OVER, UNDER, PUSH})
+
+INT_ENCODING = "INT_HEX_V1"
+DECIMAL_INT_DIGITS = 640  # sys.int_info.str_digits_check_threshold: el límite configurable nunca es menor
+_DECIMAL_INT_BOUND = 10 ** DECIMAL_INT_DIGITS
+DESCRIBE_TEXT_LIMIT = 40
+_DESCRIBE_INT_BOUND = 10 ** 18
+_DESCRIBE_ITEMS = 3
+_TYPE_NAME = type.__dict__["__name__"]  # el descriptor de type: ignora un __name__ redefinido en la metaclase
+
+
+def _int_hex(value: int) -> str:
+    """Signo y hexadecimal de un int exacto (sin conversión decimal, sin límite de dígitos)."""
+    return ("-" if value < 0 else "+") + format(-value if value < 0 else value, "x")
+
+
+def _int_token(value: int) -> str:
+    """El texto de un int exacto en block_draw: decimal hasta 640 dígitos, INT_HEX_V1 por encima."""
+    return str(value) if -_DECIMAL_INT_BOUND < value < _DECIMAL_INT_BOUND else f"{INT_ENCODING}:{_int_hex(value)}"
+
+
+def _short_text(value: str) -> str:
+    size = str.__len__(value)
+    head = str.__getitem__(value, slice(0, DESCRIBE_TEXT_LIMIT))  # métodos de str sin pasar por una subclase
+    return head if size <= DESCRIBE_TEXT_LIMIT else f"{head}... ({size} caracteres)"
+
+
+def _type_name(value) -> str:
+    return _short_text(_TYPE_NAME.__get__(type(value)))
+
+
+def _describe(value) -> str:
+    """Descripción acotada y determinista para un mensaje de error; no ejecuta código del llamador."""
+    kind = type(value)
+    if value is None or kind is bool:
+        return "None" if value is None else ("True" if value else "False")
+    if kind is int:
+        if -_DESCRIBE_INT_BOUND < value < _DESCRIBE_INT_BOUND:
+            return str(value)
+        return f"<int {'negativo ' if value < 0 else ''}de {value.bit_length()} bits>"
+    if kind is float:
+        return repr(value)
+    if kind is str:
+        size = len(value)
+        return repr(value) if size <= DESCRIBE_TEXT_LIMIT else f"{value[:DESCRIBE_TEXT_LIMIT]!r}... ({size} caracteres)"
+    if kind is list or kind is tuple or kind is dict or kind is set or kind is frozenset:
+        return f"<{kind.__name__} de {len(value)} elementos>"
+    return f"<{_type_name(value)}>"
+
+
+def _describe_keys(keys: list) -> str:
+    """Claves de un Mapping (ya enumeradas): los str exactos ordenados y recortados; las demás, por su tipo."""
+    texts = sorted(k for k in keys if type(k) is str)
+    others = sum(1 for k in keys if type(k) is not str)
+    parts = [_describe(k) for k in texts[:_DESCRIBE_ITEMS]]
+    if len(texts) > _DESCRIBE_ITEMS:
+        parts.append(f"+{len(texts) - _DESCRIBE_ITEMS} str más")
+    if others:
+        parts.append(f"{others} no str")
+    return f"[{', '.join(parts)}]"
+
+
+def _exact_keys(mapping, expected, what: str, error) -> None:
+    """Las claves del Mapping son exactamente `expected` (str), sin hashear ni comparar claves que no sean str exactos."""
+    keys = list(mapping)
+    texts = {k for k in keys if type(k) is str}
+    if len(texts) != len(keys) or texts != set(expected):
+        missing = sorted(set(expected) - texts)
+        extra = [k for k in keys if type(k) is not str or k not in expected]
+        raise error(f"{what}: faltan {missing}, sobran {len(extra)} {_describe_keys(extra)}")
 
 
 class InputError(ValueError):
@@ -272,51 +359,51 @@ class _Row(NamedTuple):
 
 def _target(market, line) -> tuple[str | None, tuple[str, ...]]:
     """(line_type, clases) del objetivo, o UnsupportedTargetError."""
-    if not isinstance(market, str) or market not in (BTTS_FT90, OVER_UNDER_FT90):
-        raise UnsupportedTargetError(f"mercado no admitido (solo {BTTS_FT90} y {OVER_UNDER_FT90}): {market!r}")
+    if type(market) is not str or market not in (BTTS_FT90, OVER_UNDER_FT90):
+        raise UnsupportedTargetError(f"mercado no admitido (solo {BTTS_FT90} y {OVER_UNDER_FT90}): {_describe(market)}")
     if market == BTTS_FT90:
         if line is not None:
-            raise UnsupportedTargetError(f"{BTTS_FT90} no tiene línea: {line!r}")
+            raise UnsupportedTargetError(f"{BTTS_FT90} no tiene línea: {_describe(line)}")
         return None, (BTTS_YES, BTTS_NO)
-    if not isinstance(line, str) or line not in SUPPORTED_LINE_TEXTS:
-        raise UnsupportedTargetError(f"línea Over/Under no admitida (solo texto canónico aprobado, sin cuartos): {line!r}")
+    if type(line) is not str or line not in SUPPORTED_LINE_TEXTS:
+        raise UnsupportedTargetError(f"línea Over/Under no admitida (solo texto canónico aprobado, sin cuartos): {_describe(line)}")
     return (INTEGER_LINE, (OVER, UNDER, PUSH)) if line.endswith(".0") else (HALF_LINE, (OVER, UNDER))
 
 
 def _check_config(config) -> None:
     if type(config) is not UncertaintyConfig:
-        raise ConfigError(f"config tiene que ser un UncertaintyConfig, no {type(config).__name__}")
+        raise ConfigError(f"config tiene que ser un UncertaintyConfig, no {_describe(config)}")
     for f in fields(config):
         if type(getattr(config, f.name)) is not int:
-            raise ConfigError(f"config.{f.name} tiene que ser un int (bool no): {getattr(config, f.name)!r}")
+            raise ConfigError(f"config.{f.name} tiene que ser un int (bool no): {_describe(getattr(config, f.name))}")
     if config.seed < 0:
-        raise ConfigError(f"config.seed tiene que ser >= 0: {config.seed}")
+        raise ConfigError(f"config.seed tiene que ser >= 0: {_describe(config.seed)}")
     if not 1 <= config.iterations <= MAX_ITERATIONS:
-        raise ConfigError(f"config.iterations tiene que estar en [1, {MAX_ITERATIONS}]: {config.iterations}")
+        raise ConfigError(f"config.iterations tiene que estar en [1, {MAX_ITERATIONS}]: {_describe(config.iterations)}")
     if not 1 <= config.bin_count <= MAX_BIN_COUNT:
-        raise ConfigError(f"config.bin_count tiene que estar en [1, {MAX_BIN_COUNT}]: {config.bin_count}")
+        raise ConfigError(f"config.bin_count tiene que estar en [1, {MAX_BIN_COUNT}]: {_describe(config.bin_count)}")
     if config.min_bin_support < 1 or config.min_total_support < 1:
         raise ConfigError("config.min_bin_support y config.min_total_support tienen que ser >= 1")
     if config.min_weeks < MIN_WEEKS_FLOOR:
-        raise ConfigError(f"config.min_weeks tiene que ser >= {MIN_WEEKS_FLOOR}: {config.min_weeks}")
+        raise ConfigError(f"config.min_weeks tiene que ser >= {MIN_WEEKS_FLOOR}: {_describe(config.min_weeks)}")
 
 
 def _week(value, what: str) -> str:
-    if (not isinstance(value, str) or len(value) != 8 or not value.isascii() or value[4:6] != "-W"
+    if (type(value) is not str or len(value) != 8 or not value.isascii() or value[4:6] != "-W"
             or not value[:4].isdigit() or not value[6:].isdigit()):
-        raise WeekError(f"{what}: week tiene que ser un texto ISO 'YYYY-Www': {value!r}")
+        raise WeekError(f"{what}: week tiene que ser un texto ISO 'YYYY-Www': {_describe(value)}")
     try:
         date.fromisocalendar(int(value[:4]), int(value[6:]), 1)
     except ValueError:
-        raise WeekError(f"{what}: semana ISO inexistente: {value!r}") from None
+        raise WeekError(f"{what}: semana ISO inexistente: {_describe(value)}") from None
     return value
 
 
 def _label(value, classes: tuple[str, ...], what: str) -> str | None:
     if value is None:
         return None
-    if not isinstance(value, str) or value not in _KNOWN_LABELS:
-        raise LabelError(f"{what}: etiqueta no válida: {value!r}")
+    if type(value) is not str or value not in _KNOWN_LABELS:
+        raise LabelError(f"{what}: etiqueta no válida: {_describe(value)}")
     if value == PUSH and PUSH not in classes:
         raise InconsistentPushLabelError(f"{what}: PUSH no existe en un objetivo binario {classes}")
     if value not in classes:
@@ -326,14 +413,20 @@ def _label(value, classes: tuple[str, ...], what: str) -> str | None:
 
 def _probabilities(value, classes: tuple[str, ...], what: str) -> tuple[float, ...]:
     if not isinstance(value, Mapping):
-        raise ProbabilityError(f"{what}: probabilities tiene que ser un Mapping con las claves {classes}, no {type(value).__name__}")
-    if set(value) != set(classes):
-        raise ProbabilityError(f"{what}: se esperan exactamente las claves {classes}: {sorted(map(repr, value))}")
+        raise ProbabilityError(f"{what}: probabilities tiene que ser un Mapping con las claves {classes}, no {_describe(value)}")
+    _exact_keys(value, classes, f"{what}: probabilities (se esperan exactamente {classes})", ProbabilityError)
+    plain = {}
+    for c in classes:  # tipo exacto y rango antes de los validadores publicados: sus mensajes solo verán int/float exactos
+        p = value[c]
+        # el rango antes que la finitud: math.isfinite(10**400) desborda (OverflowError)
+        if (type(p) is not int and type(p) is not float) or not 0 <= p <= 1 or not math.isfinite(p):
+            raise ProbabilityError(f"{what}: probabilidad {c} no válida (int o float exacto, finito, en [0, 1]): {_describe(p)}")
+        plain[c] = p
     try:
         if len(classes) == 2:
-            checked = validate_binary_probabilities((value[classes[0]], value[classes[1]]))
+            checked = validate_binary_probabilities((plain[classes[0]], plain[classes[1]]))
         else:
-            mapping = validate_integer_probabilities(value)
+            mapping = validate_integer_probabilities(plain)
             checked = tuple(mapping[c] for c in classes)
     except ProbabilityEvidenceError as exc:
         raise ProbabilityError(f"{what}: {exc}") from None
@@ -343,22 +436,21 @@ def _probabilities(value, classes: tuple[str, ...], what: str) -> tuple[float, .
 def _row(i: int, row, market: str, line: str | None, classes: tuple[str, ...]) -> _Row:
     what = f"fila {i}"
     if not isinstance(row, Mapping):
-        raise RowError(f"{what}: se espera un Mapping, no {type(row).__name__}")
-    keys = set(row)
-    if keys != ROW_FIELDS:
-        raise RowError(f"{what}: faltan {sorted(map(str, ROW_FIELDS - keys))}, sobran {sorted(map(repr, keys - ROW_FIELDS))}")
+        raise RowError(f"{what}: se espera un Mapping, no {_describe(row)}")
+    _exact_keys(row, ROW_FIELDS, what, RowError)
     sample_id, fixture_id = row["sample_id"], row["fixture_id"]
-    if not isinstance(sample_id, str) or not sample_id or sample_id != sample_id.strip():
-        raise RowError(f"{what}: sample_id tiene que ser un str no vacío sin espacios en los extremos: {sample_id!r}")
+    if type(sample_id) is not str or not sample_id or sample_id != sample_id.strip():
+        raise RowError(f"{what}: sample_id tiene que ser un str no vacío sin espacios en los extremos: {_describe(sample_id)}")
     if type(fixture_id) is not int or fixture_id < 1:
-        raise RowError(f"{what}: fixture_id tiene que ser un int >= 1: {fixture_id!r}")
-    if type(row["market"]) is not str or row["market"] != market or row["line"] != line \
-            or (line is not None and type(row["line"]) is not str):
-        raise RowError(f"{what}: ({row['market']!r}, {row['line']!r}) no es el objetivo ({market!r}, {line!r})")
+        raise RowError(f"{what}: fixture_id tiene que ser un int >= 1: {_describe(fixture_id)}")
+    row_market, row_line = row["market"], row["line"]
+    if (type(row_market) is not str or row_market != market
+            or (row_line is not None if line is None else type(row_line) is not str or row_line != line)):
+        raise RowError(f"{what}: ({_describe(row_market)}, {_describe(row_line)}) no es el objetivo ({market!r}, {line!r})")
     week = _week(row["week"], what)
     status = row["estimate_status"]
-    if not isinstance(status, str) or status not in (ESTIMATE, NO_ESTIMATE):
-        raise RowError(f"{what}: estimate_status tiene que ser {ESTIMATE} o {NO_ESTIMATE}: {status!r}")
+    if type(status) is not str or status not in (ESTIMATE, NO_ESTIMATE):
+        raise RowError(f"{what}: estimate_status tiene que ser {ESTIMATE} o {NO_ESTIMATE}: {_describe(status)}")
     label = _label(row["label"], classes, what)
     if status == NO_ESTIMATE:
         if row["probabilities"] is not None:
@@ -374,6 +466,8 @@ def _sha256(payload) -> str:
 
 
 def _plain(value):
+    if isinstance(value, int) and not isinstance(value, bool) and not -_DECIMAL_INT_BOUND < value < _DECIMAL_INT_BOUND:
+        return {INT_ENCODING: _int_hex(value)}  # sin conversión decimal: ver «Enteros grandes» en el módulo
     if is_dataclass(value):
         return {f.name: _plain(getattr(value, f.name)) for f in fields(value)}
     if isinstance(value, Mapping):
@@ -394,7 +488,8 @@ def canonical_report_json(report: ReliabilityUncertaintyReport) -> str:
 
 def block_draw(seed: int, replicate: int, draw: int, weeks: int) -> int:
     """Índice (0..weeks-1) de la semana del sorteo `draw` de la réplica `replicate` (ver el módulo)."""
-    digest = hashlib.sha256(f"{BOOTSTRAP_METHOD}|{seed}|{replicate}|{draw}".encode("ascii")).digest()
+    token = "|".join(_int_token(v) for v in (seed, replicate, draw))  # decimal como antes; INT_HEX_V1 si es enorme
+    digest = hashlib.sha256(f"{BOOTSTRAP_METHOD}|{token}".encode("ascii")).digest()
     return int.from_bytes(digest, "big") % weeks
 
 
@@ -469,12 +564,14 @@ def goals_reliability_uncertainty(rows, *, market, line, config) -> ReliabilityU
     line_type, classes = _target(market, line)
     _check_config(config)
     if not isinstance(rows, (list, tuple)):
-        raise InputError(f"las filas van en una lista o tupla (no un iterable de un solo uso), no en {type(rows).__name__}")
+        raise InputError(f"las filas van en una lista o tupla (no un iterable de un solo uso), no en {_describe(rows)}")
     parsed = sorted((_row(i, r, market, line, classes) for i, r in enumerate(rows)), key=lambda r: r.sample_id)
     for name, counter in (("sample_id", Counter(r.sample_id for r in parsed)), ("fixture_id", Counter(r.fixture_id for r in parsed))):
         repeated = sorted(k for k, n in counter.items() if n > 1)
         if repeated:
-            raise DuplicateSampleError(f"{name} repetido en el objetivo ({market}, {line}): {repeated!r}")
+            shown = ", ".join(_describe(k) for k in repeated[:_DESCRIBE_ITEMS])
+            more = f" y {len(repeated) - _DESCRIBE_ITEMS} más" if len(repeated) > _DESCRIBE_ITEMS else ""
+            raise DuplicateSampleError(f"{name} repetido en el objetivo ({market}, {line}): {len(repeated)} valor(es): {shown}{more}")
 
     binary = len(classes) == 2
     positions = (0,) if binary else tuple(range(len(classes)))  # binario: solo la clase del evento

@@ -486,3 +486,295 @@ def test_module_has_no_random_or_global_statistical_state():
     imported |= {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module}
     assert not imported & {"random", "numpy", "secrets", "time"}  # el sorteo es sha256 de (semilla, réplica, sorteo)
     assert not any(isinstance(node, ast.Global) for node in ast.walk(tree))
+
+
+# --- MOD-DEV109B-R1: enteros enormes, diagnósticos acotados y entradas hostiles ------------------------------------------
+
+BIG = 10 ** 5000  # más dígitos que el límite por defecto de CPython (4300) para int -> str
+MAX_MESSAGE = 500
+MIXED_ROWS = BTTS_ROWS + [btts("s5", 5, "2026-W03", 0.5, "NO"), btts("s6", 6, "2026-W03", None, None, status="NO_ESTIMATE"),
+                          btts("s7", 7, "2026-W04", 0.125, None)]
+
+# Identidades calculadas con el código previo a R1 (f137c6b) sobre estas mismas entradas ordinarias: R1 no las cambia
+GOLDEN = {
+    "BTTS_CFG": ("07d783b8a0d807692857cfa2af1d6cd28510ec1b3daa1f92008a42887f520a6c",
+                 "b2f3f03a015905796ee47073ab1d233e8bbcba4aa324f5cf6253af09a445a045",
+                 "31a9bc8c7e94e7f60b93493cf96929c04f759d5153028c21f5820b2d60d560fa"),
+    "INT_CFG2W": ("ea491d2d19f73e5bc18ba4dd64c0c05365bae792f62dcd87fe5a294728bc5fbb",
+                  "01fc5949a5aa5f36377035f11448b98d16d4c08a1ffd7ba9fcb61eb56717380e",
+                  "5a7b404d689303c9ea35e71310a4978b88a606d31b813dd02d3e38c4f95c6132"),
+    "BLOCK_CFG2W": ("ea491d2d19f73e5bc18ba4dd64c0c05365bae792f62dcd87fe5a294728bc5fbb",
+                    "6456649f62853ada0b5ab9a481cfdd4a7fcd1b4ac6a56e55f31a6572363acd36",
+                    "2ae97f5cbbee112f289cf9fb7bcff99e5c1c7c542e081d42b4aadc7322a73bd9"),
+    "MIXED_S11": ("7f582b090943b53b64899971a96365f61b21022cc03ddaea984329cdfd11ab72",
+                  "5359797aa849a31f8327f99d8217b31bf8e7c52e66b6519a75b6ecb90eda48ac",
+                  "16fd95a6bafe9c167b7ec5f32f97eb37041f210a35d9058b497316b41ed64b0f"),
+}
+GOLDEN_RUNS = {
+    "BTTS_CFG": lambda: run(BTTS_ROWS, market=BTTS, line=None),
+    "INT_CFG2W": lambda: run(INT_ROWS, line="2.0", config=CFG2W),
+    "BLOCK_CFG2W": lambda: run(BLOCK_ROWS, market=BTTS, line=None, config=CFG2W),
+    "MIXED_S11": lambda: run(MIXED_ROWS, market=BTTS, line=None, config=UncertaintyConfig(seed=11, iterations=50, min_weeks=2)),
+}
+
+
+def hex_token(n):
+    return ("-" if n < 0 else "+") + format(abs(n), "x")
+
+
+def raises_bounded(error, fn):
+    with pytest.raises(error) as info:
+        fn()
+    message = str(info.value)
+    assert len(message) <= MAX_MESSAGE, len(message)
+    return message
+
+
+class Hostile:
+    """Cualquier __repr__/__str__/__format__/comparación/hash/bool registra la llamada y falla."""
+    calls: list = []
+
+    def _boom(self, name):
+        Hostile.calls.append(name)
+        raise RuntimeError(f"hostile {name}")
+
+    def __repr__(self):
+        return self._boom("__repr__")
+
+    def __str__(self):
+        return self._boom("__str__")
+
+    def __format__(self, spec):
+        return self._boom("__format__")
+
+    def __eq__(self, other):
+        return self._boom("__eq__")
+
+    def __ne__(self, other):
+        return self._boom("__ne__")
+
+    def __lt__(self, other):
+        return self._boom("__lt__")
+
+    def __le__(self, other):
+        return self._boom("__le__")
+
+    def __gt__(self, other):
+        return self._boom("__gt__")
+
+    def __ge__(self, other):
+        return self._boom("__ge__")
+
+    def __hash__(self):
+        return self._boom("__hash__")
+
+    def __bool__(self):
+        return self._boom("__bool__")
+
+
+class HostileKey(Hostile):
+    __hash__ = object.__hash__  # hashable para poder construir el dict de prueba; el resto sigue siendo hostil
+
+
+class SubStr(str):
+    pass
+
+
+class SubFloat(float):
+    pass
+
+
+@pytest.fixture(autouse=True)
+def _reset_hostile_calls():
+    Hostile.calls.clear()
+    yield
+    assert Hostile.calls == []  # el módulo nunca ejecutó un método del objeto hostil
+
+
+@pytest.mark.parametrize("name", sorted(GOLDEN))
+def test_r1_ordinary_identities_are_unchanged(name):
+    report = GOLDEN_RUNS[name]()
+    assert (report.config_identity, report.dataset_identity, report.report_identity) == GOLDEN[name]
+
+
+def test_r1_huge_valid_fixture_ids_are_supported_and_distinct():
+    small = run([btts("a", 1, "2026-W01", 0.25, "YES"), btts("b", 2, "2026-W02", 0.75, "NO")], market=BTTS, line=None, config=CFG2W)
+    huge = run([btts("a", BIG, "2026-W01", 0.25, "YES"), btts("b", BIG + 1, "2026-W02", 0.75, "NO")], market=BTTS, line=None, config=CFG2W)
+    again = run([btts("b", BIG + 1, "2026-W02", 0.75, "NO"), btts("a", BIG, "2026-W01", 0.25, "YES")], market=BTTS, line=None, config=CFG2W)
+    other = run([btts("a", BIG + 2, "2026-W01", 0.25, "YES"), btts("b", BIG + 1, "2026-W02", 0.75, "NO")], market=BTTS, line=None, config=CFG2W)
+    assert huge == again and huge.dataset_identity == again.dataset_identity  # repetible e independiente del orden
+    assert other.dataset_identity != huge.dataset_identity and other.report_identity != huge.report_identity
+    assert huge.dataset_identity != small.dataset_identity
+    # la estadística no depende del identificador
+    assert (huge.ece, huge.coverage, huge.classes, huge.uncertainty) == (small.ece, small.coverage, small.classes, small.uncertainty)
+    for edge in (10 ** 640 - 1, 10 ** 640):  # última decimal y primera INT_HEX_V1: distintas y estables
+        a = run([btts("a", edge, "2026-W01", 0.25, "YES")], market=BTTS, line=None)
+        b = run([btts("a", edge, "2026-W01", 0.25, "YES")], market=BTTS, line=None)
+        assert a.dataset_identity == b.dataset_identity
+    assert run([btts("a", 10 ** 640 - 1, "2026-W01", 0.25, "YES")], market=BTTS, line=None).dataset_identity != \
+        run([btts("a", 10 ** 640, "2026-W01", 0.25, "YES")], market=BTTS, line=None).dataset_identity
+
+
+def test_r1_duplicate_huge_fixture_ids_fail_with_a_bounded_message():
+    message = raises_bounded(DuplicateSampleError, lambda: run([btts("a", BIG, "2026-W01", 0.5, "YES"), btts("b", BIG, "2026-W02", 0.5, "NO")],
+                                                               market=BTTS, line=None))
+    assert "bits" in message
+
+
+def test_r1_huge_valid_seed_canonical_encoding():
+    cfg = UncertaintyConfig(seed=BIG, iterations=5)
+    r = run(BTTS_ROWS, market=BTTS, line=None, config=cfg)
+    payload = json.loads(canonical_report_json(r))
+    assert payload["config"]["seed"] == payload["uncertainty"]["seed"] == {"INT_HEX_V1": hex_token(BIG)}
+    assert int(payload["config"]["seed"]["INT_HEX_V1"], 16) == BIG
+    assert r == run(BTTS_ROWS, market=BTTS, line=None, config=cfg)
+    plus_one = run(BTTS_ROWS, market=BTTS, line=None, config=dataclasses.replace(cfg, seed=BIG + 1))
+    assert plus_one.config_identity != r.config_identity and plus_one.report_identity != r.report_identity
+    decimal_edge = run(BTTS_ROWS, market=BTTS, line=None, config=dataclasses.replace(cfg, seed=10 ** 640 - 1))
+    assert json.loads(canonical_report_json(decimal_edge))["config"]["seed"] == 10 ** 640 - 1  # hasta 640 dígitos: número JSON
+    hex_edge = run(BTTS_ROWS, market=BTTS, line=None, config=dataclasses.replace(cfg, seed=10 ** 640))
+    assert json.loads(canonical_report_json(hex_edge))["config"]["seed"] == {"INT_HEX_V1": hex_token(10 ** 640)}
+
+
+def huge_seed_draw(seed, replicate, draw, weeks):
+    token = f"INT_HEX_V1:{hex_token(seed)}" if abs(seed) >= 10 ** 640 else str(seed)
+    digest = hashlib.sha256(f"WEEK_BLOCK_BOOTSTRAP_SHA256_COUNTER_DRAWS_V1|{token}|{replicate}|{draw}".encode()).digest()
+    return int.from_bytes(digest, "big") % weeks
+
+
+def test_r1_huge_seed_bootstrap_is_deterministic_and_follows_the_encoding():
+    cfg = UncertaintyConfig(seed=BIG, iterations=40, min_weeks=2)
+    r = run(BLOCK_ROWS, market=BTTS, line=None, config=cfg)
+    assert r.uncertainty.status == "EXPLORATORY_BOOTSTRAP" and r.uncertainty.replicates == 40
+    expected = tuple(sorted(abs(1 - 2 * sum(1 for j in range(2) if huge_seed_draw(BIG, i, j, 2) == 0)) / 4 for i in range(40)))
+    assert r.uncertainty.replicate_ece_sorted == expected
+    assert r == run(BLOCK_ROWS, market=BTTS, line=None, config=cfg)
+    for seed in (BIG, BIG + 1, 10 ** 640, 10 ** 640 - 1, 7):
+        assert block_draw(seed, 3, 1, 13) == huge_seed_draw(seed, 3, 1, 13)
+
+
+@pytest.mark.parametrize("field,value", [("seed", -BIG), ("iterations", BIG), ("bin_count", -BIG), ("min_weeks", -BIG),
+                                         ("seed", Hostile()), ("iterations", 2.5)],
+                         ids=["neg-huge-seed", "huge-iterations", "neg-huge-bins", "neg-huge-min-weeks", "hostile-seed", "float-iterations"])
+def test_r1_invalid_huge_or_hostile_config_values_are_bounded_config_errors(field, value):
+    raises_bounded(ConfigError, lambda: run([], config=dataclasses.replace(CFG, **{field: value})))
+
+
+def test_r1_hostile_config_object():
+    raises_bounded(ConfigError, lambda: run([], config=Hostile()))
+
+
+def test_r1_huge_negative_fixture_id_is_a_short_row_error():
+    message = raises_bounded(RowError, lambda: run([btts("a", -BIG, "2026-W01", 0.5, "YES")], market=BTTS, line=None))
+    assert "fixture_id" in message and "negativo" in message and "bits" in message
+
+
+def _bad_row(**change):
+    return dict(btts("a", 1, "2026-W01", 0.5, "YES"), **change)
+
+
+@pytest.mark.parametrize("change,error", [
+    ({"label": Hostile()}, LabelError), ({"label": BIG}, LabelError), ({"label": "Y" * 5_000_000}, LabelError),
+    ({"label": SubStr("YES")}, LabelError), ({"week": Hostile()}, WeekError), ({"week": BIG}, WeekError),
+    ({"week": "2026-W" + "9" * 5_000_000}, WeekError), ({"fixture_id": Hostile()}, RowError), ({"fixture_id": 1.0}, RowError),
+    ({"sample_id": Hostile()}, RowError), ({"sample_id": " " + "x" * 5_000_000}, RowError), ({"sample_id": SubStr("a")}, RowError),
+    ({"market": Hostile()}, RowError), ({"market": BIG}, RowError), ({"line": Hostile()}, RowError), ({"line": BIG}, RowError),
+    ({"estimate_status": Hostile()}, RowError), ({"estimate_status": SubStr("ESTIMATE")}, RowError),
+    ({"probabilities": Hostile()}, ProbabilityError), ({"probabilities": {"YES": Hostile(), "NO": 0.5}}, ProbabilityError),
+    ({"probabilities": {"YES": BIG, "NO": 0.5}}, ProbabilityError), ({"probabilities": {"YES": -BIG, "NO": 0.5}}, ProbabilityError),
+    ({"probabilities": {"YES": SubFloat(0.5), "NO": 0.5}}, ProbabilityError),
+    ({"probabilities": {"YES": 0.5, HostileKey(): 0.5}}, ProbabilityError),
+    ({"probabilities": {"YES": 0.5, "NO": 0.5, "x" * 5_000_000: 0.0}}, ProbabilityError),
+    ({"week": type("W" * 5000, (), {})()}, WeekError),
+], ids=["hostile-label", "huge-int-label", "5MB-label", "substr-label", "hostile-week", "huge-int-week", "5MB-week",
+        "hostile-fixture", "float-fixture", "hostile-sample", "5MB-sample", "substr-sample", "hostile-market", "huge-int-market",
+        "hostile-line", "huge-int-line", "hostile-status", "substr-status", "hostile-probabilities", "hostile-prob-value",
+        "huge-prob", "neg-huge-prob", "subfloat-prob", "hostile-prob-key", "5MB-prob-key", "long-type-name"])
+def test_r1_hostile_and_oversized_row_values_give_bounded_typed_errors(change, error):
+    message = raises_bounded(error, lambda: run([_bad_row(**change)], market=BTTS, line=None))
+    assert "x" * 100 not in message and "Y" * 100 not in message and "9" * 100 not in message and "W" * 100 not in message
+
+
+def test_r1_metaclass_name_is_read_without_running_caller_code():
+    class HostileMeta(type):
+        @property
+        def __name__(cls):
+            Hostile.calls.append("meta __name__")
+            raise RuntimeError("hostile metaclass __name__")
+
+    class MetaHostile(Hostile, metaclass=HostileMeta):
+        pass
+
+    message = raises_bounded(LabelError, lambda: run([_bad_row(label=MetaHostile())], market=BTTS, line=None))
+    assert "<MetaHostile>" in message
+
+
+@pytest.mark.parametrize("extra", [
+    {HostileKey(): 1}, {BIG: 1}, {"z" * 5_000_000: 1}, {f"extra{i}" * 1000: i for i in range(1000)}, {("tuple", "key"): 1},
+], ids=["hostile-key", "huge-int-key", "5MB-key", "1000-long-keys", "tuple-key"])
+def test_r1_unexpected_field_keys_give_bounded_row_errors(extra):
+    row = _bad_row()
+    row.update(extra)
+    message = raises_bounded(RowError, lambda: run([row], market=BTTS, line=None))
+    assert "sobran" in message
+
+
+def test_r1_missing_and_unexpected_keys_are_reported_deterministically():
+    row = _bad_row()
+    del row["week"]
+    row["zeta"], row["alpha"] = 1, 2
+    first = raises_bounded(RowError, lambda: run([row], market=BTTS, line=None))
+    second = raises_bounded(RowError, lambda: run([dict(reversed(list(row.items())))], market=BTTS, line=None))
+    assert first == second and "'week'" in first and "'alpha', 'zeta'" in first
+
+
+@pytest.mark.parametrize("market,line,error", [
+    (Hostile(), None, UnsupportedTargetError), (BIG, None, UnsupportedTargetError), ("M" * 5_000_000, None, UnsupportedTargetError),
+    (SubStr(BTTS), None, UnsupportedTargetError), (OU, Hostile(), UnsupportedTargetError), (OU, BIG, UnsupportedTargetError),
+    (OU, SubStr("2.5"), UnsupportedTargetError), (BTTS, Hostile(), UnsupportedTargetError),
+], ids=["hostile-market", "huge-int-market", "5MB-market", "substr-market", "hostile-line", "huge-int-line", "substr-line",
+        "btts-hostile-line"])
+def test_r1_hostile_or_huge_targets_give_bounded_errors(market, line, error):
+    raises_bounded(error, lambda: goals_reliability_uncertainty([], market=market, line=line, config=CFG))
+
+
+def test_r1_oversized_duplicate_sample_ids_are_bounded():
+    sid = "d" * 5_000_000
+    message = raises_bounded(DuplicateSampleError, lambda: run([btts(sid, 1, "2026-W01", 0.5, "YES"), btts(sid, 2, "2026-W01", 0.5, "NO")],
+                                                               market=BTTS, line=None))
+    assert "5000000 caracteres" in message
+
+
+def test_r1_hostile_containers_are_typed():
+    raises_bounded(InputError, lambda: run(Hostile(), market=BTTS, line=None))
+    raises_bounded(RowError, lambda: run([Hostile()], market=BTTS, line=None))
+
+
+def test_r1_messages_are_deterministic():
+    make = lambda: run([_bad_row(label=Hostile())], market=BTTS, line=None)  # noqa: E731
+    assert raises_bounded(LabelError, make) == raises_bounded(LabelError, make)
+
+
+def test_r1_functional_mapping_failures_are_not_swallowed():
+    class CallerMappingBug(Exception):
+        pass
+
+    class ExplodingMapping(dict):  # Mapping funcional del llamador: su propio código se ejecuta y su error se propaga
+        def __iter__(self):
+            raise CallerMappingBug("caller __iter__")  # ni se convierte en InputError ni se oculta
+
+    with pytest.raises(CallerMappingBug):
+        run([ExplodingMapping(_bad_row())], market=BTTS, line=None)
+
+
+def test_r1_preserves_statistics_with_huge_identities():
+    rows = [ou3(f"s{i}", BIG + i, f"2026-W0{1 + i // 2}", *probs, label)
+            for i, (probs, label) in enumerate([((0.5, 0.25, 0.25), "OVER"), ((0.5, 0.25, 0.25), "PUSH"),
+                                                ((0.25, 0.5, 0.25), "UNDER"), ((0.25, 0.5, 0.25), "UNDER")])]
+    r = run(rows, line="2.0", config=UncertaintyConfig(seed=BIG, iterations=30, min_weeks=2))
+    assert r.ece == 1 / 6 and [c.ece for c in r.classes] == [0.125, 0.375, 0.0]  # mismos valores a mano que con ids pequeños
+    assert (r.classes[2].mean_predicted, r.classes[2].observed_frequency) == (0.25, 0.25)
+    assert (r.coverage.scored, r.sample_status, r.outcome_status, r.uncertainty.status) == (4, "INSUFFICIENT_SUPPORT",
+                                                                                          "MULTIPLE_OBSERVED_CLASSES",
+                                                                                          "EXPLORATORY_BOOTSTRAP")
+    assert r.uncertainty.replicates == 30 and r.pit_status == "NOT_CERTIFIED"
