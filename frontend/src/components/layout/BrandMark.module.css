@@ -1,0 +1,13 @@
+.brand { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+.mark { width: 2rem; height: 2rem; flex: none; }
+.tile { fill: var(--color-hero-bg); }
+.curve { fill: none; stroke: var(--color-hero-accent); stroke-width: 2.4; stroke-linecap: round; }
+.axis { stroke: var(--color-hero-muted); stroke-width: 1.4; stroke-dasharray: 2 2; }
+
+.word {
+  font-weight: 800;
+  font-size: 1.05rem;
+  letter-spacing: 0.14em;
+  color: var(--color-ink);
+}

@@ -1,0 +1,157 @@
+.page {
+  display: grid;
+  gap: var(--space-5);
+  padding-block: var(--space-6) var(--space-8);
+}
+
+.competitionPicker { max-width: 28rem; }
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 11rem), 1fr));
+  gap: var(--space-4);
+  align-items: start;
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.filterActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-self: end;
+  grid-column: 1 / -1;
+}
+
+.results { display: grid; gap: var(--space-4); min-width: 0; }
+.resultsHeader h2 { margin: 0; font-size: var(--text-xl); }
+.resultsHeader p { margin: var(--space-1) 0 0; }
+.season { font-weight: 500; color: var(--color-ink-muted); }
+.resultsCount { margin: 0; font-size: var(--text-sm); color: var(--color-ink-muted); }
+
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-4) var(--space-5);
+}
+
+.list > .row + .row { margin-top: 0; border-top: 1px solid var(--color-border); }
+
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-ink-muted);
+}
+
+.round::before { content: '·'; margin-right: var(--space-3); }
+
+.teams { min-width: 0; }
+
+.rowLink {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: center;
+  min-height: 2.75rem;
+  color: var(--color-ink);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.rowLink:hover .team { text-decoration: underline; }
+
+.team { overflow-wrap: anywhere; }
+.away { text-align: right; }
+
+.score {
+  min-width: 3.5rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-muted);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.rowStatus { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+
+@media (min-width: 48rem) {
+  .row {
+    grid-template-columns: 13rem minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--space-5);
+  }
+
+  .rowMeta { flex-direction: column; gap: 0; }
+  .round::before { content: none; }
+  .rowStatus { justify-content: flex-end; }
+}
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.pageNumber { font-weight: 600; color: var(--color-ink-muted); }
+
+.back { margin: 0; }
+
+.headerStatus { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+
+.detailGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+  gap: var(--space-4);
+}
+
+.panel {
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  min-width: 0;
+}
+
+.panelTitle { font-size: var(--text-lg); }
+
+.scoreTable { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.scoreTable th,
+.scoreTable td { padding: var(--space-2) var(--space-2); border-bottom: 1px solid var(--color-border); text-align: left; }
+.scoreTable td { font-family: var(--font-mono); font-size: var(--text-lg); }
+.scoreTable thead th { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-ink-muted); overflow-wrap: anywhere; }
+
+.footnote { margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--color-ink-muted); }
+
+.details { display: grid; gap: var(--space-3); margin: 0; }
+.details > div { display: grid; grid-template-columns: 8rem minmax(0, 1fr); gap: var(--space-3); }
+.details dt { font-weight: 600; color: var(--color-ink-muted); font-size: var(--text-sm); }
+.details dd { margin: 0; overflow-wrap: anywhere; }
+
+.abstain {
+  padding: var(--space-5);
+  border: 1px solid var(--tone-abstain-ink);
+  border-radius: var(--radius-md);
+  background: var(--tone-abstain-bg);
+}
+
+.abstainHeader { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+.abstainTitle { margin: 0; font-size: var(--text-lg); }
+.abstain p { color: var(--color-ink); }
+.abstainLink { margin: 0; font-weight: 600; }

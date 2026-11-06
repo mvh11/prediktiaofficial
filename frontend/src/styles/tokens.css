@@ -1,0 +1,114 @@
+:root {
+  color-scheme: light dark;
+
+  /* Typography */
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'SF Mono', Menlo, Consolas, monospace;
+  --text-xs: 0.8125rem;
+  --text-sm: 0.875rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: clamp(1.5rem, 1.2rem + 1.2vw, 2rem);
+  --text-3xl: clamp(2rem, 1.4rem + 2.6vw, 3.25rem);
+  --leading-tight: 1.2;
+  --leading-normal: 1.6;
+
+  /* Spacing (4px base) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4.5rem;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-pill: 999px;
+
+  --content-max: 72rem;
+  --prose-max: 44rem;
+  --header-height: 4rem;
+  --gutter: clamp(1rem, 0.6rem + 2vw, 2rem);
+
+  /* Light palette */
+  --color-bg: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-surface-muted: #eef1f6;
+  --color-ink: #0e1726;
+  --color-ink-muted: #475467;
+  --color-border: #d6dce5;
+  --color-border-strong: #a9b4c4;
+  --color-brand: #0d6b63;
+  --color-brand-strong: #09524c;
+  --color-brand-contrast: #ffffff;
+  --color-brand-soft: #e2f3f1;
+  --color-focus: #1d4ed8;
+  --color-hero-bg: #0b1424;
+  --color-hero-ink: #eef3fb;
+  --color-hero-muted: #b9c4d6;
+  --color-hero-accent: #5eead4;
+
+  --tone-neutral-bg: #eef1f6;
+  --tone-neutral-ink: #344054;
+  --tone-info-bg: #e3edff;
+  --tone-info-ink: #1e40af;
+  --tone-success-bg: #def5e8;
+  --tone-success-ink: #116235;
+  --tone-warning-bg: #fdf1d8;
+  --tone-warning-ink: #8a4b06;
+  --tone-danger-bg: #fde6e6;
+  --tone-danger-ink: #a11d1d;
+  --tone-abstain-bg: #ece8fb;
+  --tone-abstain-ink: #4b2fa8;
+
+  --shadow-sm: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 8%);
+  --shadow-md: 0 4px 16px rgb(16 24 40 / 10%);
+
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0a1020;
+    --color-surface: #111a2d;
+    --color-surface-muted: #17233a;
+    --color-ink: #e7ecf5;
+    --color-ink-muted: #a5b1c6;
+    --color-border: #26334d;
+    --color-border-strong: #3d4d6b;
+    --color-brand: #5eead4;
+    --color-brand-strong: #99f6e4;
+    --color-brand-contrast: #062521;
+    --color-brand-soft: #0f2f2d;
+    --color-focus: #93c5fd;
+    --color-hero-bg: #060b16;
+
+    --tone-neutral-bg: #1c2840;
+    --tone-neutral-ink: #cfd8e6;
+    --tone-info-bg: #172a52;
+    --tone-info-ink: #a9c4ff;
+    --tone-success-bg: #10331f;
+    --tone-success-ink: #8ee0ae;
+    --tone-warning-bg: #3a2a0c;
+    --tone-warning-ink: #f8cf7c;
+    --tone-danger-bg: #3d1515;
+    --tone-danger-ink: #fca5a5;
+    --tone-abstain-bg: #271f4d;
+    --tone-abstain-ink: #c8b8ff;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+    --shadow-md: 0 6px 20px rgb(0 0 0 / 45%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+  }
+}

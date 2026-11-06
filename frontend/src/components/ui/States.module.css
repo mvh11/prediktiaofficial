@@ -1,0 +1,72 @@
+.state {
+  display: flex;
+  gap: var(--space-4);
+  align-items: flex-start;
+  padding: var(--space-5);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  font-weight: 700;
+  font-size: var(--text-lg);
+}
+
+.neutral { background: var(--tone-neutral-bg); color: var(--tone-neutral-ink); }
+.warning { background: var(--tone-warning-bg); color: var(--tone-warning-ink); }
+.danger { background: var(--tone-danger-bg); color: var(--tone-danger-ink); }
+
+.text { min-width: 0; }
+.title { margin: 0 0 var(--space-1); font-size: var(--text-lg); }
+.description { color: var(--color-ink-muted); }
+.description > :last-child { margin-bottom: 0; }
+.action { margin-top: var(--space-4); display: flex; flex-wrap: wrap; gap: var(--space-3); }
+
+.loading {
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.loadingLabel {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  color: var(--color-ink-muted);
+  font-weight: 500;
+}
+
+.spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid var(--color-border-strong);
+  border-top-color: var(--color-brand);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.skeletons { display: grid; gap: var(--space-3); margin-top: var(--space-4); }
+
+.skeleton {
+  display: block;
+  height: 3.25rem;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(90deg, var(--color-surface-muted) 0%, var(--color-border) 50%, var(--color-surface-muted) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner, .skeleton { animation: none; }
+}

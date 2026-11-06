@@ -1,0 +1,13 @@
+.notice {
+  padding: var(--space-4) var(--space-5);
+  border-left: 4px solid;
+  border-radius: var(--radius-sm);
+}
+
+.info { background: var(--tone-info-bg); border-color: var(--tone-info-ink); }
+.warning { background: var(--tone-warning-bg); border-color: var(--tone-warning-ink); }
+.abstain { background: var(--tone-abstain-bg); border-color: var(--tone-abstain-ink); }
+
+.title { margin: 0 0 var(--space-1); font-weight: 700; color: var(--color-ink); }
+.body { color: var(--color-ink); }
+.body > :last-child { margin-bottom: 0; }
