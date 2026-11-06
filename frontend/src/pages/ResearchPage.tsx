@@ -91,7 +91,7 @@ export function ResearchPage() {
             The two are different products with different standards of proof. Only the first exists today.
           </p>
           {/* Scrollable on narrow screens: focusable so keyboard users can scroll it. */}
-          <div className={styles.tableWrap} role="region" aria-labelledby="comparison-title" tabIndex={0}>
+          <div className={styles.tableWrap} role="region" aria-label="Comparison table, scrollable" tabIndex={0}>
             <table className={styles.table}>
               <caption className="visually-hidden">Comparison of research models and certified predictions</caption>
               <thead>
