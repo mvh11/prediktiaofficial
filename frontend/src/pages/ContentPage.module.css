@@ -87,7 +87,8 @@
 .toc h2 { font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-ink-muted); }
 .toc ol { margin: 0; padding-left: 1.25rem; }
 .toc li + li { margin-top: var(--space-1); }
-.toc a { display: inline-block; padding-block: 0.15rem; }
+/* Inline (not inline-block) so the list marker aligns with the first line of a wrapped link. */
+.toc a { display: inline; padding-block: 0.15rem; line-height: 1.7; }
 
 .article { display: grid; gap: var(--space-7); min-width: 0; }
 .article section > p,
