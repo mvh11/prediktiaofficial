@@ -20,13 +20,13 @@
   color: var(--color-hero-accent);
 }
 
-.heroTitle { max-width: 20ch; margin-bottom: var(--space-5); font-size: var(--text-3xl); color: var(--color-hero-ink); }
+.heroTitle { max-width: 22ch; margin-bottom: var(--space-5); font-size: var(--text-3xl); color: var(--color-hero-ink); }
 
 .heroLead { max-width: var(--prose-max); font-size: var(--text-lg); color: var(--color-hero-muted); }
 
 .heroActions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-5); }
 
-/* Secondary button on the dark hero keeps contrast in both colour schemes. */
+/* Secondary buttons on the dark hero keep contrast in both colour schemes. */
 .heroActions .heroSecondary {
   background: transparent;
   border-color: rgb(238 243 251 / 45%);
@@ -61,3 +61,56 @@
 }
 
 .grid > li + li { margin-top: 0; }
+
+.journey {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: none;
+}
+
+.journey > li + li { margin-top: 0; }
+
+.step {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.step p { margin: 0; color: var(--color-ink-muted); }
+
+.stepNumber {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--color-brand);
+  color: var(--color-brand-contrast);
+  font-weight: 700;
+}
+
+.stepTitle { margin: 0; }
+.stepLink { margin-top: auto; margin-left: calc(-1 * var(--space-3)); }
+
+.statusGrid {
+  display: grid;
+  gap: var(--space-6);
+  align-items: start;
+}
+
+.statusAside { display: grid; gap: var(--space-4); }
+.statusAside h3 { margin: 0; }
+
+@media (min-width: 60rem) {
+  .statusGrid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
+}

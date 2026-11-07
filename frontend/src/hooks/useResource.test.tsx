@@ -73,4 +73,31 @@ describe('useResource', () => {
     unmount();
     expect(captured?.aborted).toBe(true);
   });
+
+  it('retries a failed load automatically when the browser comes back online', async () => {
+    const load = vi.fn<(signal: AbortSignal) => Promise<string>>().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce('ok');
+    const { result } = renderHook(() => useResource('k', load));
+    await waitFor(() => {
+      expect(result.current.state.status).toBe('error');
+    });
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    await waitFor(() => {
+      expect(result.current.state).toEqual({ status: 'success', data: 'ok' });
+    });
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reload a successful resource when the browser comes back online', async () => {
+    const load = vi.fn(() => Promise.resolve('data'));
+    const { result } = renderHook(() => useResource('k', load));
+    await waitFor(() => {
+      expect(result.current.state.status).toBe('success');
+    });
+    act(() => {
+      window.dispatchEvent(new Event('online'));
+    });
+    expect(load).toHaveBeenCalledTimes(1);
+  });
 });

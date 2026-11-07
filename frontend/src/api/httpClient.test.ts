@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { hangingResponse, jsonResponse, textResponse } from '../test/fetchMock.ts';
 import { ApiError } from './errors.ts';
 import { buildUrl, createHttpClient } from './httpClient.ts';
+import { fixtureListSchema } from './schemas.ts';
+import { devFixture } from '../test/devOnlyData.ts';
 
 const schema = z.object({ status: z.literal('ok') });
 
@@ -50,10 +52,10 @@ describe('createHttpClient', () => {
     await expect(clientWith(fetchImpl).getJson('/health', schema)).rejects.toMatchObject({ kind: 'network' });
   });
 
-  it('times out a request that never responds', async () => {
+  it('times out a request that never responds, and reports the configured timeout', async () => {
     const fetchImpl = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => hangingResponse(new URL('http://x'), init));
     const error = await captureError(clientWith(fetchImpl, 30).getJson('/health', schema));
-    expect(error).toMatchObject({ kind: 'timeout' });
+    expect(error).toMatchObject({ kind: 'timeout', timeoutMs: 30 });
   });
 
   it('times out while reading a slow body', async () => {
@@ -105,16 +107,41 @@ describe('createHttpClient', () => {
 
   it('rejects a 2xx HTML response (e.g. an SPA fallback page) as invalid', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(textResponse('<!doctype html>', 200, 'text/html'));
-    await expect(clientWith(fetchImpl).getJson('/health', schema)).rejects.toMatchObject({ kind: 'invalid_response' });
+    await expect(clientWith(fetchImpl).getJson('/health', schema)).rejects.toMatchObject({ kind: 'invalid_response', invalid: { reason: 'not_json' } });
   });
 
   it('rejects malformed JSON', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(textResponse('{"status":', 200, 'application/json'));
-    await expect(clientWith(fetchImpl).getJson('/health', schema)).rejects.toMatchObject({ kind: 'invalid_response' });
+    await expect(clientWith(fetchImpl).getJson('/health', schema)).rejects.toMatchObject({ kind: 'invalid_response', invalid: { reason: 'malformed_json' } });
   });
 
   it('rejects JSON that does not match the schema instead of rendering it', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ status: 'degraded' }));
     await expect(clientWith(fetchImpl).getJson('/health', schema)).rejects.toMatchObject({ kind: 'invalid_response' });
+  });
+
+  it('rejects an integer that JSON.parse would silently round, naming the exact literal', async () => {
+    const numberSchema = z.object({ id: z.number() });
+    // 9007199254740993 parses to 9007199254740992: the response must not be shown at all.
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(textResponse('{"id":9007199254740993}', 200, 'application/json'));
+    const error = await captureError(clientWith(fetchImpl).getJson('/x', numberSchema));
+    expect(error).toMatchObject({ kind: 'invalid_response', invalid: { reason: 'unsafe_integer', literal: '9007199254740993' } });
+  });
+
+  it('locates the first offending record of a list response (1-based row, field and id)', async () => {
+    const rows = [devFixture(1), { ...devFixture(7), kickoff_at: '2030-01-05T15:00:00' }, devFixture(3)];
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(rows));
+    const error = await captureError(clientWith(fetchImpl).getJson('/fixtures', fixtureListSchema));
+    expect(error).toMatchObject({ kind: 'invalid_response', invalid: { reason: 'schema', row: 2, field: 'kickoff_at', rowId: '7' } });
+  });
+
+  it('locates a nested field and omits a non-integer id', async () => {
+    const rows = [{ ...devFixture(1), id: 'x', home_team: { id: 0, name: 'A', logo_url: null } }];
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(rows));
+    const error = await captureError(clientWith(fetchImpl).getJson('/fixtures', fixtureListSchema));
+    expect(error).toBeInstanceOf(ApiError);
+    const invalid = (error as ApiError).invalid;
+    expect(invalid).toMatchObject({ reason: 'schema', row: 1 });
+    expect(invalid?.rowId).toBeUndefined();
   });
 });

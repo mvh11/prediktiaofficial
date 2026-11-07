@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_DB_INT } from '../lib/ids.ts';
 
 /**
  * Runtime schemas mirroring the VERIFIED backend response models
@@ -7,13 +8,15 @@ import { z } from 'zod';
  * mistyped fields reject the whole response rather than rendering guesses.
  *
  * Deliberately STRICTER than the backend models (fail-closed, not a contract
- * mismatch): names must be non-empty (backend: `str`) and goal counts must be
- * non-negative integers (backend: `int | None`). A single row violating this
- * rejects the whole response as `invalid_response` instead of rendering a
- * nonsensical value.
+ * mismatch):
+ * - names must be non-empty (backend: `str`);
+ * - goal counts must be non-negative integers (backend: `int | None`);
+ * - ids must be positive and within the PostgreSQL `integer` range of their
+ *   columns (backend models), so no id can be a rounded JSON number.
+ * A single row violating this rejects the whole response as `invalid_response`.
  */
 
-const id = z.number().int().positive();
+const id = z.number().int().positive().max(MAX_DB_INT);
 const goals = z.number().int().nonnegative().nullable();
 
 /** ISO-8601 timestamp that carries an explicit UTC offset (never a naive local time). */
@@ -28,7 +31,7 @@ export const healthSchema = z.object({
   service: z.string(),
 });
 
-/** GET /competitions -> list[CompetitionOut] */
+/** GET /competitions -> list[CompetitionOut] (ordered by country, then name) */
 export const competitionSchema = z.object({
   id,
   external_id: z.number().int(),
@@ -41,7 +44,7 @@ export const competitionSchema = z.object({
 });
 export const competitionListSchema = z.array(competitionSchema);
 
-/** GET /competitions/{id}/teams -> list[TeamOut] */
+/** GET /competitions/{id}/teams?season= -> list[TeamOut] (ordered by name) */
 export const teamSchema = z.object({
   id,
   external_id: z.number().int(),
@@ -60,7 +63,7 @@ const fixtureTeamSchema = z.object({
   logo_url: z.string().nullable(),
 });
 
-/** GET /fixtures -> list[FixtureOut]; GET /fixtures/{id} -> FixtureOut */
+/** GET /fixtures -> list[FixtureOut] (ordered by kickoff, then id); GET /fixtures/{id} -> FixtureOut */
 export const fixtureSchema = z.object({
   id,
   external_id: z.number().int(),

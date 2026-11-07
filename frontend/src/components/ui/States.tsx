@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
+import { useMessages } from '../../i18n/i18n.ts';
 import { Button } from './Button.tsx';
 import styles from './States.module.css';
 import { cx } from '../../lib/cx.ts';
@@ -51,13 +52,21 @@ export interface ErrorStateProps {
   readonly children?: ReactNode;
   readonly onRetry?: (() => void) | undefined;
   readonly retryLabel?: string;
+  /** Extra actions next to the retry button (e.g. "go back"). */
+  readonly actions?: ReactNode;
   /** `unavailable` = honest absence (warning tone); `error` = failure (danger tone). */
   readonly variant?: 'unavailable' | 'error';
   readonly headingLevel?: 2 | 3 | undefined;
 }
 
 /** A failure or unavailable data source. Announced to assistive tech via role="alert". */
-export function ErrorState({ title, children, onRetry, retryLabel = 'Try again', variant = 'error', headingLevel }: ErrorStateProps) {
+export function ErrorState({ title, children, onRetry, retryLabel, actions, variant = 'error', headingLevel }: ErrorStateProps) {
+  const m = useMessages();
+  const retry = onRetry ? (
+    <Button variant="secondary" onClick={onRetry}>
+      {retryLabel ?? m.states.retry}
+    </Button>
+  ) : null;
   return (
     <div className={styles.state} role="alert" data-state={variant}>
       <StateFrame
@@ -66,10 +75,11 @@ export function ErrorState({ title, children, onRetry, retryLabel = 'Try again',
         title={title}
         headingLevel={headingLevel}
         action={
-          onRetry ? (
-            <Button variant="secondary" onClick={onRetry}>
-              {retryLabel}
-            </Button>
+          retry || actions ? (
+            <>
+              {retry}
+              {actions}
+            </>
           ) : undefined
         }
       >
@@ -83,15 +93,31 @@ export interface LoadingStateProps {
   readonly label: string;
   /** Number of decorative skeleton rows rendered under the label. */
   readonly rows?: number;
+  /** After this delay a "taking longer than usual" hint is added to the live region. */
+  readonly slowAfterMs?: number;
 }
 
-/** Polite live region so screen readers hear the label once; the skeleton is decorative. */
-export function LoadingState({ label, rows = 3 }: LoadingStateProps) {
+/** Polite live region so screen readers hear the label (and the slow hint) once; the skeleton is decorative. */
+export function LoadingState({ label, rows = 3, slowAfterMs = 4_000 }: LoadingStateProps) {
+  const m = useMessages();
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSlow(true);
+    }, slowAfterMs);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [slowAfterMs]);
+
   return (
-    <div className={styles.loading} role="status" aria-live="polite" data-state="loading">
-      <div className={styles.loadingLabel}>
-        <span className={styles.spinner} aria-hidden="true" />
-        <span>{label}</span>
+    <div className={styles.loading} data-state="loading">
+      <div role="status" aria-live="polite">
+        <div className={styles.loadingLabel}>
+          <span className={styles.spinner} aria-hidden="true" />
+          <span>{label}</span>
+        </div>
+        {slow ? <p className={styles.slow}>{m.states.slow}</p> : null}
       </div>
       {rows > 0 ? (
         <div className={styles.skeletons} aria-hidden="true">

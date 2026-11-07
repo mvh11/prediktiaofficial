@@ -1,5 +1,5 @@
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* Typography */
   --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
@@ -72,8 +72,13 @@
   --duration-base: 200ms;
 }
 
+/*
+ * Dark palette: follows the system preference unless the viewer chose a theme
+ * (<html data-theme="light|dark">, set by the footer switcher and index.html).
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
     --color-bg: #0a1020;
     --color-surface: #111a2d;
     --color-surface-muted: #17233a;
@@ -104,6 +109,39 @@
     --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
     --shadow-md: 0 6px 20px rgb(0 0 0 / 45%);
   }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #0a1020;
+  --color-surface: #111a2d;
+  --color-surface-muted: #17233a;
+  --color-ink: #e7ecf5;
+  --color-ink-muted: #a5b1c6;
+  --color-border: #26334d;
+  --color-border-strong: #3d4d6b;
+  --color-brand: #5eead4;
+  --color-brand-strong: #99f6e4;
+  --color-brand-contrast: #062521;
+  --color-brand-soft: #0f2f2d;
+  --color-focus: #93c5fd;
+  --color-hero-bg: #060b16;
+
+  --tone-neutral-bg: #1c2840;
+  --tone-neutral-ink: #cfd8e6;
+  --tone-info-bg: #172a52;
+  --tone-info-ink: #a9c4ff;
+  --tone-success-bg: #10331f;
+  --tone-success-ink: #8ee0ae;
+  --tone-warning-bg: #3a2a0c;
+  --tone-warning-ink: #f8cf7c;
+  --tone-danger-bg: #3d1515;
+  --tone-danger-ink: #fca5a5;
+  --tone-abstain-bg: #271f4d;
+  --tone-abstain-ink: #c8b8ff;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 40%);
+  --shadow-md: 0 6px 20px rgb(0 0 0 / 45%);
 }
 
 @media (prefers-reduced-motion: reduce) {

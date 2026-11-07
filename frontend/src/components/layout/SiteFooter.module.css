@@ -14,18 +14,22 @@
 
 .disclaimer { margin: 0; font-size: var(--text-sm); color: var(--color-ink-muted); }
 
+.side { display: grid; gap: var(--space-4); align-content: start; }
+
 .links {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-5);
+  gap: var(--space-1) var(--space-5);
   list-style: none;
   margin: 0;
   padding: 0;
 }
 
 .links li + li { margin-top: 0; }
-.links a { display: inline-block; padding-block: var(--space-2); font-weight: 600; }
+.links a { display: inline-flex; align-items: center; min-height: 2.75rem; font-weight: 600; }
 
-@media (min-width: 48rem) {
-  .inner { grid-template-columns: 1fr auto; align-items: start; }
+@media (min-width: 60rem) {
+  .inner { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+  .side { justify-items: end; }
+  .links { justify-content: flex-end; }
 }

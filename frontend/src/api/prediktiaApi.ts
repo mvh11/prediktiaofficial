@@ -29,6 +29,13 @@ export interface FixtureQuery {
   readonly offset: number;
 }
 
+export interface FixturePage {
+  /** At most `pageSize` fixtures, in backend order (kickoff, then id). */
+  readonly fixtures: Fixture[];
+  /** True only when the backend returned at least one row beyond this page. */
+  readonly hasNext: boolean;
+}
+
 /**
  * Read-only client for the verified PREDIKTIA backend endpoints.
  * Deliberately excluded: POST /sync/* (writes) and /providers/* (consume
@@ -64,6 +71,22 @@ export function createPrediktiaApi(http: HttpClient): PrediktiaApi {
       }),
     getFixture: (fixtureId, signal) => http.getJson(`/fixtures/${fixtureId}`, fixtureSchema, { signal }),
   };
+}
+
+/**
+ * The backend returns no total count. To know whether a next page exists
+ * without guessing, one extra row is requested and never shown: exact-multiple
+ * result sets therefore end on a full page with "Next" disabled.
+ */
+export async function fetchFixturePage(
+  api: PrediktiaApi,
+  query: Omit<FixtureQuery, 'limit' | 'offset'>,
+  page: number,
+  pageSize: number,
+  signal?: AbortSignal,
+): Promise<FixturePage> {
+  const rows = await api.listFixtures({ ...query, limit: pageSize + 1, offset: (page - 1) * pageSize }, signal);
+  return { fixtures: rows.slice(0, pageSize), hasNext: rows.length > pageSize };
 }
 
 export function createDefaultApi(config: AppConfig = appConfig): PrediktiaApi {

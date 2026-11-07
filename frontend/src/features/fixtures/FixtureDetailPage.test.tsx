@@ -1,82 +1,148 @@
 import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { devFinishedFixture, devFixture } from '../../test/devOnlyData.ts';
-import { jsonResponse, mockFetch, networkFailure } from '../../test/fetchMock.ts';
+import { devCompetition, devFinishedFixture, devFixture } from '../../test/devOnlyData.ts';
+import { jsonResponse, mockFetch, networkFailure, textResponse } from '../../test/fetchMock.ts';
 import { renderApp } from '../../test/renderApp.tsx';
 
+const competitions = () => jsonResponse([devCompetition()]);
+
 describe('FixtureDetailPage', () => {
-  it('shows stored details, all complete score pairs and the ABSTAIN model output', async () => {
-    mockFetch({ '/fixtures/7': () => jsonResponse(devFinishedFixture(7, { status_short: 'AET', home_goals: 3, away_goals: 2, extratime_home: 1, extratime_away: 1, fulltime_home: 2, fulltime_away: 1, venue_name: 'DEV_ONLY Ground' })) });
-    renderApp('/fixtures/7');
+  it('shows stored details in Chile and UTC time, all complete score pairs and the research context', async () => {
+    mockFetch({
+      '/competitions': competitions,
+      '/fixtures/7': () =>
+        jsonResponse(
+          devFinishedFixture(7, {
+            status_short: 'AET',
+            home_goals: 3,
+            away_goals: 2,
+            extratime_home: 1,
+            extratime_away: 1,
+            fulltime_home: 2,
+            fulltime_away: 1,
+            venue_name: 'DEV_ONLY Estadio',
+            venue_city: 'DEV_ONLY Ciudad',
+          }),
+        ),
+    });
+    renderApp('/partidos/7');
 
     expect(await screen.findByRole('heading', { level: 1, name: 'DEV_ONLY Home 7 vs DEV_ONLY Away 7' })).toBeInTheDocument();
-    expect(screen.getByText('After extra time')).toBeInTheDocument();
+    expect(document.title).toBe('DEV_ONLY Home 7 vs DEV_ONLY Away 7 · PREDIKTIA');
+    expect(screen.getAllByText('Finalizado tras alargue').length).toBeGreaterThan(0);
 
-    const table = screen.getByRole('table', { name: /Recorded scores/ });
-    const rows = within(table).getAllByRole('row').slice(1).map((row) => row.textContent);
-    expect(rows).toEqual(['Final score32', '90 minutes21', 'Half-time10', 'Extra time11']);
+    const table = screen.getByRole('table', { name: /Marcadores registrados/ });
+    const scoreRows = within(table).getAllByRole('row').slice(1).map((row) => row.textContent);
+    expect(scoreRows).toEqual(['Resultado final32', '90 minutos21', 'Primer tiempo10', 'Alargue11']);
 
-    expect(screen.getByText('DEV_ONLY Ground')).toBeInTheDocument();
-    expect(screen.getAllByText('Not recorded').length).toBeGreaterThan(0);
+    const details = screen.getByRole('region', { name: 'Datos del partido' });
+    expect(within(details).getByText(/5 ene/)).toBeInTheDocument();
+    expect(within(details).getByText(/12:00/)).toBeInTheDocument();
+    expect(within(details).getByText('2030-01-05 15:00 UTC')).toBeInTheDocument();
+    expect(within(details).getByText('DEV_ONLY Estadio, DEV_ONLY Ciudad')).toBeInTheDocument();
+    expect(within(details).getByText('No registrado')).toBeInTheDocument();
+    expect(await within(details).findByRole('link', { name: 'DEV_ONLY League A' })).toHaveAttribute('href', '/competiciones/1');
+    expect(screen.getByText(/La API no informa la hora de esa sincronización/)).toBeInTheDocument();
 
-    const output = screen.getByRole('region', { name: 'Model output' });
+    const output = screen.getByRole('region', { name: 'Salida del modelo' });
     expect(within(output).getByText('ABSTAIN')).toBeInTheDocument();
-    expect(within(output).getByRole('link', { name: 'Why PREDIKTIA abstains' })).toHaveAttribute('href', '/methodology#abstain');
+    expect(within(output).getByText('NOT_CERTIFIED')).toBeInTheDocument();
+    expect(within(output).getByText('WAIT_REAL_SOURCE')).toBeInTheDocument();
+    expect(within(output).getByRole('link', { name: 'Por qué PREDIKTIA se abstiene' })).toHaveAttribute('href', '/metodologia#abstencion');
+    expect(screen.getByText(/Para este partido está registrado: 2-1\./)).toBeInTheDocument();
+
+    const more = screen.getByRole('navigation', { name: 'Seguir explorando' });
+    expect(within(more).getByRole('link', { name: 'Más partidos de DEV_ONLY League A, temporada 2030' })).toHaveAttribute(
+      'href',
+      '/partidos?competicion=1&temporada=2030',
+    );
+    expect(within(more).getByRole('link', { name: 'Partidos de DEV_ONLY Home 7 en esta temporada' })).toHaveAttribute(
+      'href',
+      '/partidos?competicion=1&temporada=2030&equipo=17',
+    );
   });
 
   it.each([
-    ['2H', 'Second half', /This is not a live score\./],
-    ['ABD', 'Abandoned', null],
-  ] as const)('labels a %s score as "Score at last sync", never "Final score" (review N1)', async (code, statusLabel, liveNote) => {
-    mockFetch({ '/fixtures/5': () => jsonResponse(devFixture(5, { status_short: code, home_goals: 1, away_goals: 0, halftime_home: 1, halftime_away: 0 })) });
-    renderApp('/fixtures/5');
-    const table = await screen.findByRole('table', { name: /Recorded scores/ });
-    expect(screen.getByText(statusLabel)).toBeInTheDocument();
-    const rows = within(table).getAllByRole('row').slice(1).map((row) => row.textContent);
-    expect(rows).toEqual(['Score at last sync10', 'Half-time10']);
-    expect(screen.queryByText('Final score')).not.toBeInTheDocument();
-    expect(screen.getByText(/the score shown is not a final result/)).toBeInTheDocument();
-    if (liveNote) expect(screen.getByText(liveNote)).toBeInTheDocument();
+    ['2H', 'Segundo tiempo', 'minuto 60 registrado'],
+    ['ABD', 'Abandonado', null],
+    ['SUSP', 'Suspendido', null],
+  ] as const)('labels a %s score as the last-synchronized score, never as final', async (code, statusLabel, liveNote) => {
+    mockFetch({
+      '/competitions': competitions,
+      '/fixtures/5': () => jsonResponse(devFixture(5, { status_short: code, home_goals: 1, away_goals: 0, halftime_home: 1, halftime_away: 0, elapsed: 60 })),
+    });
+    renderApp('/partidos/5');
+    const table = await screen.findByRole('table', { name: /Marcadores registrados/ });
+    expect(screen.getAllByText(statusLabel).length).toBeGreaterThan(0);
+    const scoreRows = within(table).getAllByRole('row').slice(1).map((row) => row.textContent);
+    expect(scoreRows).toEqual(['Marcador en la última sincronización10', 'Primer tiempo10']);
+    expect(screen.queryByText('Resultado final')).not.toBeInTheDocument();
+    expect(screen.getByText(/el marcador mostrado no es un resultado final/)).toBeInTheDocument();
+    if (liveNote) {
+      expect(screen.getByText(new RegExp(liveNote))).toBeInTheDocument();
+      expect(screen.getByText(/No es un marcador en vivo\./)).toBeInTheDocument();
+    }
+    expect(screen.getByText(/no está registrado para este partido/)).toBeInTheDocument();
   });
 
-  it('accepts 10-digit ids within the backend integer range (review N2)', async () => {
-    mockFetch({ '/fixtures/2000000000': () => jsonResponse(devFixture(2_000_000_000)) });
-    renderApp('/fixtures/2000000000');
+  it('still shows the fixture when the competition list is unavailable', async () => {
+    mockFetch({ '/competitions': networkFailure, '/fixtures/9': () => jsonResponse(devFixture(9)) });
+    renderApp('/partidos/9');
+    expect(await screen.findByRole('heading', { level: 1, name: 'DEV_ONLY Home 9 vs DEV_ONLY Away 9' })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: 'Competición n.º 1' })).toHaveAttribute('href', '/competiciones/1');
+  });
+
+  it('accepts 10-digit ids within the backend integer range', async () => {
+    mockFetch({ '/competitions': competitions, '/fixtures/2000000000': () => jsonResponse(devFixture(2_000_000_000)) });
+    renderApp('/partidos/2000000000');
     expect(await screen.findByRole('heading', { level: 1, name: /DEV_ONLY Home 2000000000/ })).toBeInTheDocument();
   });
 
-  it('says so when no score is recorded, and warns that in-play data is not live', async () => {
-    mockFetch({ '/fixtures/8': () => jsonResponse(devFixture(8, { status_short: '2H', elapsed: 60 })) });
-    renderApp('/fixtures/8');
-    expect(await screen.findByText('No score is recorded for this fixture.')).toBeInTheDocument();
-    expect(screen.getByText(/This is not a live score\./)).toBeInTheDocument();
+  it.each(['99999999999999999999', '2147483648', '9007199254740993'])('reports the out-of-range id %s and makes no request', async (raw) => {
+    const fetchMock = mockFetch({});
+    renderApp(`/partidos/${raw}`);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Identificador fuera del rango admitido' })).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`El identificador ${raw} supera el máximo admitido`))).toBeInTheDocument();
+    expect(screen.getByText(/2\.147\.483\.647/)).toBeInTheDocument();
+    expect(screen.getByText(/no se redondeó ni se recortó/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['abc', '007', '0', '-3', '1.5'])('reports the invalid id %s and makes no request', async (raw) => {
+    const fetchMock = mockFetch({});
+    renderApp(`/partidos/${raw}`);
+    expect(await screen.findByRole('heading', { level: 1, name: 'Identificador no válido' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Ver partidos' })).toHaveAttribute('href', '/partidos');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('shows a not-found state for a 404', async () => {
-    mockFetch({ '/fixtures/404': () => jsonResponse({ detail: 'Partido no encontrado' }, 404) });
-    renderApp('/fixtures/404');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Fixture not found' })).toBeInTheDocument();
+    mockFetch({ '/competitions': competitions, '/fixtures/404': () => jsonResponse({ detail: 'Partido no encontrado' }, 404) });
+    renderApp('/partidos/404');
+    expect(await screen.findByRole('heading', { level: 1, name: 'Partido no encontrado' })).toBeInTheDocument();
   });
 
-  it('does not request invalid ids', async () => {
-    const fetchMock = mockFetch({});
-    renderApp('/fixtures/abc');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Fixture not found' })).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+  it('refuses a detail response whose id cannot be represented exactly', async () => {
+    const body = JSON.stringify(devFixture(1)).replace('"external_id":700001', '"external_id":12345678901234567890');
+    mockFetch({ '/competitions': competitions, '/fixtures/1': () => textResponse(body, 200, 'application/json') });
+    renderApp('/partidos/1');
+    expect(await screen.findByRole('heading', { name: 'Identificador numérico no representable' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Salida del modelo' })).not.toBeInTheDocument();
   });
 
   it('shows an unavailable state with retry when the backend is down', async () => {
     let calls = 0;
     mockFetch({
+      '/competitions': competitions,
       '/fixtures/9': () => {
         calls += 1;
         return calls === 1 ? networkFailure() : jsonResponse(devFixture(9));
       },
     });
-    const { user } = renderApp('/fixtures/9');
-    expect(await screen.findByRole('heading', { name: 'Data service unavailable' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '← Back to fixtures' })).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Try again' }));
+    const { user } = renderApp('/partidos/9');
+    expect(await screen.findByRole('heading', { name: 'Servicio de datos no disponible' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Volver a los partidos/ })).toHaveAttribute('href', '/partidos');
+    await user.click(screen.getByRole('button', { name: 'Reintentar' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'DEV_ONLY Home 9 vs DEV_ONLY Away 9' })).toBeInTheDocument();
   });
 });

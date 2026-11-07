@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { Link, NavLink, useLocation } from 'react-router';
+import { useMessages } from '../../i18n/i18n.ts';
 import { BrandMark } from './BrandMark.tsx';
 import { NAV_ITEMS } from './navigation.ts';
 import styles from './SiteHeader.module.css';
@@ -15,6 +16,7 @@ function navClass({ isActive }: { isActive: boolean }): string {
  * remounted (and therefore closed) on every route change by the header.
  */
 function MobileNav() {
+  const m = useMessages();
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
@@ -58,14 +60,14 @@ function MobileNav() {
           <span />
           <span />
         </span>
-        <span>{open ? 'Close menu' : 'Menu'}</span>
+        <span>{open ? m.layout.closeMenu : m.layout.menu}</span>
       </button>
-      <nav id={panelId} aria-label="Mobile" className={styles.panel} hidden={!open}>
+      <nav id={panelId} aria-label={m.layout.mobileNav} className={styles.panel} hidden={!open}>
         <ul className={styles.panelList}>
           {NAV_ITEMS.map((item) => (
             <li key={item.to}>
               <NavLink to={item.to} end={item.end ?? false} className={navClass}>
-                {item.label}
+                {m.nav[item.label]}
               </NavLink>
             </li>
           ))}
@@ -76,20 +78,21 @@ function MobileNav() {
 }
 
 export function SiteHeader() {
+  const m = useMessages();
   const { pathname } = useLocation();
   return (
     <header className={styles.header}>
       <div className={cx('container', styles.inner)}>
-        <Link to="/" className={styles.brandLink} aria-label="PREDIKTIA home">
+        <Link to="/" className={styles.brandLink} aria-label={m.layout.homeLink}>
           <BrandMark />
         </Link>
-        <span className={styles.stage}>Research preview</span>
-        <nav aria-label="Primary" className={styles.desktop}>
+        <span className={styles.stage}>{m.layout.stage}</span>
+        <nav aria-label={m.layout.primaryNav} className={styles.desktop}>
           <ul className={styles.list}>
             {NAV_ITEMS.map((item) => (
               <li key={item.to}>
                 <NavLink to={item.to} end={item.end ?? false} className={navClass}>
-                  {item.label}
+                  {m.nav[item.label]}
                 </NavLink>
               </li>
             ))}

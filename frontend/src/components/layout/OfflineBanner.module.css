@@ -1,0 +1,9 @@
+.region:empty { display: none; }
+
+.banner {
+  background: var(--tone-warning-bg);
+  color: var(--tone-warning-ink);
+  border-bottom: 1px solid currentColor;
+}
+
+.text { margin: 0; padding-block: var(--space-3); font-size: var(--text-sm); }

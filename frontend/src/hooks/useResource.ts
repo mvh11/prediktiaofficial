@@ -10,7 +10,7 @@ type Settled<T> = { readonly key: string } & ({ readonly ok: true; readonly data
 
 export interface Resource<T> {
   readonly state: ResourceState<T>;
-  /** Re-run the loader for the current key (e.g. a "Try again" button). */
+  /** Re-run the loader for the current key (e.g. a "Reintentar" button). */
   readonly reload: () => void;
 }
 
@@ -22,6 +22,7 @@ export interface Resource<T> {
  *   discarded and in-flight requests are aborted on key change and unmount.
  * - Loading is derived (the settled result belongs to a different key), so no
  *   synchronous state updates happen inside effects.
+ * - A failed load is retried automatically when the browser comes back online.
  */
 export function useResource<T>(key: string | null, load: (signal: AbortSignal) => Promise<T>): Resource<T> {
   const [attempt, setAttempt] = useState(0);
@@ -47,6 +48,20 @@ export function useResource<T>(key: string | null, load: (signal: AbortSignal) =
 
   const reload = useCallback(() => {
     setAttempt((n) => n + 1);
+  }, []);
+
+  const failed = requestKey !== null && settled?.key === requestKey && !settled.ok;
+  const onOnline = useEffectEvent(() => {
+    if (failed) reload();
+  });
+  useEffect(() => {
+    const listener = () => {
+      onOnline();
+    };
+    window.addEventListener('online', listener);
+    return () => {
+      window.removeEventListener('online', listener);
+    };
   }, []);
 
   let state: ResourceState<T>;

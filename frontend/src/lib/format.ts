@@ -1,19 +1,3 @@
-const kickoffFormatter = new Intl.DateTimeFormat(undefined, {
-  weekday: 'short',
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-  hour: '2-digit',
-  minute: '2-digit',
-  timeZoneName: 'short',
-});
-
-/** Formats an ISO timestamp (with offset) in the viewer's locale and time zone. */
-export function formatKickoff(iso: string): string {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : kickoffFormatter.format(date);
-}
-
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 /** True for a real calendar day in `YYYY-MM-DD` form. */
@@ -23,12 +7,11 @@ export function isIsoDay(value: string): boolean {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-/** Largest value of the backend's PostgreSQL `integer` primary keys. */
-export const MAX_DB_INT = 2_147_483_647;
-
-/** Parses a strictly positive integer that fits a backend `integer` id, from a URL/form string. */
-export function parsePositiveInt(value: string | null | undefined): number | undefined {
-  if (value === null || value === undefined || !/^\d{1,10}$/.test(value)) return undefined;
-  const parsed = Number(value);
-  return parsed > 0 && parsed <= MAX_DB_INT ? parsed : undefined;
+/** Lower-cases and strips diacritics so "Peñarol" matches "penarol" and "Ñuble" matches "nuble". */
+export function normalizeForSearch(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('es-CL')
+    .trim();
 }

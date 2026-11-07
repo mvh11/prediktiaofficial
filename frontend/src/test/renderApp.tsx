@@ -5,6 +5,7 @@ import { ApiProvider } from '../api/ApiProvider.tsx';
 import { createHttpClient } from '../api/httpClient.ts';
 import { createPrediktiaApi, type PrediktiaApi } from '../api/prediktiaApi.ts';
 import { routes } from '../app/routes.tsx';
+import { I18nProvider } from '../i18n/I18nProvider.tsx';
 
 export interface RenderAppOptions {
   /** Defaults to "/api" — i.e. a configured data source served through global fetch. */
@@ -23,9 +24,11 @@ export function renderApp(path: string, options: RenderAppOptions = {}) {
   const api = options.api ?? createTestApi(options);
   const user = userEvent.setup();
   const utils = render(
-    <ApiProvider api={api}>
-      <RouterProvider router={router} />
-    </ApiProvider>,
+    <I18nProvider>
+      <ApiProvider api={api}>
+        <RouterProvider router={router} />
+      </ApiProvider>
+    </I18nProvider>,
   );
   return { ...utils, router, user };
 }
