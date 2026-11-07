@@ -10,7 +10,7 @@ import { StatusBadge } from '../../components/ui/StatusBadge.tsx';
 import { useResource } from '../../hooks/useResource.ts';
 import { formatKickoff, parsePositiveInt } from '../../lib/format.ts';
 import { AbstainPanel } from './AbstainPanel.tsx';
-import { fixturePhase, fixtureStatusLabel, phaseTone, scoreLines } from './fixtureStatus.ts';
+import { fixturePhase, fixtureStatusLabel, hasFinalScore, phaseTone, scoreLines } from './fixtureStatus.ts';
 import styles from './Fixtures.module.css';
 import { cx } from '../../lib/cx.ts';
 
@@ -76,6 +76,7 @@ function FixtureDetail({ fixtureId }: { fixtureId: number }) {
 function FixtureView({ fixture }: { fixture: Fixture }) {
   const phase = fixturePhase(fixture.status_short);
   const lines = scoreLines(fixture);
+  const final = hasFinalScore(fixture);
   const title = `${fixture.home_team.name} vs ${fixture.away_team.name}`;
 
   const details: { term: string; value: string | null }[] = [
@@ -130,8 +131,10 @@ function FixtureView({ fixture }: { fixture: Fixture }) {
                   </tbody>
                 </table>
                 <p className={styles.footnote}>
-                  The final score includes extra time when played; penalty shoot-outs are listed separately. Scores are
-                  shown as stored at the last synchronization.
+                  {final
+                    ? 'The final score includes extra time when played; penalty shoot-outs are listed separately. '
+                    : 'This fixture had not finished at the last synchronization, so the score shown is not a final result. '}
+                  Scores are shown as stored at the last synchronization.
                 </p>
               </>
             ) : (

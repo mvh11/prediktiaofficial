@@ -5,6 +5,12 @@ import { z } from 'zod';
  * (backend/app/schemas/catalog.py and backend/app/schemas/fixture.py at the
  * authorized base commit). Unknown extra fields are stripped; missing or
  * mistyped fields reject the whole response rather than rendering guesses.
+ *
+ * Deliberately STRICTER than the backend models (fail-closed, not a contract
+ * mismatch): names must be non-empty (backend: `str`) and goal counts must be
+ * non-negative integers (backend: `int | None`). A single row violating this
+ * rejects the whole response as `invalid_response` instead of rendering a
+ * nonsensical value.
  */
 
 const id = z.number().int().positive();

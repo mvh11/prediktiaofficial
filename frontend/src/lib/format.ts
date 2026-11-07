@@ -23,9 +23,12 @@ export function isIsoDay(value: string): boolean {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
-/** Parses a strictly positive integer from a URL/form string. */
+/** Largest value of the backend's PostgreSQL `integer` primary keys. */
+export const MAX_DB_INT = 2_147_483_647;
+
+/** Parses a strictly positive integer that fits a backend `integer` id, from a URL/form string. */
 export function parsePositiveInt(value: string | null | undefined): number | undefined {
-  if (value === null || value === undefined || !/^\d{1,9}$/.test(value)) return undefined;
+  if (value === null || value === undefined || !/^\d{1,10}$/.test(value)) return undefined;
   const parsed = Number(value);
-  return parsed > 0 ? parsed : undefined;
+  return parsed > 0 && parsed <= MAX_DB_INT ? parsed : undefined;
 }

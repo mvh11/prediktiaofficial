@@ -92,6 +92,14 @@ of missing data:
 | 404 | not-found state |
 | valid empty list | specific empty state |
 
+The schemas are deliberately **stricter** than the backend models: names must be non-empty
+and goal counts non-negative integers. A row that violates this rejects the whole response
+as "Unexpected response" (fail-closed). This is intentional, not a contract mismatch.
+
+A score is only labelled **Final score** for finished (FT/AET/PEN) or awarded (AWD/WO)
+fixtures. Otherwise it is shown as **Score at last sync**, with a note that it is not a final
+result.
+
 ### Live backend smoke test
 
 Verified locally against the real FastAPI app with an intentionally unreachable database
@@ -155,4 +163,5 @@ There is no mock or fake data source in the application.
 - Team and competition logos are not displayed (they are third-party URLs).
 - UI copy is English only; there is no i18n layer yet.
 - Fixture statuses and scores are as of the backend's last synchronization, not live.
-- The fixture list has no total count from the API, so pagination is previous/next only.
+- The fixture list has no total count from the API, so pagination is previous/next only. When a
+  result set is an exact multiple of the page size, "Next" leads to an honest "No more fixtures" page.

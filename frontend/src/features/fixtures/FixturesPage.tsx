@@ -279,7 +279,7 @@ function FilterForm({ filters, season, teams, update }: FilterFormProps) {
       </SelectField>
       <SelectField label="Status" name="status" defaultValue={filters.finished}>
         <option value="all">All fixtures</option>
-        <option value="pending">Not finished</option>
+        <option value="pending">Not finished (incl. postponed, cancelled, awarded)</option>
         <option value="finished">Finished</option>
       </SelectField>
       <InputField label="From (UTC)" name="from" type="date" defaultValue={filters.dateFrom ?? ''} />

@@ -82,16 +82,25 @@ export interface ScoreLine {
   readonly away: number;
 }
 
+/** Whether the stored score is a final result (finished or administratively awarded). */
+export function hasFinalScore(fixture: Pick<Fixture, 'status_short'>): boolean {
+  const phase = fixturePhase(fixture.status_short);
+  return phase === 'finished' || phase === 'awarded';
+}
+
 /**
  * Score lines exactly as stored. Only complete pairs are shown (the backend
- * stores scores as atomic pairs). No score is ever derived or inferred.
+ * stores scores as atomic pairs). No score is ever derived or inferred, and the
+ * main pair is only called "Final score" when the fixture actually ended; for
+ * in-play, suspended, abandoned or postponed fixtures it is the score recorded
+ * at the last synchronization.
  */
 export function scoreLines(fixture: Fixture): ScoreLine[] {
   const lines: ScoreLine[] = [];
   const push = (label: string, home: number | null, away: number | null) => {
     if (home !== null && away !== null) lines.push({ label, home, away });
   };
-  push('Final score', fixture.home_goals, fixture.away_goals);
+  push(hasFinalScore(fixture) ? 'Final score' : 'Score at last sync', fixture.home_goals, fixture.away_goals);
   push('90 minutes', fixture.fulltime_home, fixture.fulltime_away);
   push('Half-time', fixture.halftime_home, fixture.halftime_away);
   push('Extra time', fixture.extratime_home, fixture.extratime_away);
@@ -101,8 +110,7 @@ export function scoreLines(fixture: Fixture): ScoreLine[] {
 
 /** Primary score shown in lists: only for finished/awarded fixtures with a complete pair. */
 export function headlineScore(fixture: Fixture): ScoreLine | null {
-  const phase = fixturePhase(fixture.status_short);
-  if (phase !== 'finished' && phase !== 'awarded') return null;
+  if (!hasFinalScore(fixture)) return null;
   if (fixture.home_goals === null || fixture.away_goals === null) return null;
   return { label: 'Final score', home: fixture.home_goals, away: fixture.away_goals };
 }

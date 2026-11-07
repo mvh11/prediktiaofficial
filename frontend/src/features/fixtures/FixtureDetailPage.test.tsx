@@ -24,6 +24,27 @@ describe('FixtureDetailPage', () => {
     expect(within(output).getByRole('link', { name: 'Why PREDIKTIA abstains' })).toHaveAttribute('href', '/methodology#abstain');
   });
 
+  it.each([
+    ['2H', 'Second half', /This is not a live score\./],
+    ['ABD', 'Abandoned', null],
+  ] as const)('labels a %s score as "Score at last sync", never "Final score" (review N1)', async (code, statusLabel, liveNote) => {
+    mockFetch({ '/fixtures/5': () => jsonResponse(devFixture(5, { status_short: code, home_goals: 1, away_goals: 0, halftime_home: 1, halftime_away: 0 })) });
+    renderApp('/fixtures/5');
+    const table = await screen.findByRole('table', { name: /Recorded scores/ });
+    expect(screen.getByText(statusLabel)).toBeInTheDocument();
+    const rows = within(table).getAllByRole('row').slice(1).map((row) => row.textContent);
+    expect(rows).toEqual(['Score at last sync10', 'Half-time10']);
+    expect(screen.queryByText('Final score')).not.toBeInTheDocument();
+    expect(screen.getByText(/the score shown is not a final result/)).toBeInTheDocument();
+    if (liveNote) expect(screen.getByText(liveNote)).toBeInTheDocument();
+  });
+
+  it('accepts 10-digit ids within the backend integer range (review N2)', async () => {
+    mockFetch({ '/fixtures/2000000000': () => jsonResponse(devFixture(2_000_000_000)) });
+    renderApp('/fixtures/2000000000');
+    expect(await screen.findByRole('heading', { level: 1, name: /DEV_ONLY Home 2000000000/ })).toBeInTheDocument();
+  });
+
   it('says so when no score is recorded, and warns that in-play data is not live', async () => {
     mockFetch({ '/fixtures/8': () => jsonResponse(devFixture(8, { status_short: '2H', elapsed: 60 })) });
     renderApp('/fixtures/8');

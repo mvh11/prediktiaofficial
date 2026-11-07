@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isIsoDay, parsePositiveInt } from '../../lib/format.ts';
 import { devFinishedFixture, devFixture } from '../../test/devOnlyData.ts';
 import { dateRangeError, finishedToQuery, parseFixtureFilters, serializeFixtureFilters } from './fixtureFilters.ts';
-import { fixturePhase, fixtureStatusLabel, headlineScore, scoreLines } from './fixtureStatus.ts';
+import { fixturePhase, fixtureStatusLabel, hasFinalScore, headlineScore, scoreLines } from './fixtureStatus.ts';
 
 describe('fixture status', () => {
   it.each([
@@ -35,6 +35,19 @@ describe('fixture status', () => {
     const lines = scoreLines(devFinishedFixture(1, { halftime_away: null }));
     expect(lines.map((line) => line.label)).toEqual(['Final score', '90 minutes']);
     expect(scoreLines(devFixture(1))).toEqual([]);
+  });
+
+  it.each(['1H', 'HT', '2H', 'ET', 'ABD', 'SUSP', 'INT', 'PST'])(
+    'never labels a %s score as final (review N1)',
+    (code) => {
+      const lines = scoreLines(devFixture(1, { status_short: code, home_goals: 1, away_goals: 0 }));
+      expect(lines).toEqual([{ label: 'Score at last sync', home: 1, away: 0 }]);
+      expect(hasFinalScore({ status_short: code })).toBe(false);
+    },
+  );
+
+  it.each(['FT', 'AET', 'PEN', 'AWD', 'WO'])('labels a %s score as final', (code) => {
+    expect(scoreLines(devFinishedFixture(1, { status_short: code }))[0]?.label).toBe('Final score');
   });
 });
 
@@ -81,7 +94,11 @@ describe('format helpers', () => {
     expect(parsePositiveInt('42')).toBe(42);
     expect(parsePositiveInt('0')).toBeUndefined();
     expect(parsePositiveInt('1e3')).toBeUndefined();
+    expect(parsePositiveInt('1000000000')).toBe(1_000_000_000);
+    expect(parsePositiveInt('2147483647')).toBe(2_147_483_647);
+    expect(parsePositiveInt('2147483648')).toBeUndefined();
     expect(parsePositiveInt('9999999999')).toBeUndefined();
+    expect(parsePositiveInt('12345678901')).toBeUndefined();
     expect(parsePositiveInt(undefined)).toBeUndefined();
   });
 });
