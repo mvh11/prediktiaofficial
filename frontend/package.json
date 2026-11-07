@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json",
+    "typecheck": "tsc -p tsconfig.app.json && tsc -p tsconfig.node.json && tsc -p tsconfig.e2e.json",
     "lint": "eslint . --max-warnings=0",
     "test": "vitest run",
     "test:watch": "vitest",
