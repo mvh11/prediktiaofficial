@@ -42,3 +42,8 @@
 .option:has(input:checked) { background: var(--color-brand); color: var(--color-brand-contrast); }
 .option:has(input:focus-visible) { outline: 3px solid var(--color-focus); outline-offset: -3px; }
 .option:hover:not(:has(input:checked)) { background: var(--color-surface-muted); color: var(--color-ink); }
+
+/* Forced colours drop backgrounds: mark the selected option with a system-colour outline. */
+@media (forced-colors: active) {
+  .option:has(input:checked) { outline: 3px solid Highlight; outline-offset: -3px; }
+}

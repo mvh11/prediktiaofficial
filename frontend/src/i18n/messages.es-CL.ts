@@ -276,7 +276,6 @@ export const esCL = {
     typeCup: 'Copa',
     currentSeason: (season: number) => `Temporada actual: ${season}`,
     noCurrentSeason: 'Sin temporada actual registrada',
-    viewCompetition: 'Ver competición y equipos',
     viewFixtures: 'Ver partidos',
     listLabel: (country: string) => `Competiciones de ${country}`,
   },
@@ -288,7 +287,6 @@ export const esCL = {
     notFoundTitle: 'Competición no encontrada',
     notFound: 'No existe una competición con este identificador en el catálogo de PREDIKTIA.',
     backToList: 'Ver todas las competiciones',
-    leadWithCountry: (type: string, country: string) => `${type} · ${country}`,
     facts: 'Datos de la competición',
     country: 'País',
     type: 'Tipo',
@@ -380,7 +378,6 @@ export const esCL = {
     removeFilter: (label: string) => `Quitar filtro: ${label}`,
     chipCompetition: (name: string) => `Competición: ${name}`,
     chipSeason: (season: number) => `Temporada ${season}`,
-    chipSeasonCurrent: (season: number) => `Temporada ${season} (actual)`,
     chipTeam: (name: string) => `Equipo: ${name}`,
     chipFrom: (day: string) => `Desde ${day}`,
     chipTo: (day: string) => `Hasta ${day}`,
@@ -413,7 +410,6 @@ export const esCL = {
     timeZoneNote: 'Horas en hora de Chile continental (America/Santiago).',
     versus: 'vs',
     syncedInPlay: 'al sincronizar',
-    roundLabel: (round: string) => `Fecha o ronda: ${round}`,
   },
 
   fixture: {
