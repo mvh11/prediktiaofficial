@@ -228,6 +228,28 @@ describe('FixturesPage — browsing', () => {
     });
   });
 
+  it('keeps a team that came from the URL when another filter is applied (team list loads after mount)', async () => {
+    let releaseTeams: () => void = () => undefined;
+    const teamsReady = new Promise<void>((resolve) => {
+      releaseTeams = resolve;
+    });
+    mockFetch({ ...happyRoutes(), '/competitions/1/teams': () => teamsReady.then(() => jsonResponse([devTeam(11), devTeam(12)])) });
+    const { user, router } = renderApp('/partidos?competicion=1&temporada=2030&equipo=12');
+    await rows();
+    expect(screen.getByLabelText('Equipo')).toHaveValue('12');
+    releaseTeams();
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'DEV_ONLY Team 12' })).toBeInTheDocument();
+    });
+    expect(screen.getByLabelText('Equipo')).toHaveValue('12');
+
+    await user.selectOptions(screen.getByLabelText('Estado'), 'Finalizados (tiempo reglamentario, alargue o penales)');
+    await user.click(screen.getByRole('button', { name: 'Aplicar filtros' }));
+    await waitFor(() => {
+      expect(router.state.location.search).toBe('?competicion=1&temporada=2030&equipo=12&estado=finalizados');
+    });
+  });
+
   it('quick ranges set UTC days', async () => {
     mockFetch(happyRoutes());
     const { user, router } = renderApp('/partidos');

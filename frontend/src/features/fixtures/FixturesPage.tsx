@@ -159,6 +159,9 @@ interface FormErrors {
 function FilterPanel({ filters, competitions, selected, season, teams, update }: FilterPanelProps) {
   const { messages: m } = useI18n();
   const [errors, setErrors] = useState<FormErrors>({});
+  // Controlled: the team list arrives after mount, and an uncontrolled <select>
+  // would fall back to "all teams" when the URL's team option is replaced.
+  const [teamValue, setTeamValue] = useState(filters.teamId !== undefined ? String(filters.teamId) : '');
 
   const onSubmit = (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -255,7 +258,10 @@ function FilterPanel({ filters, competitions, selected, season, teams, update }:
         <SelectField
           label={m.fixtures.team}
           name="equipo"
-          defaultValue={filters.teamId !== undefined ? String(filters.teamId) : ''}
+          value={teamValue}
+          onChange={(event) => {
+            setTeamValue(event.target.value);
+          }}
           hint={teamHint}
           disabled={teamOptions.length === 0 && filters.teamId === undefined}
         >
