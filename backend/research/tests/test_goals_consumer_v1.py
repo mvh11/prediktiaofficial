@@ -83,41 +83,99 @@ def b_rows(report):
              "estimate_status": e["estimate_status"], "probabilities": e["probabilities"], "label": e["label"]} for e in report["ledger"]]
 
 
-# El escenario de PRIMARY: O/U 2.0, cinco liquidadas (OVER, UNDER, PUSH), tres ESTIMATE y dos NO_ESTIMATE.
-PRIMARY = [obs(1, day(3, 2), score=(2, 1)),                          # ESTIMATE OVER
-           obs(2, day(3, 9), score=(1, 0)),                          # ESTIMATE UNDER
-           obs(3, day(3, 16), score=(1, 1)),                         # ESTIMATE PUSH
-           obs(4, day(3, 20), status="NO_ESTIMATE", score=(3, 0)),   # NO_ESTIMATE OVER
-           obs(5, day(3, 25), status="NO_ESTIMATE", score=(2, 0)),   # NO_ESTIMATE PUSH
-           obs(6, day(1, 10))]                                       # train: fuera de todo holdout
+# PRIMARY_GOLDEN: la fixture literal de PRIMARY. O/U 2.0, cinco filas, todas liquidadas; tres ESTIMATE y dos NO_ESTIMATE.
+PRIMARY_GOLDEN = [obs(1, day(3, 2), score=(3, 0)),                          # f1 ESTIMATE     3-0 -> OVER
+                  obs(2, day(3, 9), score=(2, 0)),                          # f2 ESTIMATE     2-0 -> PUSH
+                  obs(3, day(3, 16), score=(1, 0)),                         # f3 ESTIMATE     1-0 -> UNDER
+                  obs(4, day(3, 20), status="NO_ESTIMATE", score=(0, 0)),   # f4 NO_ESTIMATE  0-0 -> UNDER
+                  obs(5, day(3, 25), status="NO_ESTIMATE", score=(2, 0))]   # f5 NO_ESTIMATE  2-0 -> PUSH
+TRAIN_ONLY = obs(6, day(1, 10))                                             # anterior a O1: fuera de todo holdout
+
+# ALTERNATIVE_SCENARIO (NO es PRIMARY_GOLDEN): la fixture comprometida antes, con f4 = 3-0 (OVER). Solo regresión aparte.
+ALTERNATIVE_SCENARIO = [obs(1, day(3, 2), score=(2, 1)), obs(2, day(3, 9), score=(1, 0)), obs(3, day(3, 16), score=(1, 1)),
+                        obs(4, day(3, 20), status="NO_ESTIMATE", score=(3, 0)), obs(5, day(3, 25), status="NO_ESTIMATE", score=(2, 0))]
+OU_CLASSES = ("OVER", "UNDER", "PUSH")
+
+
+def class_counts(ledger, status=None):
+    """Cuentas por clase recontadas fila a fila del libro mayor (todas las liquidadas, o solo un estado de estimación)."""
+    return {c: sum(1 for e in ledger if e["label"] == c and status in (None, e["estimate_status"])) for c in OU_CLASSES}
 
 
 # ------------------------------------------------------------------------------------------- 1. escenario de PRIMARY
 
-def test_01_primary_five_row_integer_line_settled_and_scored_counts_differ():
-    report = run(PRIMARY)
+def test_01_primary_golden_five_rows_settled_scored_and_abstained_counts():
+    report = run(PRIMARY_GOLDEN)
+    ledger = report["ledger"]
+    assert [(e["fixture_id"], e["estimate_status"], e["label"], e["label_missing_reason"]) for e in ledger] == [
+        (1, "ESTIMATE", "OVER", None), (2, "ESTIMATE", "PUSH", None), (3, "ESTIMATE", "UNDER", None),
+        (4, "NO_ESTIMATE", "UNDER", None), (5, "NO_ESTIMATE", "PUSH", None)]
     pooled = report["pooled"]["denominators"]
+    assert (pooled["input_total"], pooled["settled_total"], pooled["scored_settled"], pooled["abstained_settled"],
+            pooled["no_estimate_input"]) == (5, 5, 3, 2, 2)
+    assert pooled["settled_by_class"] == {"OVER": 1, "UNDER": 2, "PUSH": 2}
+    assert pooled["scored_by_class"] == {"OVER": 1, "UNDER": 1, "PUSH": 1}
+    assert pooled["abstained_by_class"] == {"OVER": 0, "UNDER": 1, "PUSH": 1}
     assert pooled == {
         "input_total": 5, "estimate_input": 3, "no_estimate_input": 2, "label_missing_input": 0, "label_missing_estimate": 0,
         "label_missing_no_estimate": 0, "settled_total": 5, "scored_settled": 3, "abstained_settled": 2,
-        "settled_by_class": {"OVER": 2, "UNDER": 1, "PUSH": 2}, "scored_by_class": {"OVER": 1, "UNDER": 1, "PUSH": 1},
-        "abstained_by_class": {"OVER": 1, "UNDER": 0, "PUSH": 1}, "label_missing_by_reason": {}}
-    assert report["fold_groups"][0]["denominators"] == pooled
+        "settled_by_class": {"OVER": 1, "UNDER": 2, "PUSH": 2}, "scored_by_class": {"OVER": 1, "UNDER": 1, "PUSH": 1},
+        "abstained_by_class": {"OVER": 0, "UNDER": 1, "PUSH": 1}, "label_missing_by_reason": {}}
     assert report["pooled"]["result"] == {"status": RESULT_SCORED, "reasons": []}
-    # 109A cuenta TODAS las liquidadas; 109B solo las puntuadas: no son equivalentes y el consumidor no las confunde
+    assert report["counts"] == {"input_rows": 5, "holdout_rows": 5, "outside_holdout_rows": 0, "folds": 1}
+
+    # libro mayor, pliegue, conciliación y agregado dicen lo mismo
+    assert (class_counts(ledger), class_counts(ledger, "ESTIMATE"), class_counts(ledger, "NO_ESTIMATE")) == (
+        pooled["settled_by_class"], pooled["scored_by_class"], pooled["abstained_by_class"])
+    assert all(pooled["settled_by_class"][c] == pooled["scored_by_class"][c] + pooled["abstained_by_class"][c] for c in OU_CLASSES)
+    assert report["fold_groups"][0]["denominators"] == pooled
+    agg = aggregate_goals_consumer_reports([report])
+    assert agg["result"] == {"status": RESULT_SCORED, "reasons": []} and agg["denominators"] == pooled and agg["fixtures"] == 5
+    assert agg["reliability_report"]["outcome_counts"] == pooled["scored_by_class"]
+
+    # 109A cuenta TODAS las liquidadas (NO_ESTIMATE incluidas); 109B solo las puntuadas: no son equivalentes
     (group,) = report["oos_report"]["folds"][0]["groups"]
-    assert group["outcome_counts"] == {"OVER": 2, "UNDER": 1, "PUSH": 2}
-    assert report["reliability_reports"]["pooled"]["outcome_counts"] == {"OVER": 1, "UNDER": 1, "PUSH": 1}
-    assert group["model"]["scored"] == 3 and group["coverage"]["abstained_settled"] == 2
-    assert report["reliability_reports"]["pooled"]["coverage"]["no_estimate"] == 2
+    assert (group["market"], group["line"]) == (OU, "2.0")
+    assert group["outcome_counts"] == pooled["settled_by_class"] == {"OVER": 1, "UNDER": 2, "PUSH": 2}
+    assert (group["holdout_rows"], group["holdout_estimate"], group["holdout_no_estimate"], group["holdout_settled"]) == (5, 3, 2, 5)
+    assert (group["coverage"]["settled"], group["coverage"]["model_scored"], group["coverage"]["abstained_settled"]) == (5, 3, 2)
+    assert group["model"]["scored"] == 3
+    for b in (report["reliability_reports"]["pooled"], report["reliability_reports"]["folds"][0]):
+        assert b["outcome_counts"] == pooled["scored_by_class"] == {"OVER": 1, "UNDER": 1, "PUSH": 1}
+        coverage = b["coverage"]
+        assert (coverage["total_input"], coverage["scored"], coverage["no_estimate"], coverage["label_missing"]) == (5, 3, 2, 0)
+    # cada fuente ejecutada por sí sola sobre las filas literales da las mismas cuentas
+    assert evaluate_goals_oos(copy.deepcopy(PRIMARY_GOLDEN), oos_config(config())) == report["oos_report"]
+    standalone = goals_reliability_uncertainty(b_rows(report), market=OU, line="2.0", config=RELIABILITY)
+    assert dict(standalone.outcome_counts) == {"OVER": 1, "UNDER": 1, "PUSH": 1}
     assert report["fold_groups"][0]["oos"]["metric_basis"] == "THREE_CLASS_OVER_UNDER_PUSH"
-    assert report["counts"] == {"input_rows": 6, "holdout_rows": 5, "outside_holdout_rows": 1, "folds": 1}
-    assert [e["fixture_id"] for e in report["ledger"]] == [1, 2, 3, 4, 5]
-    assert report["compatibility"]["count_semantics"]["reliability_reports.outcome_counts"] == "SETTLED_ESTIMATE_ONLY"
+    semantics = report["compatibility"]["count_semantics"]
+    assert semantics["oos_report.folds[].groups[].outcome_counts"] == "ALL_SETTLED_ESTIMATE_AND_NO_ESTIMATE"
+    assert semantics["reliability_reports.outcome_counts"] == "SETTLED_ESTIMATE_ONLY"
+
+    # una fila de entrenamiento fuera de todo holdout no cambia ni el libro mayor ni los denominadores
+    with_train = run(PRIMARY_GOLDEN + [TRAIN_ONLY])
+    assert with_train["counts"] == {"input_rows": 6, "holdout_rows": 5, "outside_holdout_rows": 1, "folds": 1}
+    assert with_train["ledger"] == ledger and with_train["pooled"]["denominators"] == pooled
+
+
+def test_01c_alternative_scenario_former_fixture_is_a_separate_regression():
+    """ALTERNATIVE_SCENARIO, nunca PRIMARY_GOLDEN: con f4 = 3-0 la abstención liquidada es OVER, no UNDER."""
+    report = run(ALTERNATIVE_SCENARIO)
+    den = report["pooled"]["denominators"]
+    assert (den["input_total"], den["settled_total"], den["scored_settled"], den["abstained_settled"],
+            den["no_estimate_input"]) == (5, 5, 3, 2, 2)
+    assert den["settled_by_class"] == {"OVER": 2, "UNDER": 1, "PUSH": 2}
+    assert den["scored_by_class"] == {"OVER": 1, "UNDER": 1, "PUSH": 1}
+    assert den["abstained_by_class"] == {"OVER": 1, "UNDER": 0, "PUSH": 1}
+    (group,) = report["oos_report"]["folds"][0]["groups"]
+    assert group["outcome_counts"] == den["settled_by_class"]
+    assert report["reliability_reports"]["pooled"]["outcome_counts"] == den["scored_by_class"]
+    assert den["settled_by_class"] != run(PRIMARY_GOLDEN)["pooled"]["denominators"]["settled_by_class"]
 
 
 def test_01b_report_is_json_round_trippable_and_digest_recomputes():
-    report = run(PRIMARY)
+    report = run(PRIMARY_GOLDEN)
     assert json.loads(json.dumps(report)) == report
     assert redigest(report)["report_digest"] == report["report_digest"]
     assert report["calibration_claim"] == CALIBRATION_CLAIM and "NOT_CERTIFIED" in report["classifications"]
@@ -399,7 +457,7 @@ def second_cohort(fixture_ids=(11, 12, 13), *, line="2.0", market=OU, **over):
 
 def test_13_overlapping_holdout_configuration_is_a_preserved_source_error():
     with pytest.raises(ConsumerSourceError) as info:
-        run(PRIMARY, origins=(O1, O1 + timedelta(days=10)))
+        run(PRIMARY_GOLDEN, origins=(O1, O1 + timedelta(days=10)))
     err = info.value
     assert isinstance(err.source_error, OOSConfigError) and err.__cause__ is err.source_error
     assert (err.source_id, err.source_version) == ("GOALS_OOS_WALK_FORWARD", "1")
@@ -407,7 +465,7 @@ def test_13_overlapping_holdout_configuration_is_a_preserved_source_error():
 
 
 def test_13b_overlapping_fixture_cohorts_are_non_comparable():
-    first, overlapping = run(PRIMARY), second_cohort((11, 3, 13))
+    first, overlapping = run(PRIMARY_GOLDEN), second_cohort((11, 3, 13))
     agg = aggregate_goals_consumer_reports([first, overlapping])
     assert agg["result"] == {"status": RESULT_NON_COMPARABLE, "reasons": [OVERLAPPING_FIXTURES]}
     assert agg["denominators"] is None and agg["reliability"] is None
@@ -417,15 +475,15 @@ def test_13b_overlapping_fixture_cohorts_are_non_comparable():
 
 
 def test_13c_disjoint_cohorts_pool_counts_and_rerun_reliability_on_the_union():
-    first, second = run(PRIMARY), second_cohort()
+    first, second = run(PRIMARY_GOLDEN), second_cohort()
     agg = aggregate_goals_consumer_reports([first, second])
     assert agg["result"] == {"status": RESULT_SCORED, "reasons": []}
     a, b = first["pooled"]["denominators"], second["pooled"]["denominators"]
     den = agg["denominators"]
     assert den["input_total"] == a["input_total"] + b["input_total"] == 8
     assert den["settled_by_class"] == {c: a["settled_by_class"][c] + b["settled_by_class"][c] for c in ("OVER", "UNDER", "PUSH")}
-    assert den["scored_by_class"] == {"OVER": 2, "UNDER": 2, "PUSH": 2}  # 1/1/1 de PRIMARY + 3-1, 0-0, 1-1
-    assert den["settled_by_class"] == {"OVER": 3, "UNDER": 2, "PUSH": 3}
+    assert den["scored_by_class"] == {"OVER": 2, "UNDER": 2, "PUSH": 2}  # 1/1/1 de PRIMARY_GOLDEN + 3-1, 0-0, 1-1
+    assert den["settled_by_class"] == {"OVER": 2, "UNDER": 3, "PUSH": 3}  # 1/2/2 de PRIMARY_GOLDEN + 3-1, 0-0, 1-1
     # la fiabilidad agregada es 109B sobre la unión de filas, nunca una media de ECE
     rows = sorted(b_rows(first) + b_rows(second), key=lambda r: r["fixture_id"])
     union = goals_reliability_uncertainty(rows, market=OU, line="2.0", config=RELIABILITY)
@@ -441,7 +499,7 @@ def test_13c_disjoint_cohorts_pool_counts_and_rerun_reliability_on_the_union():
     (lambda: second_cohort(reliability=UncertaintyConfig(seed=8, iterations=20, min_weeks=2)), RELIABILITY_CONFIG_MISMATCH),
 ])
 def test_14_incompatible_producer_market_line_or_reliability_config(other, reason):
-    agg = aggregate_goals_consumer_reports([run(PRIMARY), other()])
+    agg = aggregate_goals_consumer_reports([run(PRIMARY_GOLDEN), other()])
     assert agg["result"] == {"status": RESULT_NON_COMPARABLE, "reasons": [reason]}
     assert agg["denominators"] is None
 
@@ -507,7 +565,7 @@ def _consumer_version(report):
     (_consumer_version, CONSUMER_VERSION_MISMATCH),
 ])
 def test_19_non_auditable_evidence_is_non_comparable(tamper, reason):
-    report = run(PRIMARY)
+    report = run(PRIMARY_GOLDEN)
     agg = aggregate_goals_consumer_reports([tamper(report)])
     assert agg["result"] == {"status": RESULT_NON_COMPARABLE, "reasons": [reason]}
     assert agg["inputs"][0]["status"] == REJECTED and agg["denominators"] is None and agg["reliability_report"] is None
@@ -516,7 +574,7 @@ def test_19_non_auditable_evidence_is_non_comparable(tamper, reason):
 
 
 def test_19b_untrusted_structures_are_input_errors():
-    report = run(PRIMARY)
+    report = run(PRIMARY_GOLDEN)
     CALLS.clear()
     for bad in ([], (), [Hostile()], [dict(report, extra=Hostile())], [dict(report, extra=BenignFloat(1.0))],
                 [dict(report, extra=float("nan"))], [dict(report, extra=10 ** 640)], [{1: 2}], "x", Hostile()):
@@ -531,7 +589,7 @@ def test_19b_untrusted_structures_are_input_errors():
 
 
 def test_19c_single_verified_report_aggregates_to_its_own_pool():
-    report = run(PRIMARY)
+    report = run(PRIMARY_GOLDEN)
     agg = aggregate_goals_consumer_reports([json.loads(json.dumps(report))])
     assert agg["inputs"][0]["status"] == VERIFIED and agg["inputs"][0]["report_digest"] == report["report_digest"]
     assert agg["denominators"] == report["pooled"]["denominators"]
@@ -575,8 +633,8 @@ def test_15b_temporal_inconsistencies_are_preserved_source_errors():
         run([], holdout_length=28)
     # un desfase distinto de UTC es el mismo instante: misma semana, mismo informe
     plus2 = timezone(timedelta(hours=2))
-    shifted = [dict(o, kickoff_at=o["kickoff_at"].astimezone(plus2)) for o in PRIMARY]
-    assert run(shifted)["ledger"] == run(PRIMARY)["ledger"]
+    shifted = [dict(o, kickoff_at=o["kickoff_at"].astimezone(plus2)) for o in PRIMARY_GOLDEN]
+    assert run(shifted)["ledger"] == run(PRIMARY_GOLDEN)["ledger"]
 
 
 def test_15c_config_contract_and_identifiers():
@@ -588,7 +646,7 @@ def test_15c_config_contract_and_identifiers():
     with pytest.raises(ConsumerConfigError):
         run_goals_research_consumer([], {k: v for k, v in config().items() if k != "embargo"})
     with pytest.raises(ConsumerSourceError) as info:
-        run(PRIMARY, reliability=UncertaintyConfig(seed=7, iterations=0))
+        run(PRIMARY_GOLDEN, reliability=UncertaintyConfig(seed=7, iterations=0))
     assert isinstance(info.value.source_error, ReliabilityConfigError) and info.value.source_id == "GOALS_RELIABILITY_UNCERTAINTY"
 
 
@@ -610,7 +668,7 @@ def test_16_fixture_id_boundary_at_10_pow_640():
 
 def test_17_b_only_giant_seed_passes_through_with_int_hex_v1():
     giant = UncertaintyConfig(seed=10 ** 5000, iterations=20, min_weeks=2)
-    report = run(PRIMARY, reliability=giant)
+    report = run(PRIMARY_GOLDEN, reliability=giant)
     pooled = report["reliability_reports"]["pooled"]
     assert pooled["config"]["seed"] == {"INT_HEX_V1": "+" + format(10 ** 5000, "x")}
     standalone = goals_reliability_uncertainty(b_rows(report), market=OU, line="2.0", config=giant)
@@ -623,7 +681,7 @@ def test_17_b_only_giant_seed_passes_through_with_int_hex_v1():
 
 def test_18_source_identities_and_reports_pass_through_unchanged():
     cfg = config(origins=(O1, O2))
-    rows = PRIMARY + [obs(21, day(4, 3), score=(0, 0)), obs(22, day(4, 10), status="NO_ESTIMATE", score=(2, 2))]
+    rows = PRIMARY_GOLDEN + [obs(21, day(4, 3), score=(0, 0)), obs(22, day(4, 10), status="NO_ESTIMATE", score=(2, 2))]
     report = run_goals_research_consumer(rows, cfg)
     oos = evaluate_goals_oos(copy.deepcopy(rows), oos_config(cfg))
     assert report["oos_report"] == oos
@@ -643,7 +701,7 @@ def test_18_source_identities_and_reports_pass_through_unchanged():
 
 
 def test_18b_consumer_never_mutates_caller_inputs():
-    rows, cfg = copy.deepcopy(PRIMARY), config()
+    rows, cfg = copy.deepcopy(PRIMARY_GOLDEN), config()
     before = (copy.deepcopy(rows), dict(cfg))
     run_goals_research_consumer(rows, cfg)
     assert (rows, cfg) == before
@@ -652,10 +710,10 @@ def test_18b_consumer_never_mutates_caller_inputs():
 # --------------------------------------------------------------------------------------------- 20. determinismo
 
 def test_20_deterministic_across_valid_permutations():
-    reference = run(PRIMARY)
+    reference = run(PRIMARY_GOLDEN)
     rng = random.Random(109)
     for _ in range(5):
-        rows = [dict(reversed(list(copy.deepcopy(o).items()))) for o in PRIMARY]
+        rows = [dict(reversed(list(copy.deepcopy(o).items()))) for o in PRIMARY_GOLDEN]
         rng.shuffle(rows)
         report = run(tuple(rows) if rng.random() < 0.5 else rows)
         assert report == reference and report["report_digest"] == reference["report_digest"]
