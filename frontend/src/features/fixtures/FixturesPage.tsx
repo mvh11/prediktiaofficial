@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type SubmitEvent } from 'react';
+import { useId, useMemo, useRef, useState, type SubmitEvent } from 'react';
 import { useSearchParams } from 'react-router';
 import { useApi } from '../../api/apiContext.ts';
 import { isNotFound } from '../../api/errors.ts';
@@ -45,6 +45,8 @@ export function FixturesPage() {
   const { filters, ignored } = parseFixtureFilters(searchParams);
   const competitions = useResource('competitions', (signal) => api.listCompetitions(signal));
   const resultsHeadingRef = useRef<HTMLHeadingElement>(null);
+  // Lives here (not in the remounted form) so choosing a competition keeps the panel open on phones.
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const competitionList = competitions.state.status === 'success' ? competitions.state.data : null;
   const competitionsById = useMemo(() => new Map((competitionList ?? []).map((item) => [item.id, item])), [competitionList]);
@@ -67,7 +69,6 @@ export function FixturesPage() {
     <>
       <PageHeader
         breadcrumbs={[{ label: m.nav.home, to: PATHS.home }, { label: m.nav.fixtures }]}
-        eyebrow={m.fixtures.eyebrow}
         title={m.fixtures.title}
         documentTitle={m.fixtures.documentTitle}
         lead={<p>{m.fixtures.lead}</p>}
@@ -94,6 +95,8 @@ export function FixturesPage() {
           season={season}
           teams={teams.state}
           update={update}
+          open={filtersOpen}
+          onOpenChange={setFiltersOpen}
         />
 
         <section className={styles.results} aria-labelledby="results-title">
@@ -144,6 +147,9 @@ interface FilterPanelProps {
   readonly season: number | undefined;
   readonly teams: ResourceState<Team[]>;
   readonly update: UpdateFilters;
+  /** Small screens only: whether the collapsible form is expanded. */
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
 }
 
 interface FormErrors {
@@ -156,8 +162,9 @@ interface FormErrors {
  * the URL changes, so browser back/forward always shows the applied filters.
  * The competition applies immediately (it determines the team list).
  */
-function FilterPanel({ filters, competitions, selected, season, teams, update }: FilterPanelProps) {
+function FilterPanel({ filters, competitions, selected, season, teams, update, open, onOpenChange }: FilterPanelProps) {
   const { messages: m } = useI18n();
+  const formId = useId();
   const [errors, setErrors] = useState<FormErrors>({});
   // Controlled: the team list arrives after mount, and an uncontrolled <select>
   // would fall back to "all teams" when the URL's team option is replaced.
@@ -188,6 +195,7 @@ function FilterPanel({ filters, competitions, selected, season, teams, update }:
       dateTo,
       finished: parseFinished(read('estado')) ?? 'all',
     });
+    onOpenChange(false);
   };
 
   const competitionField = () => {
@@ -238,10 +246,23 @@ function FilterPanel({ filters, competitions, selected, season, teams, update }:
 
   return (
     <section className={styles.filterPanel} aria-labelledby="filters-title">
-      <h2 id="filters-title" className={styles.filterTitle}>
-        {m.fixtures.filtersTitle}
-      </h2>
-      <form className={styles.filters} onSubmit={onSubmit} aria-label={m.fixtures.filtersLabel} noValidate>
+      <div className={styles.filterHeader}>
+        <h2 id="filters-title" className={styles.filterTitle}>
+          {m.fixtures.filtersTitle}
+        </h2>
+        <Button
+          variant="secondary"
+          className={styles.filterToggle}
+          aria-expanded={open}
+          aria-controls={formId}
+          onClick={() => {
+            onOpenChange(!open);
+          }}
+        >
+          {open ? m.fixtures.hideFilters : m.fixtures.showFilters}
+        </Button>
+      </div>
+      <form id={formId} className={styles.filters} data-open={open} onSubmit={onSubmit} aria-label={m.fixtures.filtersLabel} noValidate>
         <div className={styles.wide}>{competitionField()}</div>
         <InputField
           label={m.fixtures.season}

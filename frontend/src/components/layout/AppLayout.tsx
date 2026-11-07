@@ -30,7 +30,12 @@ export function AppLayout() {
         </Suspense>
       </main>
       <SiteFooter />
-      <ScrollRestoration />
+      {/*
+        Keyed by pathname: a freshly loaded document always starts with the history key
+        "default", so keying by entry would restore another page's position in the same tab.
+        Filter and pagination changes (same pathname) keep the scroll position.
+      */}
+      <ScrollRestoration getKey={(location) => location.pathname} />
     </>
   );
 }

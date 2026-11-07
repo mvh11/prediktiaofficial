@@ -50,7 +50,7 @@ function team(id: number, name: string, extra: Partial<DevTeam> = {}): DevTeam {
   return { id, external_id: 8000 + id, name, code: null, country: 'DEV_ONLY País', founded: null, is_national: false, logo_url: null, ...extra };
 }
 
-export const DEV_TEAMS: Record<number, DevTeam[]> = {
+export const DEV_TEAMS: Partial<Record<number, DevTeam[]>> = {
   1: [
     team(11, 'DEV_ONLY Deportes Ñandú', { code: 'DÑA', founded: 1925 }),
     team(12, 'DEV_ONLY Unión Costa'),
@@ -100,8 +100,8 @@ function buildFixtures(): DevFixture[] {
   const league = DEV_TEAMS[1] ?? [];
   // 30 fixtures: more than one 25-row page.
   for (let index = 0; index < 30; index += 1) {
-    const home = league[index % league.length] as DevTeam;
-    const away = league[(index + 1) % league.length] as DevTeam;
+    const home = league[index % league.length];
+    const away = league[(index + 1) % league.length];
     const status = index < 10 ? 'FT' : index === 10 ? '2H' : index === 11 ? 'PST' : 'NS';
     const score: [number, number] | null = index < 10 ? [index % 3, (index + 1) % 2] : index === 10 ? [1, 1] : null;
     out.push(fixture(101 + index, 1, index, home, away, status, score));
@@ -109,7 +109,7 @@ function buildFixtures(): DevFixture[] {
   // Exactly 25 fixtures: one full page and nothing more.
   const cup = DEV_TEAMS[2] ?? [];
   for (let index = 0; index < 25; index += 1) {
-    out.push(fixture(201 + index, 2, index, cup[index % 2] as DevTeam, cup[(index + 1) % 2] as DevTeam, 'NS', null));
+    out.push(fixture(201 + index, 2, index, cup[index % 2], cup[(index + 1) % 2], 'NS', null));
   }
   return out;
 }
@@ -158,7 +158,7 @@ function listFixtures(params: URLSearchParams): DevFixture[] {
 }
 
 /** Serves the fake API on `/api/*` and returns the list of requests the page made. */
-export async function useDevOnlyApi(page: Page, options: FakeApiOptions = {}): Promise<RecordedRequest[]> {
+export async function serveDevOnlyApi(page: Page, options: FakeApiOptions = {}): Promise<RecordedRequest[]> {
   const requests: RecordedRequest[] = [];
   await page.route('**/api/**', async (route) => {
     const request = route.request();

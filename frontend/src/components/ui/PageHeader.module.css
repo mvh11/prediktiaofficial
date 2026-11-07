@@ -24,3 +24,10 @@
 .lead > :last-child { margin-bottom: 0; }
 
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-5); }
+
+/* Phones: tighter header so content starts within the first screen. */
+@media (max-width: 47.99rem) {
+  .header { padding-block: var(--space-5); }
+  .lead { margin-top: var(--space-3); font-size: var(--text-md); }
+  .actions { margin-top: var(--space-4); }
+}

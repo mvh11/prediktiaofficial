@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { expectNoHorizontalOverflow, runAxe, trackConsole } from './support/checks.ts';
-import { useDevOnlyApi } from './support/devOnlyApi.ts';
+import { serveDevOnlyApi } from './support/devOnlyApi.ts';
 
 interface PageCase {
   readonly path: string;
@@ -35,7 +35,7 @@ const PAGES: readonly PageCase[] = [
 ];
 
 async function open(page: Page, item: PageCase) {
-  await useDevOnlyApi(page);
+  await serveDevOnlyApi(page);
   await page.goto(item.path);
   await expect(page.getByRole('heading', { level: 1, name: item.heading })).toBeVisible();
   if (item.ready) await item.ready(page);

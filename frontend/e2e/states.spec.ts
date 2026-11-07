@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { runAxe, trackConsole } from './support/checks.ts';
-import { DEV_FIXTURES, useDevOnlyApi } from './support/devOnlyApi.ts';
+import { DEV_FIXTURES, serveDevOnlyApi } from './support/devOnlyApi.ts';
 
 test('without a backend, every data view is honestly unavailable and offers a retry', async ({ page }) => {
   const problems = trackConsole(page);
@@ -19,7 +19,7 @@ test('without a backend, every data view is honestly unavailable and offers a re
 });
 
 test('a slow backend shows loading, then a "taking longer" hint, then the data', async ({ page }) => {
-  await useDevOnlyApi(page, { fixturesDelayMs: 6_000 });
+  await serveDevOnlyApi(page, { fixturesDelayMs: 6_000 });
   await page.goto('/partidos?competicion=1');
   const status = page.getByRole('status').filter({ hasText: 'Cargando partidos…' });
   await expect(status).toBeVisible();
@@ -29,7 +29,7 @@ test('a slow backend shows loading, then a "taking longer" hint, then the data',
 
 test('a server error is explained and recovers on retry', async ({ page }) => {
   let calls = 0;
-  await useDevOnlyApi(page, {
+  await serveDevOnlyApi(page, {
     override: {
       '/fixtures/101': async (route) => {
         calls += 1;
@@ -53,7 +53,7 @@ test('a server error is explained and recovers on retry', async ({ page }) => {
 test('one malformed record rejects the page with an understandable, recoverable error', async ({ page }) => {
   const broken = [DEV_FIXTURES[0], { ...DEV_FIXTURES[1], kickoff_at: '2030-03-02 23:30' }, DEV_FIXTURES[2]];
   let calls = 0;
-  await useDevOnlyApi(page, {
+  await serveDevOnlyApi(page, {
     override: {
       '/fixtures': async (route) => {
         calls += 1;
@@ -75,7 +75,7 @@ test('one malformed record rejects the page with an understandable, recoverable 
 
 test('going offline is announced, failed loads say so, and they retry when the connection returns', async ({ page, context }) => {
   const network = { offline: false };
-  await useDevOnlyApi(page, { network });
+  await serveDevOnlyApi(page, { network });
   await page.goto('/partidos?competicion=1');
   await expect(page.locator('li[data-fixture-id]')).toHaveCount(25);
 

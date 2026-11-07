@@ -43,7 +43,7 @@ function BackLink({ to }: { to: string }) {
   return (
     <p className={styles.back}>
       <Link to={to}>
-        <span aria-hidden="true">← </span>
+        <span aria-hidden="true">←</span>
         {m.fixture.back}
       </Link>
     </p>

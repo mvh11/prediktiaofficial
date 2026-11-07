@@ -33,7 +33,7 @@ function FixtureRow({ fixture, competition, returnSearch }: { fixture: Fixture; 
       </div>
       <div className={styles.teams}>
         <Link to={fixturePath(fixture.id)} state={{ from: returnSearch }} className={styles.rowLink}>
-          <span className={styles.team}>{fixture.home_team.name}</span>{' '}
+          <span className={cx(styles.team, styles.home)}>{fixture.home_team.name}</span>{' '}
           <span className={cx(styles.score, score === null && styles.versus)}>{score ? `${score.home} – ${score.away}` : m.fixtures.versus}</span>{' '}
           <span className={cx(styles.team, styles.away)}>{fixture.away_team.name}</span>
         </Link>

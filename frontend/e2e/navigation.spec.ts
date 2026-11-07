@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { expectNoHorizontalOverflow, usesMenu } from './support/checks.ts';
-import { useDevOnlyApi } from './support/devOnlyApi.ts';
+import { serveDevOnlyApi } from './support/devOnlyApi.ts';
 
 const DESTINATIONS = [
   { label: 'Competiciones', path: '/competiciones', heading: 'Competiciones', title: 'Competiciones · PREDIKTIA' },
@@ -32,7 +32,7 @@ test('the header adapts to the viewport', async ({ page }, testInfo) => {
 });
 
 test('Spanish navigation: every destination updates URL, title, current link and focus', async ({ page }, testInfo) => {
-  await useDevOnlyApi(page);
+  await serveDevOnlyApi(page);
   await page.goto('/');
   for (const destination of DESTINATIONS) {
     const nav = await navigation(page, testInfo.project.name);
@@ -51,7 +51,7 @@ test('Spanish navigation: every destination updates URL, title, current link and
 
 test('the menu is keyboard operable and returns focus', async ({ page }, testInfo) => {
   test.skip(!usesMenu(testInfo.project.name), 'menu only below 960px');
-  await useDevOnlyApi(page);
+  await serveDevOnlyApi(page);
   await page.goto('/');
   const toggle = page.getByRole('button', { name: 'Menú' });
   await toggle.focus();
@@ -85,7 +85,7 @@ test('skip link becomes visible on focus and moves focus to main', async ({ page
 });
 
 test('breadcrumbs lead back up the journey', async ({ page }) => {
-  await useDevOnlyApi(page);
+  await serveDevOnlyApi(page);
   await page.goto('/competiciones/1');
   const crumbs = page.getByRole('navigation', { name: 'Ruta de navegación' });
   await expect(crumbs).toContainText('Inicio');
@@ -95,7 +95,7 @@ test('breadcrumbs lead back up the journey', async ({ page }) => {
 });
 
 test('Phase 1 English links redirect to the Spanish URLs', async ({ page }) => {
-  await useDevOnlyApi(page);
+  await serveDevOnlyApi(page);
   await page.goto('/fixtures?competition=1&status=finished');
   await expect(page).toHaveURL(/\/partidos\?competicion=1&estado=finalizados$/);
   await page.goto('/methodology#abstain');
@@ -121,4 +121,28 @@ test('the theme choice persists across reloads', async ({ page }) => {
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(group.getByRole('radio', { name: 'Oscura' })).toBeChecked();
+});
+
+test('scroll: new pages start at the top and Back restores the list position', async ({ page }) => {
+  await serveDevOnlyApi(page);
+  await page.goto('/partidos?competicion=1');
+  const last = page.locator('li[data-fixture-id]').last();
+  await last.scrollIntoViewIfNeeded();
+  const listScroll = await page.evaluate(() => window.scrollY);
+  expect(listScroll).toBeGreaterThan(500);
+
+  // Client-side navigation to a detail page starts at the top.
+  await last.getByRole('link').click();
+  await expect(page.getByRole('heading', { level: 1, name: /vs/ })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await expect(page.getByRole('navigation', { name: 'Ruta de navegación' })).toBeInViewport();
+
+  await page.goBack();
+  await expect(page.locator('li[data-fixture-id]').last()).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(500);
+
+  // A freshly loaded document never inherits another page's position.
+  await page.goto('/partidos/101');
+  await expect(page.getByRole('heading', { level: 1, name: /vs/ })).toBeVisible();
+  expect(await page.evaluate(() => window.scrollY)).toBe(0);
 });

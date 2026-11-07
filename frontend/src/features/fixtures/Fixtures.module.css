@@ -17,7 +17,18 @@
   min-width: 0;
 }
 
+.filterHeader { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
 .filterTitle { margin: 0; font-size: var(--text-lg); }
+
+/* Small screens: filters collapse behind a disclosure button so results stay close to the top. */
+@media (max-width: 47.99rem) {
+  .filters[data-open='false'] { display: none; }
+}
+
+/* Doubled class: must beat the Button module's own display rule regardless of stylesheet order. */
+@media (min-width: 48rem) {
+  .filterHeader .filterToggle { display: none; }
+}
 
 .filters {
   display: grid;
@@ -98,9 +109,11 @@
   margin: 0;
   font-size: var(--text-md);
   font-weight: 700;
-  text-transform: capitalize;
   color: var(--color-ink-muted);
 }
+
+/* Spanish dates are sentence case: only the weekday's first letter is capitalised. */
+.dayTitle::first-letter { text-transform: uppercase; }
 
 .list {
   margin: 0;
@@ -151,6 +164,19 @@
 .team { overflow-wrap: anywhere; }
 .away { text-align: right; }
 
+/* Narrow phones: home and away stacked, score on the right. */
+@media (max-width: 29.99rem) {
+  .rowLink {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'home score' 'away score';
+    row-gap: var(--space-1);
+  }
+
+  .home { grid-area: home; }
+  .score { grid-area: score; }
+  .away { grid-area: away; text-align: left; }
+}
+
 .score {
   min-width: 3.5rem;
   padding: 0.2rem 0.5rem;
@@ -168,7 +194,8 @@
 
 @media (min-width: 48rem) {
   .row {
-    grid-template-columns: 11rem minmax(0, 1fr) auto;
+    /* Fixed side columns keep the score/"vs" column aligned from row to row. */
+    grid-template-columns: 11rem minmax(0, 1fr) 16rem;
     align-items: center;
     gap: var(--space-5);
   }
@@ -191,7 +218,7 @@
 /* ---------- Detail ---------- */
 
 .back { margin: 0; font-weight: 600; }
-.back a { display: inline-flex; align-items: center; min-height: 2.75rem; }
+.back a { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 2.75rem; }
 
 .headerStatus { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 
@@ -217,7 +244,8 @@
 .scoreTable th,
 .scoreTable td { padding: var(--space-2); border-bottom: 1px solid var(--color-border); text-align: left; }
 .scoreTable td { font-family: var(--font-mono); font-size: var(--text-lg); }
-.scoreTable thead th { font-size: var(--text-xs); text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-ink-muted); overflow-wrap: anywhere; }
+.scoreTable thead th { font-size: var(--text-xs); color: var(--color-ink-muted); overflow-wrap: break-word; vertical-align: bottom; }
+.scoreTable thead th:first-child { text-transform: uppercase; letter-spacing: 0.05em; }
 
 .footnote { margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--color-ink-muted); }
 

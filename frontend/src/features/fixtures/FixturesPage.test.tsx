@@ -250,6 +250,20 @@ describe('FixturesPage — browsing', () => {
     });
   });
 
+  it('exposes a filter disclosure button for small screens that reflects its state', async () => {
+    mockFetch(happyRoutes());
+    const { user } = renderApp('/partidos');
+    await rows();
+    const toggle = screen.getByRole('button', { name: 'Mostrar filtros' });
+    const form = screen.getByRole('form', { name: 'Filtros de partidos' });
+    expect(toggle).toHaveAttribute('aria-controls', form.id);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(form).toHaveAttribute('data-open', 'false');
+    await user.click(toggle);
+    expect(screen.getByRole('button', { name: 'Ocultar filtros' })).toHaveAttribute('aria-expanded', 'true');
+    expect(form).toHaveAttribute('data-open', 'true');
+  });
+
   it('quick ranges set UTC days', async () => {
     mockFetch(happyRoutes());
     const { user, router } = renderApp('/partidos');

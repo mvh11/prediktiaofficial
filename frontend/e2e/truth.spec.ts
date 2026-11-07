@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { expectNoForbiddenContent } from './support/checks.ts';
-import { useDevOnlyApi } from './support/devOnlyApi.ts';
+import { serveDevOnlyApi } from './support/devOnlyApi.ts';
 
 const ALLOWED = [/^\/api\/health$/, /^\/api\/competitions$/, /^\/api\/competitions\/\d+\/teams$/, /^\/api\/fixtures$/, /^\/api\/fixtures\/\d+$/];
 
 test('fixture detail resolves to ABSTAIN with NOT_CERTIFIED and WAIT_REAL_SOURCE explained', async ({ page }) => {
-  await useDevOnlyApi(page);
+  await serveDevOnlyApi(page);
   await page.goto('/partidos/101');
   const output = page.getByRole('region', { name: 'Salida del modelo' });
   await expect(output.getByText('ABSTAIN', { exact: true })).toBeVisible();
@@ -18,7 +18,7 @@ test('fixture detail resolves to ABSTAIN with NOT_CERTIFIED and WAIT_REAL_SOURCE
 });
 
 test('every listed fixture carries ABSTAIN, and in-play data is never presented as live or final', async ({ page }) => {
-  await useDevOnlyApi(page);
+  await serveDevOnlyApi(page);
   await page.goto('/partidos?competicion=1');
   const rows = page.locator('li[data-fixture-id]');
   await expect(rows).toHaveCount(25);
@@ -32,7 +32,7 @@ test('every listed fixture carries ABSTAIN, and in-play data is never presented 
 });
 
 test('pages show no probabilities, odds, EV or betting calls to action, and only GET the verified endpoints', async ({ page }) => {
-  const requests = await useDevOnlyApi(page);
+  const requests = await serveDevOnlyApi(page);
   for (const path of ['/', '/competiciones', '/competiciones/1', '/partidos?competicion=1', '/partidos/101', '/investigacion', '/metodologia']) {
     await page.goto(path);
     await expect(page.getByRole('heading', { level: 1 })).toBeVisible();

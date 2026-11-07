@@ -108,9 +108,14 @@
   align-items: start;
 }
 
-.statusAside { display: grid; gap: var(--space-4); }
+.statusAside {
+  display: grid;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
 .statusAside h3 { margin: 0; }
 
-@media (min-width: 60rem) {
-  .statusGrid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); }
-}
+

@@ -335,14 +335,15 @@ export const esCL = {
 
   fixtures: {
     documentTitle: 'Partidos',
-    eyebrow: 'Partidos',
     title: 'Partidos',
     lead: 'Busca partidos almacenados por PREDIKTIA. Estados y marcadores corresponden a la última sincronización.',
     noticeTitle: 'Qué estás viendo',
     notice:
-      'Los datos vienen del almacén de PREDIKTIA, no de un servicio en vivo: estados y marcadores son los de la última sincronización, cuya hora la API no informa. Las horas se muestran en hora de Chile continental. Ningún partido tiene pronósticos, cuotas ni recomendaciones.',
+      'Datos almacenados, no en vivo: estados y marcadores son los de la última sincronización, cuya hora la API no informa. Ningún partido tiene pronósticos, cuotas ni recomendaciones.',
     filtersTitle: 'Filtros',
     filtersLabel: 'Filtros de partidos',
+    showFilters: 'Mostrar filtros',
+    hideFilters: 'Ocultar filtros',
     competition: 'Competición',
     competitionAll: 'Todas las competiciones',
     competitionHint: 'Se aplica al seleccionarla y carga sus equipos.',
