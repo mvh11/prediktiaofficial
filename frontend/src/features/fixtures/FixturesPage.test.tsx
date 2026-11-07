@@ -393,7 +393,7 @@ describe('FixturesPage — detail round trip', () => {
       expect(router.state.location.search).toBe('?competicion=1&estado=finalizados');
     });
   });
-
+});
 
 describe('FixturesPage — identifier integrity and date bounds', () => {
   it.each(['41.99999999999999999', '12.9999999999999999', '1.0000000000000001', '4.2e1'])(
@@ -437,5 +437,4 @@ describe('FixturesPage — identifier integrity and date bounds', () => {
     expect(router.state.location.search).toBe('');
     expect(fixtureRequests(fetchMock)).toHaveLength(before);
   });
-});
 });
