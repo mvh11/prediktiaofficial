@@ -15,7 +15,6 @@ import { useResource, type Resource, type ResourceState } from '../../hooks/useR
 import { utcDay } from '../../i18n/format.ts';
 import { useI18n } from '../../i18n/i18n.ts';
 import type { Messages } from '../../i18n/messages.es-CL.ts';
-import { isIsoDay } from '../../lib/format.ts';
 import { parsePositiveInt } from '../../lib/ids.ts';
 import { DataServiceStatus } from '../system/DataServiceStatus.tsx';
 import { groupByCountry } from '../competitions/competitionText.ts';
@@ -24,7 +23,10 @@ import {
   FIXTURE_PAGE_SIZE,
   finishedToQuery,
   isInvertedRange,
+  isSupportedDay,
+  MAX_DAY,
   MAX_SEASON,
+  MIN_DAY,
   MIN_SEASON,
   parseFinished,
   parseFixtureFilters,
@@ -154,6 +156,7 @@ interface FilterPanelProps {
 
 interface FormErrors {
   readonly season?: string;
+  readonly from?: string;
   readonly to?: string;
 }
 
@@ -179,12 +182,16 @@ function FilterPanel({ filters, competitions, selected, season, teams, update, o
     };
     const seasonText = read('temporada');
     const nextSeason = parseSeason(seasonText);
-    const dateFrom = isIsoDay(read('desde')) ? read('desde') : undefined;
-    const dateTo = isIsoDay(read('hasta')) ? read('hasta') : undefined;
-    const next: { season?: string; to?: string } = {};
+    const fromText = read('desde');
+    const toText = read('hasta');
+    const dateFrom = isSupportedDay(fromText) ? fromText : undefined;
+    const dateTo = isSupportedDay(toText) ? toText : undefined;
+    const next: { season?: string; from?: string; to?: string } = {};
     if (seasonText !== '' && nextSeason === undefined) next.season = m.fixtures.seasonInvalid;
-    if (isInvertedRange(dateFrom, dateTo)) next.to = m.fixtures.dateRangeError;
-    if (next.season !== undefined || next.to !== undefined) {
+    if (fromText !== '' && dateFrom === undefined) next.from = m.fixtures.dateOutOfRange;
+    if (toText !== '' && dateTo === undefined) next.to = m.fixtures.dateOutOfRange;
+    else if (isInvertedRange(dateFrom, dateTo)) next.to = m.fixtures.dateRangeError;
+    if (next.season !== undefined || next.from !== undefined || next.to !== undefined) {
       setErrors(next);
       return;
     }
@@ -301,8 +308,17 @@ function FilterPanel({ filters, competitions, selected, season, teams, update, o
           <option value="pending">{m.fixtures.statusPending}</option>
           <option value="finished">{m.fixtures.statusFinished}</option>
         </SelectField>
-        <InputField label={m.fixtures.from} name="desde" type="date" defaultValue={filters.dateFrom ?? ''} hint={m.fixtures.dateHint} />
-        <InputField label={m.fixtures.to} name="hasta" type="date" defaultValue={filters.dateTo ?? ''} error={errors.to} />
+        <InputField
+          label={m.fixtures.from}
+          name="desde"
+          type="date"
+          min={MIN_DAY}
+          max={MAX_DAY}
+          defaultValue={filters.dateFrom ?? ''}
+          hint={m.fixtures.dateHint}
+          error={errors.from}
+        />
+        <InputField label={m.fixtures.to} name="hasta" type="date" min={MIN_DAY} max={MAX_DAY} defaultValue={filters.dateTo ?? ''} error={errors.to} />
         <div className={styles.quick} role="group" aria-label={m.fixtures.quickRanges}>
           <span className={styles.quickLabel} aria-hidden="true">
             {m.fixtures.quickRanges}

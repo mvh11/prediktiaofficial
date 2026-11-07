@@ -76,7 +76,8 @@ Inicio → Competiciones → Partidos → Detalle del partido → Contexto de in
 | `/investigacion`, `/metodologia` | Research approach, limitations, evidence requirements, ABSTAIN-first gates |
 
 `estado` is `pendientes` or `finalizados`; `desde`/`hasta` are `YYYY-MM-DD` **UTC** days, because
-that is how the backend filters. Phase 1 English URLs (`/fixtures`, `/fixtures/:id`, `/research`,
+that is how the backend filters, limited to 1900-01-01…2100-12-31 (the backend computes `date_to + 1 day`,
+which overflows for 9999-12-31 and answers HTTP 500). Phase 1 English URLs (`/fixtures`, `/fixtures/:id`, `/research`,
 `/methodology`, their query parameters and methodology anchors) redirect to the Spanish ones.
 
 URL parameters that cannot be used (unknown values, invalid or out-of-range ids, impossible dates)
@@ -113,9 +114,16 @@ Competition, team, fixture and season ids are PostgreSQL `integer` columns (1..2
 - URL ids are kept as canonical decimal strings (`src/lib/ids.ts`) and converted only when in range.
   Invalid ids (`abc`, `007`, `0`) and out-of-range ids (`2147483648`, `99999999999999999999`) get an
   explanatory page; **no request is made** and nothing is rounded.
-- Before `JSON.parse`, response text is scanned for integer literals beyond `Number.MAX_SAFE_INTEGER`
-  (`src/api/jsonNumbers.ts`); such a response is rejected and the exact literal is shown, instead of
-  silently displaying a rounded id. Schemas additionally require ids within the `integer` range.
+- `JSON.parse` loses information before any schema can look at it: it rounds integers beyond
+  `Number.MAX_SAFE_INTEGER` and also near-integers and exponents (`12.9999999999999999` → 13,
+  `1.0000000000000001` → 1, `1.3e1` → 13). Two guards therefore run on the **raw response text**
+  (`src/api/jsonNumbers.ts`): any integer literal beyond the safe range is rejected, and every identifier token
+  (`id` at any depth — fixture, competition, team — `competition_id`, `external_id`) must be a canonical decimal
+  integer within its column's `integer` range (ids 1..2,147,483,647). Keys are decoded exactly as JSON.parse does
+  (escaped spellings, duplicate keys) and text inside strings is never treated as a number. A violating response
+  is rejected whole and the exact token and record are shown. Schemas additionally require ids within range.
+- `GET /fixtures/{id}` must return that same id; a response about another fixture is refused, so the UI never
+  shows or links a different fixture than the one in the URL.
 
 ### Failure handling
 
@@ -132,7 +140,10 @@ ever rendered in place of missing data:
 | timeout | "La solicitud tardó demasiado" (states the seconds) + retry |
 | non-JSON 2xx, malformed JSON, schema mismatch | "Respuesta con formato inesperado" naming the first offending record (row, id, field); one bad record rejects the whole page |
 | integer JSON cannot represent exactly | "Identificador numérico no representable" with the literal |
-| 404 | not-found state |
+| identifier token not a canonical in-range integer | "Identificador no válido en la respuesta" with the token and record |
+| detail response about another fixture | "La respuesta no corresponde al partido solicitado" (requested vs received id) |
+| 404 with the backend's JSON `detail` | not-found state |
+| 404 without a JSON body (proxy, static server) | "Servicio de datos no disponible" (HTTP 404) + retry — never "not found" |
 | valid empty list | specific empty state |
 
 The schemas are deliberately **stricter** than the backend models (non-empty names, non-negative

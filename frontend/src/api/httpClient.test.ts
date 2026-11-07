@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { hangingResponse, jsonResponse, textResponse } from '../test/fetchMock.ts';
 import { ApiError } from './errors.ts';
 import { buildUrl, createHttpClient } from './httpClient.ts';
-import { fixtureListSchema } from './schemas.ts';
+import { fixtureListSchema, fixtureSchema } from './schemas.ts';
 import { devFixture } from '../test/devOnlyData.ts';
 
 const schema = z.object({ status: z.literal('ok') });
@@ -136,12 +136,69 @@ describe('createHttpClient', () => {
   });
 
   it('locates a nested field and omits a non-integer id', async () => {
-    const rows = [{ ...devFixture(1), id: 'x', home_team: { id: 0, name: 'A', logo_url: null } }];
+    // A string id is not a number token (the identifier guard ignores strings); the schema rejects it.
+    const rows = [{ ...devFixture(1), id: 'x', home_team: { id: 5, name: '', logo_url: null } }];
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(rows));
     const error = await captureError(clientWith(fetchImpl).getJson('/fixtures', fixtureListSchema));
     expect(error).toBeInstanceOf(ApiError);
     const invalid = (error as ApiError).invalid;
     expect(invalid).toMatchObject({ reason: 'schema', row: 1 });
     expect(invalid?.rowId).toBeUndefined();
+  });
+
+  // D1 (independent QA): JSON.parse rounds near-integers and accepts exponents, so an identifier token must be
+  // checked on the raw text. Each case would otherwise arrive as a "valid" integer id.
+  it.each([
+    ['12.9999999999999999', 13],
+    ['41.99999999999999999', 42],
+    ['1.0000000000000001', 1],
+    ['1.3e1', 13],
+    ['1E0', 1],
+    ['2.0', 2],
+  ])('rejects the list identifier token %s instead of reading it as %d', async (token, rounded) => {
+    expect(JSON.parse(`{"id":${token}}`)).toEqual({ id: rounded }); // the loss being guarded against
+    const text = JSON.stringify([devFixture(1), devFixture(2)]).replace('"id":2,', `"id":${token},`);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(textResponse(text, 200, 'application/json'));
+    const error = await captureError(clientWith(fetchImpl).getJson('/fixtures', fixtureListSchema));
+    expect(error).toMatchObject({ kind: 'invalid_response', invalid: { reason: 'invalid_identifier', field: 'id', literal: token, row: 2 } });
+  });
+
+  it.each([
+    ['competition_id', '1.0000000000000001'],
+    ['competition_id', '0'],
+    ['competition_id', '-1'],
+    ['external_id', '700001.0'],
+    ['external_id', '2147483648'],
+    ['external_id', '-0'],
+  ])('rejects %s token %s in a detail response', async (key, token) => {
+    const text = JSON.stringify(devFixture(1)).replace(new RegExp(`"${key}":-?\\d+`), `"${key}":${token}`);
+    expect(text).toContain(`"${key}":${token}`);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(textResponse(text, 200, 'application/json'));
+    const error = await captureError(clientWith(fetchImpl).getJson('/fixtures/1', fixtureSchema));
+    expect(error).toMatchObject({ kind: 'invalid_response', invalid: { reason: 'invalid_identifier', field: key, literal: token } });
+    expect((error as ApiError).invalid?.row).toBeUndefined();
+  });
+
+  it('checks nested team ids and keeps strings that merely look like JSON numbers', async () => {
+    const nested = JSON.stringify(devFixture(1)).replace(/"home_team":\{"id":\d+/, '"home_team":{"id":11.000000000000001');
+    const fetchNested = vi.fn<typeof fetch>().mockResolvedValue(textResponse(nested, 200, 'application/json'));
+    expect(await captureError(clientWith(fetchNested).getJson('/fixtures/1', fixtureSchema))).toMatchObject({
+      invalid: { reason: 'invalid_identifier', field: 'id', literal: '11.000000000000001' },
+    });
+
+    const lookalike = devFixture(1, { venue_name: '{"id":12.9999999999999999}', referee: '"id": 1e3' });
+    const fetchOk = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(lookalike));
+    await expect(clientWith(fetchOk).getJson('/fixtures/1', fixtureSchema)).resolves.toMatchObject({
+      id: 1,
+      venue_name: '{"id":12.9999999999999999}',
+      referee: '"id": 1e3',
+    });
+  });
+
+  it('accepts in-range canonical identifiers, including the PostgreSQL integer maximum', async () => {
+    const teams = { home_team: { id: 2147483647, name: 'A', logo_url: null }, away_team: { id: 1, name: 'B', logo_url: null } };
+    const body = devFixture(2147483647, { ...teams, competition_id: 2147483647, external_id: -2147483648 });
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(body));
+    await expect(clientWith(fetchImpl).getJson('/fixtures/2147483647', fixtureSchema)).resolves.toMatchObject({ id: 2147483647 });
   });
 });

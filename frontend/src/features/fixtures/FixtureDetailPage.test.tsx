@@ -145,4 +145,44 @@ describe('FixtureDetailPage', () => {
     await user.click(screen.getByRole('button', { name: 'Reintentar' }));
     expect(await screen.findByRole('heading', { level: 1, name: 'DEV_ONLY Home 9 vs DEV_ONLY Away 9' })).toBeInTheDocument();
   });
+
+  // D1 (independent QA): a near-integer id token must never become another fixture's id.
+  it.each([
+    ['13', '12.9999999999999999'],
+    ['42', '41.99999999999999999'],
+    ['1', '1.0000000000000001'],
+    ['13', '1.3e1'],
+  ])('/partidos/%s refuses a response whose id token is %s (it would round to the requested id)', async (requested, token) => {
+    const body = JSON.stringify(devFixture(Number(requested))).replace(`"id":${requested},`, `"id":${token},`);
+    expect(body).toContain(`"id":${token},`);
+    mockFetch({ '/competitions': competitions, [`/fixtures/${requested}`]: () => textResponse(body, 200, 'application/json') });
+    const { router } = renderApp(`/partidos/${requested}`);
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Identificador no válido en la respuesta');
+    expect(alert).toHaveTextContent(`«${token}»`);
+    expect(screen.queryByRole('heading', { level: 1, name: /vs/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Salida del modelo' })).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe(`/partidos/${requested}`);
+  });
+
+  it('refuses a well-formed response about a different fixture and never shows or links it', async () => {
+    mockFetch({ '/competitions': competitions, '/fixtures/101': () => jsonResponse(devFinishedFixture(102)) });
+    const { router } = renderApp('/partidos/101');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('La respuesta no corresponde al partido solicitado');
+    expect(alert).toHaveTextContent('Se pidió el partido 101, pero el servicio de datos respondió con el partido 102.');
+    expect(screen.queryByText(/DEV_ONLY Home 102/)).not.toBeInTheDocument();
+    expect(document.querySelector('a[href="/partidos/102"]')).toBeNull();
+    expect(router.state.location.pathname).toBe('/partidos/101');
+  });
+
+  it('a non-JSON 404 (proxy or static server) is an unavailable service, not a missing fixture (L1)', async () => {
+    mockFetch({ '/competitions': competitions, '/fixtures/9': () => textResponse('<!doctype html><title>404</title>', 404, 'text/html') });
+    renderApp('/partidos/9');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Servicio de datos no disponible');
+    expect(alert).toHaveTextContent('HTTP 404');
+    expect(screen.queryByRole('heading', { level: 1, name: 'Partido no encontrado' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+  });
 });

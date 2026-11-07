@@ -107,6 +107,13 @@ export const esCL = {
     unsafeIntegerTitle: 'Identificador numérico no representable',
     unsafeInteger: (literal: string) =>
       `La respuesta contiene el número ${literal}, que supera el máximo que el navegador puede representar sin perder precisión. Para no mostrar un identificador alterado, se descartó la respuesta completa.`,
+    invalidIdentifierTitle: 'Identificador no válido en la respuesta',
+    invalidIdentifier: (literal: string, field: string) =>
+      `El campo «${field}» de la respuesta trae «${literal}», que no es un identificador entero canónico dentro del rango admitido (1 a 2.147.483.647 para identificadores internos). Interpretarlo podría redondearlo a otro número, así que se descartó la respuesta completa.`,
+    invalidIdentifierRow: (row: number) => `El valor está en el registro n.º ${row} de la respuesta.`,
+    identityMismatchTitle: 'La respuesta no corresponde al partido solicitado',
+    identityMismatch: (expected: string, received: string) =>
+      `Se pidió el partido ${expected}, pero el servicio de datos respondió con el partido ${received}. Para no mostrar un partido distinto, no se muestra nada.`,
     notFoundTitle: 'No encontrado',
     notFound: (subject: string) => `No fue posible encontrar ${subject} en el almacén de datos de PREDIKTIA.`,
     rejectedTitle: 'Solicitud rechazada',
@@ -368,6 +375,7 @@ export const esCL = {
     to: 'Hasta (día UTC)',
     dateHint: 'El servicio filtra por día UTC: un partido nocturno en Chile puede quedar en el día UTC siguiente.',
     dateRangeError: 'La fecha «hasta» debe ser igual o posterior a la fecha «desde».',
+    dateOutOfRange: 'Indica un día entre el 1 de enero de 1900 y el 31 de diciembre de 2100.',
     apply: 'Aplicar filtros',
     reset: 'Restablecer',
     quickRanges: 'Rangos rápidos (días UTC)',

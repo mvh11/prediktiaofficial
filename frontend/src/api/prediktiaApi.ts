@@ -1,3 +1,4 @@
+import { ApiError } from './errors.ts';
 import { createHttpClient, type HttpClient } from './httpClient.ts';
 import {
   competitionListSchema,
@@ -69,7 +70,16 @@ export function createPrediktiaApi(http: HttpClient): PrediktiaApi {
           offset: Math.max(0, query.offset),
         },
       }),
-    getFixture: (fixtureId, signal) => http.getJson(`/fixtures/${fixtureId}`, fixtureSchema, { signal }),
+    getFixture: async (fixtureId, signal) => {
+      const fixture = await http.getJson(`/fixtures/${fixtureId}`, fixtureSchema, { signal });
+      // Never show (or link from) a different fixture than the one requested.
+      if (fixture.id !== fixtureId) {
+        throw new ApiError('invalid_response', `Requested fixture ${String(fixtureId)} but received ${String(fixture.id)}.`, {
+          invalid: { reason: 'identity_mismatch', field: 'id', literal: String(fixture.id), expected: String(fixtureId) },
+        });
+      }
+      return fixture;
+    },
   };
 }
 

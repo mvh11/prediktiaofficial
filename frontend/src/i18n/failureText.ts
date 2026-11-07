@@ -34,6 +34,14 @@ export function failureText(failure: FailureInfo, subject: string, m: Messages):
       if (invalid?.reason === 'unsafe_integer' && invalid.literal !== undefined) {
         return { title: e.unsafeIntegerTitle, paragraphs: [e.unsafeInteger(invalid.literal)] };
       }
+      if (invalid?.reason === 'invalid_identifier' && invalid.literal !== undefined) {
+        const paragraphs = [e.invalidIdentifier(invalid.literal, invalid.field ?? 'id')];
+        if (invalid.row !== undefined) paragraphs.push(e.invalidIdentifierRow(invalid.row), e.invalidOneRow);
+        return { title: e.invalidIdentifierTitle, paragraphs };
+      }
+      if (invalid?.reason === 'identity_mismatch' && invalid.literal !== undefined && invalid.expected !== undefined) {
+        return { title: e.identityMismatchTitle, paragraphs: [e.identityMismatch(invalid.expected, invalid.literal)] };
+      }
       const paragraphs = [e.invalid(subject)];
       if (invalid?.reason === 'not_json') paragraphs.push(e.invalidNotJson);
       else if (invalid?.reason === 'malformed_json') paragraphs.push(e.invalidMalformedJson);

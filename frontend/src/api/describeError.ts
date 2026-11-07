@@ -46,9 +46,10 @@ export function describeError(error: unknown, context: DescribeContext = {}): Fa
       return info('invalid', true, { status: error.status, invalid: error.invalid });
     case 'http': {
       const status = error.status ?? 0;
-      if (status === 404) return info('not_found', false, { status });
-      // Non-JSON 5xx responses typically come from a proxy/gateway when the backend is down.
-      if (status >= 500 && error.detail === null) return info('unavailable', true, { status });
+      if (status === 404 && error.detail !== null) return info('not_found', false, { status });
+      // Non-JSON 404/5xx responses come from a proxy, gateway or static server, not from the
+      // backend: the API is unreachable or misrouted, which says nothing about the record.
+      if ((status === 404 || status >= 500) && error.detail === null) return info('unavailable', true, { status });
       return info('rejected', status >= 500 || status === 429, { status });
     }
   }

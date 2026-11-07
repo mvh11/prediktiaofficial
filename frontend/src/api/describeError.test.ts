@@ -11,6 +11,7 @@ describe('describeError', () => {
     [new ApiError('timeout', 'x', { timeoutMs: 10_000 }), 'timeout', true],
     [new ApiError('invalid_response', 'x'), 'invalid', true],
     [new ApiError('http', 'x', { status: 404, detail: 'nope' }), 'not_found', false],
+    [new ApiError('http', 'x', { status: 404, detail: null }), 'unavailable', true],
     [new ApiError('http', 'x', { status: 502, detail: null }), 'unavailable', true],
     [new ApiError('http', 'x', { status: 500, detail: 'boom' }), 'rejected', true],
     [new ApiError('http', 'x', { status: 422, detail: 'bad' }), 'rejected', false],

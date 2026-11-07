@@ -37,6 +37,18 @@ export interface IgnoredParam {
 export const FIXTURE_PAGE_SIZE = 25;
 export const MIN_SEASON = 1900;
 export const MAX_SEASON = 2100;
+/**
+ * Supported UTC days for date filters. The backend computes `date_to + 1 day`
+ * (backend/app/api/routes/fixtures.py), which overflows for 9999-12-31 and
+ * answers HTTP 500; days outside the season range are never sent.
+ */
+export const MIN_DAY = '1900-01-01';
+export const MAX_DAY = '2100-12-31';
+
+/** A real `YYYY-MM-DD` calendar day within [MIN_DAY, MAX_DAY]. */
+export function isSupportedDay(value: string): boolean {
+  return isIsoDay(value) && value >= MIN_DAY && value <= MAX_DAY;
+}
 
 export const EMPTY_FILTERS: FixtureFilters = {
   competitionId: undefined,
@@ -88,8 +100,8 @@ export function parseFixtureFilters(params: URLSearchParams): ParsedFilters {
   const day = (name: string): string | undefined => {
     const raw = read(name);
     if (raw === null) return undefined;
-    if (isIsoDay(raw)) return raw;
-    ignored.push({ name, raw, reason: 'invalid' });
+    if (isSupportedDay(raw)) return raw;
+    ignored.push({ name, raw, reason: isIsoDay(raw) ? 'unsupported' : 'invalid' });
     return undefined;
   };
 

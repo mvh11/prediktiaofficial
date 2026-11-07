@@ -393,4 +393,49 @@ describe('FixturesPage — detail round trip', () => {
       expect(router.state.location.search).toBe('?competicion=1&estado=finalizados');
     });
   });
+
+
+describe('FixturesPage — identifier integrity and date bounds', () => {
+  it.each(['41.99999999999999999', '12.9999999999999999', '1.0000000000000001', '4.2e1'])(
+    'refuses a list whose second row id token is %s, so no row can link to a rounded id',
+    async (token) => {
+      const text = JSON.stringify([devFixture(1), devFixture(42), devFixture(3)]).replace('"id":42,', `"id":${token},`);
+      mockFetch({ ...happyRoutes(), '/fixtures': () => textResponse(text, 200, 'application/json') });
+      renderApp('/partidos');
+      const alert = await within(await resultsLoaded()).findByRole('alert');
+      expect(alert).toHaveTextContent('Identificador no válido en la respuesta');
+      expect(alert).toHaveTextContent('registro n.º 2');
+      expect(alert).toHaveTextContent(`«${token}»`);
+      expect(document.querySelectorAll('li[data-fixture-id]')).toHaveLength(0);
+      expect(document.querySelector('a[href^="/partidos/"]')).toBeNull();
+    },
+  );
+
+  it('reports out-of-range UTC days in the URL and never sends them (L2)', async () => {
+    const fetchMock = mockFetch(happyRoutes());
+    renderApp('/partidos?desde=0001-01-01&hasta=9999-12-31');
+    expect(await screen.findByText('hasta = «9999-12-31» (fuera del rango admitido)')).toBeInTheDocument();
+    expect(screen.getByText('desde = «0001-01-01» (fuera del rango admitido)')).toBeInTheDocument();
+    await rows();
+    const sent = fixtureRequests(fetchMock)[0];
+    expect(sent?.searchParams.has('date_from')).toBe(false);
+    expect(sent?.searchParams.has('date_to')).toBe(false);
+  });
+
+  it('rejects an out-of-range day typed into the form with a described error (L2)', async () => {
+    const fetchMock = mockFetch(happyRoutes());
+    const { user, router } = renderApp('/partidos');
+    await rows();
+    const before = fixtureRequests(fetchMock).length;
+    const to = screen.getByLabelText('Hasta (día UTC)');
+    expect(to).toHaveAttribute('min', '1900-01-01');
+    expect(to).toHaveAttribute('max', '2100-12-31');
+    await user.type(to, '9999-12-31');
+    await user.click(screen.getByRole('button', { name: 'Aplicar filtros' }));
+    expect(to).toHaveAttribute('aria-invalid', 'true');
+    expect(to).toHaveAccessibleDescription(/entre el 1 de enero de 1900 y el 31 de diciembre de 2100/);
+    expect(router.state.location.search).toBe('');
+    expect(fixtureRequests(fetchMock)).toHaveLength(before);
+  });
+});
 });

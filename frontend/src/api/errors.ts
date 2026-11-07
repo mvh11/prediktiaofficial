@@ -14,7 +14,16 @@ export type ApiErrorKind =
   /** 2xx response that is not JSON, is malformed, loses precision or does not match the verified schema. */
   | 'invalid_response';
 
-export type InvalidReason = 'not_json' | 'malformed_json' | 'unsafe_integer' | 'schema';
+export type InvalidReason =
+  | 'not_json'
+  | 'malformed_json'
+  /** An integer anywhere in the response that JSON numbers cannot represent exactly. */
+  | 'unsafe_integer'
+  /** An identifier token that is not a canonical in-range integer (e.g. 12.9999999999999999, 1e3, 0, -5). */
+  | 'invalid_identifier'
+  /** A well-formed response about a different record than the one requested. */
+  | 'identity_mismatch'
+  | 'schema';
 
 /** Where and why a 2xx response was rejected (no data is ever shown from it). */
 export interface InvalidDetail {
@@ -25,8 +34,10 @@ export interface InvalidDetail {
   readonly row?: number;
   /** The offending record's `id` exactly as received, when it was a plain integer. */
   readonly rowId?: string;
-  /** The integer literal that could not be represented exactly. */
+  /** The token (or id) exactly as received. */
   readonly literal?: string;
+  /** For identity_mismatch: the id that was requested. */
+  readonly expected?: string;
 }
 
 export interface ApiErrorOptions {
@@ -61,6 +72,12 @@ export function isApiError(value: unknown): value is ApiError {
   return value instanceof ApiError;
 }
 
+/**
+ * A 404 from the backend itself: FastAPI answers unknown records with a JSON
+ * `{"detail": ...}`. A 404 without that body (HTML or text from a proxy or a
+ * static server) means the API route is not reachable, not that the record is
+ * missing, so it is never reported as "not found".
+ */
 export function isNotFound(error: unknown): boolean {
-  return isApiError(error) && error.kind === 'http' && error.status === 404;
+  return isApiError(error) && error.kind === 'http' && error.status === 404 && error.detail !== null;
 }

@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import { ApiError, type InvalidDetail } from './errors.ts';
-import { findUnsafeIntegerLiteral } from './jsonNumbers.ts';
+import { findIdentifierIssue, findUnsafeIntegerLiteral } from './jsonNumbers.ts';
 
 export type QueryValue = string | number | boolean | null | undefined;
 
@@ -78,7 +78,9 @@ export function locateIssue(issues: readonly z.core.$ZodIssue[], body: unknown):
  * - explicit "not configured" short-circuit (no request is made);
  * - per-request timeout via AbortController, covering headers AND body;
  * - caller cancellation that is distinguishable from timeouts;
- * - precision guard: integers JSON cannot represent exactly reject the response;
+ * - precision guards on the raw text: integers JSON cannot represent exactly, and
+ *   identifier tokens that are not canonical in-range integers, reject the response
+ *   (JSON.parse would otherwise round 12.9999999999999999 to 13 without a trace);
  * - strict JSON + schema validation, so unverified shapes never reach the UI.
  */
 export function createHttpClient({ baseUrl, timeoutMs, fetchImpl }: HttpClientOptions): HttpClient {
@@ -158,6 +160,20 @@ export function createHttpClient({ baseUrl, timeoutMs, fetchImpl }: HttpClientOp
             status: response.status,
             cause,
             invalid: { reason: 'malformed_json' },
+          });
+        }
+
+        // Valid JSON from here on: check identifier tokens before trusting any parsed number.
+        const identifier = findIdentifierIssue(text);
+        if (identifier !== null) {
+          throw new ApiError('invalid_response', `Identifier ${identifier.key} is not a canonical in-range integer: ${identifier.literal}.`, {
+            status: response.status,
+            invalid: {
+              reason: 'invalid_identifier',
+              field: identifier.key,
+              literal: identifier.literal,
+              ...(identifier.row !== undefined ? { row: identifier.row } : {}),
+            },
           });
         }
 
