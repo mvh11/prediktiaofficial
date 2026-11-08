@@ -36,8 +36,13 @@ export function failureText(failure: FailureInfo, subject: string, m: Messages):
       }
       if (invalid?.reason === 'invalid_identifier' && invalid.literal !== undefined) {
         const paragraphs = [e.invalidIdentifier(invalid.literal, invalid.field ?? 'id')];
-        if (invalid.row !== undefined) paragraphs.push(e.invalidIdentifierRow(invalid.row), e.invalidOneRow);
+        if (invalid.row !== undefined) paragraphs.push(e.invalidTokenRow(invalid.row), e.invalidOneRow);
         return { title: e.invalidIdentifierTitle, paragraphs };
+      }
+      if (invalid?.reason === 'invalid_integer' && invalid.literal !== undefined && invalid.field !== undefined) {
+        const paragraphs = [e.invalidInteger(invalid.literal, invalid.field)];
+        if (invalid.row !== undefined) paragraphs.push(e.invalidTokenRow(invalid.row), e.invalidOneRow);
+        return { title: e.invalidIntegerTitle, paragraphs };
       }
       if (invalid?.reason === 'identity_mismatch' && invalid.literal !== undefined && invalid.expected !== undefined) {
         return { title: e.identityMismatchTitle, paragraphs: [e.identityMismatch(invalid.expected, invalid.literal)] };

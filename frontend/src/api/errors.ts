@@ -21,6 +21,8 @@ export type InvalidReason =
   | 'unsafe_integer'
   /** An identifier token that is not a canonical in-range integer (e.g. 12.9999999999999999, 1e3, 0, -5). */
   | 'invalid_identifier'
+  /** Another contract integer (season, goals, minute…) whose token is not an exact canonical int32 (e.g. 6.7e1, 0.99999999999999999). */
+  | 'invalid_integer'
   /** A well-formed response about a different record than the one requested. */
   | 'identity_mismatch'
   | 'schema';

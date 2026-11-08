@@ -116,12 +116,20 @@ Competition, team, fixture and season ids are PostgreSQL `integer` columns (1..2
   explanatory page; **no request is made** and nothing is rounded.
 - `JSON.parse` loses information before any schema can look at it: it rounds integers beyond
   `Number.MAX_SAFE_INTEGER` and also near-integers and exponents (`12.9999999999999999` → 13,
-  `1.0000000000000001` → 1, `1.3e1` → 13). Two guards therefore run on the **raw response text**
-  (`src/api/jsonNumbers.ts`): any integer literal beyond the safe range is rejected, and every identifier token
-  (`id` at any depth — fixture, competition, team — `competition_id`, `external_id`) must be a canonical decimal
-  integer within its column's `integer` range (ids 1..2,147,483,647). Keys are decoded exactly as JSON.parse does
-  (escaped spellings, duplicate keys) and text inside strings is never treated as a number. A violating response
-  is rejected whole and the exact token and record are shown. Schemas additionally require ids within range.
+  `1.0000000000000001` → 1, `1.3e1` → 13, `2029.9999999999999999` → 2030, `0.99999999999999999` → 1,
+  `6.7e1` → 67). Two guards therefore run on the **raw response text** (`src/api/jsonNumbers.ts`): any
+  integer literal beyond the safe range is rejected, and every integer field of the verified contract must be a
+  canonical decimal integer (no fraction, exponent, leading zero or `-0`) within its column's `integer` range:
+  - identifiers (`id` at any depth — fixture, competition, team — `competition_id`, `external_id`; ids 1..2,147,483,647);
+  - all other integers (FE2-R1): `season`, `current_season`, `founded`, `elapsed` and every score
+    (`home_goals`, `away_goals`, `halftime_*`, `extratime_*`, `penalty_*`, `fulltime_*`).
+
+  A unit test checks that this list equals the integer fields of the zod schemas and that no schema field is a
+  decimal. `null` stays valid where the contract allows it; numbers under keys outside the contract (legitimately
+  decimal or not) are left to the schema, which strips them. Keys are decoded exactly as JSON.parse does (escaped
+  spellings, duplicate keys; never a prototype member such as `__proto__`), and text inside strings is never
+  treated as a number. A violating response is rejected whole and the exact token, field and record are shown.
+  Domain limits (ids within range, non-negative goals) are checked afterwards by the schemas.
 - `GET /fixtures/{id}` must return that same id; a response about another fixture is refused, so the UI never
   shows or links a different fixture than the one in the URL.
 
@@ -139,8 +147,9 @@ ever rendered in place of missing data:
 | slow response | loading state; after 4 s a polite "Está tardando más de lo habitual…" |
 | timeout | "La solicitud tardó demasiado" (states the seconds) + retry |
 | non-JSON 2xx, malformed JSON, schema mismatch | "Respuesta con formato inesperado" naming the first offending record (row, id, field); one bad record rejects the whole page |
-| integer JSON cannot represent exactly | "Identificador numérico no representable" with the literal |
+| integer JSON cannot represent exactly | "Número no representable con exactitud" with the literal |
 | identifier token not a canonical in-range integer | "Identificador no válido en la respuesta" with the token and record |
+| other contract integer (season, score, minute…) not an exact canonical integer | "Número entero no válido en la respuesta" with the field, token and record |
 | detail response about another fixture | "La respuesta no corresponde al partido solicitado" (requested vs received id) |
 | 404 with the backend's JSON `detail` | not-found state |
 | 404 without a JSON body (proxy, static server) | "Servicio de datos no disponible" (HTTP 404) + retry — never "not found" |
@@ -190,6 +199,21 @@ Synthetic records live only in `src/test/devOnlyData.ts` (unit tests) and
 that no application module references them. The browser fake serves `/api/*` by intercepting
 requests inside the browser; it follows the backend's filtering, ordering, offset and limit so
 pagination behaves like the real API. There is no mock or fake data source in the application.
+
+### Test timing under load
+
+Unit and component tests wait for real states (`findBy*`, `waitFor`); timeouts are only the budget
+before a test gives up, sized for a 4-CPU machine at 100 % load:
+
+- Testing Library's async budget is 5 s (`src/test/setup.ts`) and Vitest's per-test limit 30 s
+  (`vitest.config.ts`); the defaults (1 s and 5 s) were exceeded by correct but slow renders.
+- `renderApp` warms the code-split page modules once per test file, so a wait never includes Vite's
+  on-demand transform of a page; cold lazy loading is tested separately in `src/app/lazyPages.test.tsx`.
+- The document title is set in a layout effect, in the same commit as the page heading
+  (`src/hooks/useDocumentTitle.test.tsx`).
+- Test API clients default to a 30 s timeout; the timeout states pass small values explicitly.
+- A transient state (e.g. loading with a 50 ms budget) is awaited, never asserted to still be
+  present afterwards; stable states are asserted where nothing can change them.
 
 ## Prueba con el backend real (live backend smoke test)
 

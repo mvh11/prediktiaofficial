@@ -2,7 +2,8 @@ import { screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { utcDay } from '../../i18n/format.ts';
 import { devCompetition, devFixture, devTeam } from '../../test/devOnlyData.ts';
-import { jsonResponse, mockFetch, networkFailure, requestedUrls } from '../../test/fetchMock.ts';
+import { jsonResponse, mockFetch, networkFailure, requestedUrls, textResponse } from '../../test/fetchMock.ts';
+import { RAW_TOKEN, withRawToken } from '../../test/rawJson.ts';
 import { renderApp } from '../../test/renderApp.tsx';
 
 const health = () => jsonResponse({ status: 'ok', service: 'prediktia-backend' });
@@ -158,5 +159,36 @@ describe('CompetitionDetailPage', () => {
     renderApp(`/competiciones/${raw}`);
     expect(await screen.findByRole('heading', { level: 1, name: heading })).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('competition pages — exact integers (FE2-R1)', () => {
+  it('refuses a catalog whose current season token would round (2029.9999999999999999 -> 2030)', async () => {
+    const text = withRawToken([CATALOG[0], { ...CATALOG[1], current_season: RAW_TOKEN }], '2029.9999999999999999');
+    mockFetch({ '/health': health, '/competitions': () => textResponse(text, 200, 'application/json') });
+    renderApp('/competiciones');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Número entero no válido en la respuesta');
+    expect(alert).toHaveTextContent('«current_season»');
+    expect(alert).toHaveTextContent('registro n.º 2');
+    expect(screen.queryByRole('link', { name: 'DEV_ONLY Liga Ñuble' })).not.toBeInTheDocument();
+  });
+
+  it('refuses a team directory with an exponent founding year and keeps the rest of the page', async () => {
+    const teams = withRawToken([devTeam(11, { founded: RAW_TOKEN })], '1.925e3');
+    mockFetch({
+      '/health': health,
+      '/competitions': () => jsonResponse(CATALOG),
+      '/competitions/1/teams': () => textResponse(teams, 200, 'application/json'),
+      '/fixtures': () => jsonResponse([]),
+    });
+    renderApp('/competiciones/1');
+    expect(await screen.findByRole('heading', { level: 1, name: 'DEV_ONLY Liga Ñuble' })).toBeInTheDocument();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Número entero no válido en la respuesta');
+    expect(alert).toHaveTextContent('«founded»');
+    expect(alert).toHaveTextContent('«1.925e3»');
+    expect(screen.queryByText('Fundado en 1925', { exact: false })).not.toBeInTheDocument();
+    expect(screen.queryByRole('list', { name: 'Equipos' })).not.toBeInTheDocument();
   });
 });

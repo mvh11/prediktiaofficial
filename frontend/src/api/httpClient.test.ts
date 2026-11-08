@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { hangingResponse, jsonResponse, textResponse } from '../test/fetchMock.ts';
 import { ApiError } from './errors.ts';
 import { buildUrl, createHttpClient } from './httpClient.ts';
-import { fixtureListSchema, fixtureSchema } from './schemas.ts';
-import { devFixture } from '../test/devOnlyData.ts';
+import { competitionListSchema, fixtureListSchema, fixtureSchema, teamListSchema } from './schemas.ts';
+import { devCompetition, devFinishedFixture, devFixture, devTeam } from '../test/devOnlyData.ts';
+import { RAW_TOKEN, withRawToken } from '../test/rawJson.ts';
 
 const schema = z.object({ status: z.literal('ok') });
 
@@ -202,5 +203,78 @@ describe('createHttpClient', () => {
     const body = devFixture(2147483647, { ...teams, competition_id: 2147483647, external_id: -2147483648 });
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(body));
     await expect(clientWith(fetchImpl).getJson('/fixtures/2147483647', fixtureSchema)).resolves.toMatchObject({ id: 2147483647 });
+  });
+
+  // FE2-R1: every other integer of the contract is checked on the raw text too, so a score, season or minute can
+  // never arrive rounded. Each token below parses to a "valid" integer.
+  it.each([
+    ['season', '2029.9999999999999999'],
+    ['home_goals', '0.99999999999999999'],
+    ['elapsed', '6.7e1'],
+    ['away_goals', '1.0000000000000001'],
+    ['halftime_home', '0.0'],
+    ['penalty_away', '1e0'],
+    ['fulltime_home', '-0'],
+    ['extratime_away', '2147483648'],
+  ])('rejects the fixture %s token %s in a list, naming the field, the token and the record', async (key, token) => {
+    const text = withRawToken([devFinishedFixture(1), devFinishedFixture(2, { [key]: RAW_TOKEN })], token);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(textResponse(text, 200, 'application/json'));
+    const error = await captureError(clientWith(fetchImpl).getJson('/fixtures', fixtureListSchema));
+    expect(error).toMatchObject({ kind: 'invalid_response', invalid: { reason: 'invalid_integer', field: key, literal: token, row: 2 } });
+  });
+
+  it('rejects a near-integer season of a competition and an exponent founding year of a team', async () => {
+    const competitions = withRawToken([devCompetition({ current_season: RAW_TOKEN })], '2.03e3');
+    const fetchCompetitions = vi.fn<typeof fetch>().mockResolvedValue(textResponse(competitions, 200, 'application/json'));
+    expect(await captureError(clientWith(fetchCompetitions).getJson('/competitions', competitionListSchema))).toMatchObject({
+      invalid: { reason: 'invalid_integer', field: 'current_season', literal: '2.03e3', row: 1 },
+    });
+    const teams = withRawToken([devTeam(11), devTeam(12, { founded: RAW_TOKEN })], '1.9e3');
+    const fetchTeams = vi.fn<typeof fetch>().mockResolvedValue(textResponse(teams, 200, 'application/json'));
+    expect(await captureError(clientWith(fetchTeams).getJson('/competitions/1/teams', teamListSchema))).toMatchObject({
+      invalid: { reason: 'invalid_integer', field: 'founded', literal: '1.9e3', row: 2 },
+    });
+  });
+
+  it('accepts exact integers and null in every optional integer field', async () => {
+    const finished = devFinishedFixture(5, { elapsed: 120, extratime_home: 0, extratime_away: 0, penalty_home: 4, penalty_away: 3 });
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse([finished, devFixture(6)]));
+    await expect(clientWith(fetchImpl).getJson('/fixtures', fixtureListSchema)).resolves.toMatchObject([
+      { id: 5, elapsed: 120, penalty_home: 4, penalty_away: 3, season: 2030 },
+      { id: 6, elapsed: null, home_goals: null, fulltime_away: null },
+    ]);
+  });
+
+  it('keeps legitimately decimal numbers of fields outside the contract out of the check (the schema strips them)', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ ...devFixture(1), probability_hint: 0.25, weights: [1.5, 2e-3] }));
+    const fixture = await clientWith(fetchImpl).getJson('/fixtures/1', fixtureSchema);
+    expect(fixture).not.toHaveProperty('probability_hint');
+    expect(fixture.id).toBe(1);
+  });
+
+  it('still reports an identifier as invalid_identifier, whichever check comes first in the text', async () => {
+    const both = withRawToken({ ...devFixture(1, { home_goals: 0 }), id: RAW_TOKEN }, '1.0000000000000001').replace(
+      '"home_goals":0,',
+      '"home_goals":0.99999999999999999,',
+    );
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(textResponse(both, 200, 'application/json'));
+    expect(await captureError(clientWith(fetchImpl).getJson('/fixtures/1', fixtureSchema))).toMatchObject({
+      invalid: { reason: 'invalid_identifier', field: 'id', literal: '1.0000000000000001' },
+    });
+  });
+
+  it('leaves a canonical integer outside its domain to the schema, which names the field', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse(devFinishedFixture(1, { home_goals: -1 })));
+    expect(await captureError(clientWith(fetchImpl).getJson('/fixtures/1', fixtureSchema))).toMatchObject({
+      invalid: { reason: 'schema', field: 'home_goals' },
+    });
+  });
+
+  it('refuses an unrepresentable integer in a score with its exact literal', async () => {
+    const text = withRawToken(devFinishedFixture(1, { away_goals: RAW_TOKEN }), '9007199254740993');
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(textResponse(text, 200, 'application/json'));
+    expect(await captureError(clientWith(fetchImpl).getJson('/fixtures/1', fixtureSchema))).toMatchObject({
+      invalid: { reason: 'unsafe_integer', literal: '9007199254740993' },
+    });
   });
 });

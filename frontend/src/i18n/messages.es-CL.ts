@@ -104,13 +104,16 @@ export const esCL = {
       `El registro n.º ${row} de la respuesta (identificador ${id}) no cumple el formato esperado (campo «${field}»).`,
     invalidOneRow:
       'Un solo registro inconsistente invalida toda la página: PREDIKTIA no elimina ni corrige datos en silencio. Si el problema persiste, el dato debe corregirse en el origen.',
-    unsafeIntegerTitle: 'Identificador numérico no representable',
+    unsafeIntegerTitle: 'Número no representable con exactitud',
     unsafeInteger: (literal: string) =>
-      `La respuesta contiene el número ${literal}, que supera el máximo que el navegador puede representar sin perder precisión. Para no mostrar un identificador alterado, se descartó la respuesta completa.`,
+      `La respuesta contiene el número ${literal}, que supera el máximo que el navegador puede representar sin perder precisión. Para no mostrar un dato alterado (un identificador, una temporada o un marcador), se descartó la respuesta completa.`,
     invalidIdentifierTitle: 'Identificador no válido en la respuesta',
     invalidIdentifier: (literal: string, field: string) =>
       `El campo «${field}» de la respuesta trae «${literal}», que no es un identificador entero canónico dentro del rango admitido (1 a 2.147.483.647 para identificadores internos). Interpretarlo podría redondearlo a otro número, así que se descartó la respuesta completa.`,
-    invalidIdentifierRow: (row: number) => `El valor está en el registro n.º ${row} de la respuesta.`,
+    invalidIntegerTitle: 'Número entero no válido en la respuesta',
+    invalidInteger: (literal: string, field: string) =>
+      `El campo «${field}» de la respuesta trae «${literal}», que no es un número entero exacto (sin decimales ni exponente) dentro del rango admitido. Interpretarlo podría redondearlo a otro valor, por ejemplo otra temporada u otro marcador, así que se descartó la respuesta completa.`,
+    invalidTokenRow: (row: number) => `El valor está en el registro n.º ${row} de la respuesta.`,
     identityMismatchTitle: 'La respuesta no corresponde al partido solicitado',
     identityMismatch: (expected: string, received: string) =>
       `Se pidió el partido ${expected}, pero el servicio de datos respondió con el partido ${received}. Para no mostrar un partido distinto, no se muestra nada.`,

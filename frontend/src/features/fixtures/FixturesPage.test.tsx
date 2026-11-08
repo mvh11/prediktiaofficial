@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { utcDay } from '../../i18n/format.ts';
 import { devCompetition, devFinishedFixture, devFixture, devTeam } from '../../test/devOnlyData.ts';
 import { hangingResponse, jsonResponse, mockFetch, networkFailure, requestedUrls, textResponse } from '../../test/fetchMock.ts';
+import { RAW_TOKEN, withRawToken } from '../../test/rawJson.ts';
 import { renderApp } from '../../test/renderApp.tsx';
 import { FIXTURE_PAGE_SIZE } from './fixtureFilters.ts';
 
@@ -112,7 +113,7 @@ describe('FixturesPage — data source states', () => {
     mockFetch({ ...happyRoutes(), '/fixtures': () => textResponse(body, 200, 'application/json') });
     renderApp('/partidos');
     const alert = await within(await resultsLoaded()).findByRole('alert');
-    expect(alert).toHaveTextContent('Identificador numérico no representable');
+    expect(alert).toHaveTextContent('Número no representable con exactitud');
     expect(alert).toHaveTextContent('9007199254740993');
   });
 
@@ -449,5 +450,32 @@ describe('FixturesPage — identifier integrity and date bounds', () => {
     expect(to).toHaveAccessibleDescription(/entre el 1 de enero de 1900 y el 31 de diciembre de 2100/);
     expect(router.state.location.search).toBe('');
     expect(fixtureRequests(fetchMock)).toHaveLength(before);
+  });
+});
+
+describe('FixturesPage — exact integers (FE2-R1)', () => {
+  it.each([
+    ['season', '2029.9999999999999999'],
+    ['home_goals', '0.99999999999999999'],
+    ['elapsed', '6.7e1'],
+  ])('refuses a list whose second row has the %s token %s, in Spanish, and shows no row', async (key, token) => {
+    const text = withRawToken([devFinishedFixture(1), devFinishedFixture(2, { [key]: RAW_TOKEN }), devFixture(3)], token);
+    mockFetch({ ...happyRoutes(), '/fixtures': () => textResponse(text, 200, 'application/json') });
+    renderApp('/partidos');
+    const alert = await within(await resultsLoaded()).findByRole('alert');
+    expect(alert).toHaveTextContent('Número entero no válido en la respuesta');
+    expect(alert).toHaveTextContent(`El campo «${key}» de la respuesta trae «${token}», que no es un número entero exacto`);
+    expect(alert).toHaveTextContent('registro n.º 2');
+    expect(alert).toHaveTextContent('PREDIKTIA no elimina ni corrige datos en silencio');
+    expect(within(alert).getByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+    expect(document.querySelectorAll('li[data-fixture-id]')).toHaveLength(0);
+    expect(screen.queryByText(/DEV_ONLY Home/)).not.toBeInTheDocument();
+  });
+
+  it('accepts exact scores (including 0) and null optional integers', async () => {
+    mockFetch(happyRoutes([devFinishedFixture(1, { home_goals: 0, away_goals: 3 }), devFixture(2)]));
+    renderApp('/partidos');
+    expect(await rows()).toHaveLength(2);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });

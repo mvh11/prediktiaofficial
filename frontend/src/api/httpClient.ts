@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import { ApiError, type InvalidDetail } from './errors.ts';
-import { findIdentifierIssue, findUnsafeIntegerLiteral } from './jsonNumbers.ts';
+import { findIntegerTokenIssue, findUnsafeIntegerLiteral } from './jsonNumbers.ts';
 
 export type QueryValue = string | number | boolean | null | undefined;
 
@@ -163,16 +163,17 @@ export function createHttpClient({ baseUrl, timeoutMs, fetchImpl }: HttpClientOp
           });
         }
 
-        // Valid JSON from here on: check identifier tokens before trusting any parsed number.
-        const identifier = findIdentifierIssue(text);
-        if (identifier !== null) {
-          throw new ApiError('invalid_response', `Identifier ${identifier.key} is not a canonical in-range integer: ${identifier.literal}.`, {
+        // Valid JSON from here on: check identifier and other integer tokens before trusting any parsed number.
+        const integer = findIntegerTokenIssue(text);
+        if (integer !== null) {
+          const what = integer.kind === 'identifier' ? 'Identifier' : 'Integer field';
+          throw new ApiError('invalid_response', `${what} ${integer.key} is not a canonical in-range integer: ${integer.literal}.`, {
             status: response.status,
             invalid: {
-              reason: 'invalid_identifier',
-              field: identifier.key,
-              literal: identifier.literal,
-              ...(identifier.row !== undefined ? { row: identifier.row } : {}),
+              reason: integer.kind === 'identifier' ? 'invalid_identifier' : 'invalid_integer',
+              field: integer.key,
+              literal: integer.literal,
+              ...(integer.row !== undefined ? { row: integer.row } : {}),
             },
           });
         }

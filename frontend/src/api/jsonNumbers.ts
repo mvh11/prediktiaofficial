@@ -4,9 +4,11 @@
  *
  * - `JSON.parse` rounds integers beyond Number.MAX_SAFE_INTEGER
  *   (9007199254740993 becomes 9007199254740992);
- * - it also rounds near-integers and accepts exponents, so an identifier token
- *   such as `12.9999999999999999`, `1.0000000000000001` or `1.3e1` arrives as a
- *   perfectly "safe" integer (13, 1, 13). No check after parsing can tell.
+ * - it also rounds near-integers and accepts exponents, so a token such as
+ *   `12.9999999999999999`, `1.0000000000000001` or `1.3e1` (an id), or
+ *   `2029.9999999999999999`, `0.99999999999999999` or `6.7e1` (a season, a
+ *   score, a minute) arrives as a perfectly "safe" integer (13, 1, 13, 2030, 1,
+ *   67). No check after parsing can tell.
  *
  * Both scanners understand JSON strings (including escapes), so text inside
  * string values is never mistaken for a number.
@@ -56,18 +58,25 @@ export function findUnsafeIntegerLiteral(text: string): string | null {
 }
 
 /**
- * Identifier fields of the verified contract and the exact token each must be:
+ * Integer fields of the verified contract and the exact token each must be:
  * a canonical decimal integer (no sign unless allowed, no leading zeros, no
- * fraction, no exponent) within the PostgreSQL `integer` range of its column
- * (backend/app/models/*.py). Keys are matched at any depth, so nested team ids
- * (`home_team.id`) are covered too.
+ * fraction, no exponent, no "-0") within the PostgreSQL `integer` range of its
+ * column (backend/app/schemas/{catalog,fixture}.py, backend/app/models/*.py).
+ * Keys are matched at any depth, so nested team ids (`home_team.id`) are
+ * covered too.
  */
 const INT32_MIN = -2_147_483_648n;
 const INT32_MAX = 2_147_483_647n;
 const POSITIVE = /^[1-9]\d*$/;
 const SIGNED = /^-?(0|[1-9]\d*)$/;
 
-export const IDENTIFIER_RULES: Readonly<Record<string, { readonly pattern: RegExp; readonly min: bigint; readonly max: bigint }>> = {
+export interface IntegerTokenRule {
+  readonly pattern: RegExp;
+  readonly min: bigint;
+  readonly max: bigint;
+}
+
+export const IDENTIFIER_RULES: Readonly<Record<string, IntegerTokenRule>> = {
   /** Primary keys (serial `integer`): fixtures, competitions, teams. */
   id: { pattern: POSITIVE, min: 1n, max: INT32_MAX },
   competition_id: { pattern: POSITIVE, min: 1n, max: INT32_MAX },
@@ -75,21 +84,67 @@ export const IDENTIFIER_RULES: Readonly<Record<string, { readonly pattern: RegEx
   external_id: { pattern: SIGNED, min: INT32_MIN, max: INT32_MAX },
 };
 
-export function isValidIdentifierToken(key: string, token: string): boolean {
-  const rule = IDENTIFIER_RULES[key];
+const INT32: IntegerTokenRule = { pattern: SIGNED, min: INT32_MIN, max: INT32_MAX };
+
+/**
+ * FE2-R1: every other `int` / `int | None` field of CompetitionOut, TeamOut and
+ * FixtureOut (all `Integer` columns). These are every number the frontend's
+ * contracts carry; none is legitimately decimal. The token rule is only "exact,
+ * canonical int32": domain limits (goals >= 0, …) stay in the schemas, which
+ * then name the field. `null` is not a number token and stays the schema's call.
+ */
+export const INTEGER_FIELD_RULES: Readonly<Record<string, IntegerTokenRule>> = {
+  /** CompetitionOut */
+  current_season: INT32,
+  /** TeamOut */
+  founded: INT32,
+  /** FixtureOut */
+  season: INT32,
+  elapsed: INT32,
+  home_goals: INT32,
+  away_goals: INT32,
+  halftime_home: INT32,
+  halftime_away: INT32,
+  extratime_home: INT32,
+  extratime_away: INT32,
+  penalty_home: INT32,
+  penalty_away: INT32,
+  fulltime_home: INT32,
+  fulltime_away: INT32,
+};
+
+/** Own-property lookup: a response key such as "__proto__" or "constructor" must never resolve to a prototype member. */
+function ruleFor(rules: Readonly<Record<string, IntegerTokenRule>>, key: string): IntegerTokenRule | undefined {
+  return Object.hasOwn(rules, key) ? rules[key] : undefined;
+}
+
+function matches(rule: IntegerTokenRule | undefined, token: string): boolean {
   if (rule === undefined) return true;
   if (!rule.pattern.test(token) || token === '-0') return false;
   const value = BigInt(token);
   return value >= rule.min && value <= rule.max;
 }
 
+export function isValidIdentifierToken(key: string, token: string): boolean {
+  return matches(ruleFor(IDENTIFIER_RULES, key), token);
+}
+
+export function isValidIntegerFieldToken(key: string, token: string): boolean {
+  return matches(ruleFor(INTEGER_FIELD_RULES, key), token);
+}
+
 export interface IdentifierIssue {
   /** The offending token exactly as received. */
   readonly literal: string;
-  /** The identifier key it was the value of, e.g. "id" or "competition_id". */
+  /** The key it was the value of, e.g. "id", "competition_id" or "home_goals". */
   readonly key: string;
   /** 1-based record position when the response is a top-level array. */
   readonly row?: number;
+}
+
+export interface IntegerTokenIssue extends IdentifierIssue {
+  /** Which rule set rejected it: an identifier (IDENTIFIER_RULES) or another integer field (INTEGER_FIELD_RULES). */
+  readonly kind: 'identifier' | 'integer';
 }
 
 interface Frame {
@@ -106,6 +161,22 @@ interface Frame {
  * "id" are recognised; duplicate keys are all checked.
  */
 export function findIdentifierIssue(text: string): IdentifierIssue | null {
+  return findObjectNumberIssue(text, isValidIdentifierToken);
+}
+
+/**
+ * FE2-R1: first identifier OR other contract integer whose RAW token is not
+ * acceptable, with the rule set that rejected it; else null. Same scanning
+ * guarantees as findIdentifierIssue, whose identifier rules apply unchanged.
+ */
+export function findIntegerTokenIssue(text: string): IntegerTokenIssue | null {
+  const issue = findObjectNumberIssue(text, (key, token) => isValidIdentifierToken(key, token) && isValidIntegerFieldToken(key, token));
+  if (issue === null) return null;
+  return { ...issue, kind: ruleFor(IDENTIFIER_RULES, issue.key) === undefined ? 'integer' : 'identifier' };
+}
+
+/** First number in object-value position that `accept` refuses for its key (the last key read at that depth). */
+function findObjectNumberIssue(text: string, accept: (key: string, token: string) => boolean): IdentifierIssue | null {
   const stack: Frame[] = [];
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
@@ -129,7 +200,7 @@ export function findIdentifierIssue(text: string): IdentifierIssue | null {
     } else if (code === 45 || (code >= 48 && code <= 57)) {
       const end = numberEnd(text, index);
       const token = text.slice(index, end);
-      if (top?.kind === 'object' && top.key !== null && !isValidIdentifierToken(top.key, token)) {
+      if (top?.kind === 'object' && top.key !== null && !accept(top.key, token)) {
         const root = stack[0];
         const row = root?.kind === 'array' && stack.length >= 2 ? root.index + 1 : undefined;
         return { literal: token, key: top.key, ...(row !== undefined ? { row } : {}) };

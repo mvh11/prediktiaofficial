@@ -40,7 +40,7 @@ test('a response with an integer JSON cannot represent exactly is refused, not r
   });
   await page.goto('/partidos/101');
   const alert = page.getByRole('alert');
-  await expect(alert).toContainText('Identificador numérico no representable');
+  await expect(alert).toContainText('Número no representable con exactitud');
   await expect(alert).toContainText('9007199254740993');
   await expect(page.getByText('9007199254740992')).toHaveCount(0);
 });

@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { devCompetition, devFinishedFixture, devFixture } from '../../test/devOnlyData.ts';
 import { jsonResponse, mockFetch, networkFailure, textResponse } from '../../test/fetchMock.ts';
+import { RAW_TOKEN, withRawToken } from '../../test/rawJson.ts';
 import { renderApp } from '../../test/renderApp.tsx';
 
 const competitions = () => jsonResponse([devCompetition()]);
@@ -126,7 +127,7 @@ describe('FixtureDetailPage', () => {
     const body = JSON.stringify(devFixture(1)).replace('"external_id":700001', '"external_id":12345678901234567890');
     mockFetch({ '/competitions': competitions, '/fixtures/1': () => textResponse(body, 200, 'application/json') });
     renderApp('/partidos/1');
-    expect(await screen.findByRole('heading', { name: 'Identificador numérico no representable' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Número no representable con exactitud' })).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Salida del modelo' })).not.toBeInTheDocument();
   });
 
@@ -184,5 +185,27 @@ describe('FixtureDetailPage', () => {
     expect(alert).toHaveTextContent('HTTP 404');
     expect(screen.queryByRole('heading', { level: 1, name: 'Partido no encontrado' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+  });
+});
+
+describe('FixtureDetailPage — exact integers (FE2-R1)', () => {
+  it.each([
+    ['home_goals', '0.99999999999999999'],
+    ['season', '2029.9999999999999999'],
+    ['elapsed', '6.7e1'],
+    ['fulltime_away', '1.0'],
+  ])('refuses a detail response whose %s token is %s, showing nothing of the fixture', async (key, token) => {
+    const text = withRawToken(devFinishedFixture(7, { [key]: RAW_TOKEN }), token);
+    mockFetch({ '/competitions': competitions, '/fixtures/7': () => textResponse(text, 200, 'application/json') });
+    const { router } = renderApp('/partidos/7');
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Número entero no válido en la respuesta');
+    expect(alert).toHaveTextContent(`«${key}»`);
+    expect(alert).toHaveTextContent(`«${token}»`);
+    expect(alert).toHaveTextContent('se descartó la respuesta completa');
+    expect(screen.queryByRole('heading', { level: 1, name: /vs/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('table', { name: /Marcadores registrados/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Salida del modelo' })).not.toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/partidos/7');
   });
 });

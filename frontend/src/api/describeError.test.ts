@@ -57,8 +57,24 @@ describe('failureText (es-CL)', () => {
   it('names an integer that cannot be represented exactly', () => {
     const error = new ApiError('invalid_response', 'x', { invalid: { reason: 'unsafe_integer', literal: '9007199254740993' } });
     const text = failureText(describeError(error), 'este partido', esCL);
-    expect(text.title).toBe('Identificador numérico no representable');
+    expect(text.title).toBe('Número no representable con exactitud');
     expect(text.paragraphs[0]).toContain('9007199254740993');
+  });
+
+  it('names a contract integer whose token is not exact, with its field and record (FE2-R1)', () => {
+    const invalid = { reason: 'invalid_integer', field: 'season', literal: '2029.9999999999999999', row: 3 } as const;
+    const text = failureText(describeError(new ApiError('invalid_response', 'x', { invalid })), 'la lista de partidos', esCL);
+    expect(text.title).toBe('Número entero no válido en la respuesta');
+    expect(text.paragraphs[0]).toBe(
+      'El campo «season» de la respuesta trae «2029.9999999999999999», que no es un número entero exacto (sin decimales ni exponente) dentro del rango admitido. Interpretarlo podría redondearlo a otro valor, por ejemplo otra temporada u otro marcador, así que se descartó la respuesta completa.',
+    );
+    expect(text.paragraphs[1]).toBe('El valor está en el registro n.º 3 de la respuesta.');
+    expect(text.paragraphs[2]).toMatch(/no elimina ni corrige datos en silencio/);
+    const single = { reason: 'invalid_integer', field: 'elapsed', literal: '6.7e1' } as const;
+    const detail = failureText(describeError(new ApiError('invalid_response', 'x', { invalid: single })), 'este partido', esCL);
+    expect(detail.title).toBe('Número entero no válido en la respuesta');
+    expect(detail.paragraphs).toHaveLength(1);
+    expect(detail.paragraphs[0]).toContain('«elapsed»');
   });
 
   it('distinguishes a gateway outage (status) from an unreachable service', () => {
