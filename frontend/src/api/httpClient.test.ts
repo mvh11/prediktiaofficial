@@ -8,7 +8,9 @@ import { devFixture } from '../test/devOnlyData.ts';
 
 const schema = z.object({ status: z.literal('ok') });
 
-function clientWith(fetchImpl: typeof fetch, timeoutMs = 1_000) {
+// The default timeout is far above any stubbed response time (CPU starvation must not turn a success into a timeout);
+// the timeout tests pass a small value explicitly.
+function clientWith(fetchImpl: typeof fetch, timeoutMs = 30_000) {
   return createHttpClient({ baseUrl: '/api', timeoutMs, fetchImpl });
 }
 

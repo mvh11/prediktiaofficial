@@ -75,12 +75,25 @@ describe('FixturesPage — data source states', () => {
     expect(alert).toHaveTextContent('HTTP 502');
   });
 
+  it('keeps an announced loading state while the backend has not answered within its time budget', async () => {
+    mockFetch({ '/health': hangingResponse, '/competitions': hangingResponse, '/fixtures': hangingResponse });
+    renderApp('/partidos');
+    const loading = await screen.findByText('Cargando partidos…');
+    expect(loading).toBeInTheDocument();
+    expect(loading.closest('[role="status"]')).toHaveAttribute('aria-live', 'polite');
+    expect(within(results()).queryByRole('heading', { name: 'La solicitud tardó demasiado' })).not.toBeInTheDocument();
+  });
+
   it('shows a timeout state when the backend hangs', async () => {
     mockFetch({ '/health': hangingResponse, '/competitions': hangingResponse, '/fixtures': hangingResponse });
     renderApp('/partidos', { timeoutMs: 50 });
-    expect(await screen.findByText('Cargando partidos…')).toBeInTheDocument();
+    // W2: with a 50 ms budget the loading state is transient. findByText only resolves once it was rendered, but
+    // asserting it is *still* in the document afterwards raced the timer under CPU load; the stable loading state is
+    // asserted in the previous test, and here it must be gone once the timeout is shown.
+    await screen.findByText('Cargando partidos…');
     expect(await within(await resultsLoaded()).findByRole('heading', { name: 'La solicitud tardó demasiado' })).toBeInTheDocument();
     expect(within(results()).getByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+    expect(screen.queryByText('Cargando partidos…')).not.toBeInTheDocument();
   });
 
   it('rejects the whole page when one record breaks the verified schema, and says which one', async () => {
