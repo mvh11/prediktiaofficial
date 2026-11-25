@@ -5,7 +5,9 @@ unicidad por partido: un valor repetido cuenta tantas veces como aparezca.
 
 Las clasificaciones son etiquetas categóricas opacas: se comparan de forma EXACTA, sin
 normalizar mayúsculas, espacios ni alias. "AVAILABLE", "available" y " AVAILABLE" son tres
-clasificaciones distintas.
+clasificaciones distintas. Una subclase de str (un miembro de StrEnum, por ejemplo) cuenta por su
+texto, que no cambia: las claves del resultado son siempre str exactos, así que ni el tipo ni la
+igualdad propia de la subclase alteran el resultado o lo hacen depender del orden de llegada.
 
 Este módulo solo describe la muestra. No fija tamaño mínimo de muestra, umbrales de cobertura,
 elegibilidad para modelar ni ninguna regla de decisión: `total_observations` es un hecho, no
@@ -51,7 +53,7 @@ def summarize_availability(classifications: Iterable[str]) -> AvailabilitySummar
     for label in classifications:
         if not isinstance(label, str):
             raise TypeError(f"clasificación no str: {label!r}")
-        counter[label] += 1
+        counter[str.__str__(label)] += 1  # su texto exacto como str: sin el tipo ni la igualdad de una subclase
 
     total = sum(counter.values())
     counts = {label: counter[label] for label in sorted(counter)}

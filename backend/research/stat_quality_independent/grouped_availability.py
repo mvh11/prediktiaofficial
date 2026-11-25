@@ -8,6 +8,8 @@ Semántica:
 - una observación pertenece al grupo cuya clave entrega el caller, y solo a ese;
 - las claves se comparan de forma EXACTA, sin normalizar mayúsculas, espacios, alias ni ids:
   "Liga", "liga" y " Liga" son tres grupos distintos;
+- una subclase de str (un miembro de StrEnum, por ejemplo) cuenta por su texto, que no cambia: las
+  claves de grupo y de clasificación del resultado son siempre str exactos;
 - no se deduplica: la multiplicidad importa y un par repetido cuenta tantas veces como aparezca;
 - cada grupo se resume de forma independiente con `summarize_availability`, así que hereda su
   contrato (etiquetas exactas, "AVAILABLE" exacto, 0.0 si el grupo no la contiene);
@@ -46,6 +48,6 @@ def summarize_availability_by_group(observations: Iterable[tuple[str, str]]) -> 
             raise TypeError(f"clave de grupo no str: {group_key!r}")
         if not isinstance(label, str):
             raise TypeError(f"clasificación no str: {label!r}")
-        labels_by_group.setdefault(group_key, []).append(label)
+        labels_by_group.setdefault(str.__str__(group_key), []).append(label)  # texto exacto; summarize_availability hace lo mismo con la etiqueta
 
     return MappingProxyType({key: summarize_availability(labels_by_group[key]) for key in sorted(labels_by_group)})
