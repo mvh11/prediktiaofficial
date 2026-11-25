@@ -33,12 +33,15 @@ def summarize_availability_by_group(observations: Iterable[tuple[str, str]]) -> 
     Devuelve un mapping de solo lectura group_key -> AvailabilitySummary con las claves en orden
     ascendente (orden de `str`). Sin observaciones, el mapping está vacío.
 
-    Lanza TypeError si la entrada es un único str/bytes, si una observación no es una tupla de
-    exactamente dos elementos o si la clave de grupo o la clasificación no son str: no se convierte
-    ni se descarta nada en silencio.
+    Lanza TypeError si la entrada es un único str/bytes o un mapping (se recorrerían sus claves y se
+    descartarían sus valores: unos conteos de pares se pasan con `Counter.elements()`), si una
+    observación no es una tupla de exactamente dos elementos o si la clave de grupo o la
+    clasificación no son str: no se convierte ni se descarta nada en silencio.
     """
     if isinstance(observations, (str, bytes)):
         raise TypeError("observations debe ser un iterable de pares (group_key, classification)")
+    if isinstance(observations, Mapping):
+        raise TypeError("observations debe tener un elemento por observación, no ser un mapping de conteos (usa Counter.elements())")
     labels_by_group: dict[str, list[str]] = {}
     for observation in observations:
         if not isinstance(observation, tuple) or len(observation) != 2:

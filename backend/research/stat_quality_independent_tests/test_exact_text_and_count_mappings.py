@@ -3,7 +3,11 @@ Datos sintéticos, sin BD ni app.*.
 Se ejecuta por ruta explícita: python -m pytest research/stat_quality_independent_tests -q"""
 
 import itertools
+from collections import Counter
 from enum import StrEnum
+from types import MappingProxyType
+
+import pytest
 
 from research.stat_quality_independent.availability import summarize_availability
 from research.stat_quality_independent.grouped_availability import summarize_availability_by_group
@@ -60,3 +64,26 @@ def test_labels_and_group_keys_count_by_their_exact_text_not_by_a_subclass_equal
     assert list(result) == ["Liga", "liga"]
     assert result["Liga"].available_proportion == 1.0
     assert result["liga"].available_proportion == 0.0  # "available" no es la etiqueta exacta
+
+
+COUNTS = {"AVAILABLE": 3, "EMPTY": 1}  # 3 de 4 observaciones disponibles
+PAIR_COUNTS = {("liga-a", "AVAILABLE"): 3, ("liga-a", "EMPTY"): 1}
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [Counter(COUNTS), dict(COUNTS), MappingProxyType(dict(COUNTS)), summarize_availability(Counter(COUNTS).elements()).counts_by_classification],
+    ids=["Counter", "dict", "mappingproxy", "summary-counts"],
+)
+def test_count_mappings_are_rejected_instead_of_counting_each_key_once(counts):
+    with pytest.raises(TypeError, match="mapping"):
+        summarize_availability(counts)
+    # un elemento por observación: así se pasan unos conteos
+    assert summarize_availability(Counter(counts).elements()).available_proportion == 0.75
+
+
+@pytest.mark.parametrize("counts", [Counter(PAIR_COUNTS), dict(PAIR_COUNTS), MappingProxyType(dict(PAIR_COUNTS))], ids=["Counter", "dict", "mappingproxy"])
+def test_grouped_count_mappings_are_rejected_instead_of_counting_each_pair_once(counts):
+    with pytest.raises(TypeError, match="mapping"):
+        summarize_availability_by_group(counts)
+    assert summarize_availability_by_group(Counter(counts).elements())["liga-a"].available_proportion == 0.75

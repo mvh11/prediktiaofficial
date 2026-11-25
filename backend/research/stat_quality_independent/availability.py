@@ -44,11 +44,14 @@ class AvailabilitySummary:
 def summarize_availability(classifications: Iterable[str]) -> AvailabilitySummary:
     """Resume una secuencia finita de clasificaciones. Pura: no modifica la entrada.
 
-    Lanza TypeError si la entrada es un único str/bytes (se recorrería carácter a carácter) o si
-    algún elemento no es str: no se convierte ni se descarta nada en silencio.
+    Lanza TypeError si la entrada es un único str/bytes (se recorrería carácter a carácter), si es un
+    mapping (se recorrerían sus claves y se descartarían sus valores: unos conteos se pasan con
+    `Counter.elements()`) o si algún elemento no es str: no se convierte ni se descarta nada en silencio.
     """
     if isinstance(classifications, (str, bytes)):
         raise TypeError("classifications debe ser un iterable de str, no un único str/bytes")
+    if isinstance(classifications, Mapping):
+        raise TypeError("classifications debe tener un elemento por observación, no ser un mapping de conteos (usa Counter.elements())")
     counter: Counter[str] = Counter()
     for label in classifications:
         if not isinstance(label, str):
